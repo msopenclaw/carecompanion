@@ -3,6 +3,7 @@
 import { useEffect, useState, useCallback } from "react";
 import { PatientSelector } from "@/components/shared/patient-selector";
 import { SafetyDisclaimer } from "@/components/shared/safety-disclaimer";
+import { IPhoneFrame } from "@/components/shared/iphone-frame";
 import { HealthStatusBadge } from "@/components/patient/health-status-badge";
 import { VitalsGrid } from "@/components/patient/vitals-grid";
 import { MedicationChecklist } from "@/components/patient/medication-checklist";
@@ -74,7 +75,7 @@ export default function Home() {
 
   if (!selectedPatient || !selectedPatientId) {
     return (
-      <div className="flex h-screen items-center justify-center">
+      <div className="flex h-screen items-center justify-center bg-slate-50">
         <div className="animate-pulse text-muted-foreground">
           Loading CareCompanion AI...
         </div>
@@ -82,13 +83,12 @@ export default function Home() {
     );
   }
 
-  // After the guard above, selectedPatientId is guaranteed to be non-null.
   const currentPatientId: string = selectedPatientId;
 
   return (
-    <div className="flex h-screen flex-col bg-background">
+    <div className="flex h-screen flex-col bg-slate-50">
       {/* Header */}
-      <header className="flex items-center justify-between border-b px-4 py-3 bg-white shrink-0">
+      <header className="flex items-center justify-between border-b px-6 py-3 bg-white shrink-0 shadow-sm">
         <div className="flex items-center gap-3">
           <div className="flex items-center gap-2">
             <div className="h-8 w-8 rounded-lg bg-primary flex items-center justify-center">
@@ -118,82 +118,10 @@ export default function Home() {
         </div>
       </header>
 
-      {/* Split Screen - 3 Panels */}
+      {/* Main content: Provider (left) | Patient phone (center) | Caregiver phone (right) */}
       <div className="flex flex-1 overflow-hidden">
-        {/* Patient View */}
-        <div className="flex-1 border-r flex flex-col min-w-0">
-          <div className="bg-blue-50 px-4 py-2 border-b flex items-center gap-2 shrink-0">
-            <Badge
-              variant="outline"
-              className="bg-blue-100 text-blue-700 border-blue-300 text-xs"
-            >
-              Patient View
-            </Badge>
-            <span className="text-xs text-muted-foreground">
-              Mobile-first dashboard
-            </span>
-          </div>
-          <ScrollArea className="flex-1">
-            <div className="p-4 space-y-4 max-w-md mx-auto">
-              <div className="flex items-center justify-between">
-                <div>
-                  <p className="text-sm text-muted-foreground">
-                    Good morning,
-                  </p>
-                  <h2 className="text-xl font-bold">
-                    {selectedPatient.firstName}
-                  </h2>
-                </div>
-                <HealthStatusBadge
-                  status={
-                    selectedPatient.statusBadge as "green" | "yellow" | "red"
-                  }
-                />
-              </div>
-
-              <TrendSummary
-                patientId={currentPatientId}
-                key={`trend-${currentPatientId}-${refreshKey}`}
-              />
-
-              <div>
-                <h3 className="text-sm font-semibold mb-2">Current Vitals</h3>
-                <VitalsGrid
-                  patientId={currentPatientId}
-                  key={`vitals-${currentPatientId}-${refreshKey}`}
-                />
-              </div>
-
-              <Separator />
-
-              <div>
-                <h3 className="text-sm font-semibold mb-2">
-                  Today&apos;s Medications
-                </h3>
-                <MedicationChecklist
-                  patientId={currentPatientId}
-                  key={`meds-${currentPatientId}-${refreshKey}`}
-                />
-              </div>
-
-              <Separator />
-
-              <div>
-                <h3 className="text-sm font-semibold mb-2">
-                  AI Health Companion
-                </h3>
-                <AiChat
-                  patientId={currentPatientId}
-                  patientName={selectedPatient.firstName}
-                  key={`chat-${currentPatientId}`}
-                />
-              </div>
-            </div>
-          </ScrollArea>
-        </div>
-
-        {/* Provider View */}
-        <div className="flex-1 border-r flex flex-col min-w-0">
+        {/* Provider View — desktop panel on the left */}
+        <div className="w-[420px] border-r bg-white flex flex-col min-w-0 shrink-0">
           <div className="bg-purple-50 px-4 py-2 border-b flex items-center gap-2 shrink-0">
             <Badge
               variant="outline"
@@ -223,18 +151,77 @@ export default function Home() {
           </ScrollArea>
         </div>
 
-        {/* Caregiver View */}
-        <div className="w-80 flex flex-col min-w-0 shrink-0">
-          <div className="bg-green-50 px-4 py-2 border-b flex items-center gap-2 shrink-0">
-            <Badge
-              variant="outline"
-              className="bg-green-100 text-green-700 border-green-300 text-xs"
-            >
-              Caregiver View
-            </Badge>
-            <span className="text-xs text-muted-foreground">Family view</span>
-          </div>
-          <ScrollArea className="flex-1">
+        {/* Phone displays area — centered */}
+        <div className="flex-1 flex items-center justify-center gap-10 py-6 overflow-auto">
+          {/* Patient Phone — Center */}
+          <IPhoneFrame
+            label="Patient View"
+            labelColor="#2563eb"
+            sublabel="Mobile dashboard"
+          >
+            <div className="p-4 space-y-4">
+              <div className="flex items-center justify-between">
+                <div>
+                  <p className="text-xs text-muted-foreground">
+                    Good morning,
+                  </p>
+                  <h2 className="text-lg font-bold">
+                    {selectedPatient.firstName}
+                  </h2>
+                </div>
+                <HealthStatusBadge
+                  status={
+                    selectedPatient.statusBadge as "green" | "yellow" | "red"
+                  }
+                />
+              </div>
+
+              <TrendSummary
+                patientId={currentPatientId}
+                key={`trend-${currentPatientId}-${refreshKey}`}
+              />
+
+              <div>
+                <h3 className="text-xs font-semibold mb-1.5">Current Vitals</h3>
+                <VitalsGrid
+                  patientId={currentPatientId}
+                  key={`vitals-${currentPatientId}-${refreshKey}`}
+                />
+              </div>
+
+              <Separator />
+
+              <div>
+                <h3 className="text-xs font-semibold mb-1.5">
+                  Today&apos;s Medications
+                </h3>
+                <MedicationChecklist
+                  patientId={currentPatientId}
+                  key={`meds-${currentPatientId}-${refreshKey}`}
+                />
+              </div>
+
+              <Separator />
+
+              <div>
+                <h3 className="text-xs font-semibold mb-1.5">
+                  AI Health Companion
+                </h3>
+                <AiChat
+                  patientId={currentPatientId}
+                  patientName={selectedPatient.firstName}
+                  key={`chat-${currentPatientId}`}
+                />
+              </div>
+            </div>
+          </IPhoneFrame>
+
+          {/* Caregiver Phone — Right */}
+          <IPhoneFrame
+            label="Caregiver View"
+            labelColor="#16a34a"
+            sublabel="Family view"
+          >
             <div className="p-4 space-y-4">
               <StatusCard
                 status={
@@ -266,7 +253,7 @@ export default function Home() {
                 }))}
               />
             </div>
-          </ScrollArea>
+          </IPhoneFrame>
         </div>
       </div>
 

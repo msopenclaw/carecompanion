@@ -101,21 +101,21 @@ function ComparisonCards({ isActive }: { isActive: boolean }) {
       >
         <div className="flex items-center gap-1.5">
           <div className="h-1.5 w-1.5 rounded-full bg-slate-400" />
-          <span className="text-[9px] font-bold text-slate-500 uppercase tracking-wider">
+          <span className="text-[11px] font-bold text-slate-500 uppercase tracking-wider">
             Legacy RPM
           </span>
         </div>
         <div className="space-y-0.5">
-          <div className="flex justify-between text-[10px]">
+          <div className="flex justify-between text-[12px]">
             <span className="text-slate-500">Patients</span>
             <span className="text-slate-600 font-semibold tabular-nums">100</span>
           </div>
-          <div className="flex justify-between text-[10px]">
+          <div className="flex justify-between text-[12px]">
             <span className="text-slate-500">Nurse time</span>
             <span className="text-slate-600 font-semibold">40 hrs/wk</span>
           </div>
           <div className="border-t border-slate-200 pt-0.5 mt-0.5">
-            <div className="flex justify-between text-[10px]">
+            <div className="flex justify-between text-[12px]">
               <span className="text-slate-500 font-medium">Net/month</span>
               <span className="text-slate-700 font-bold tabular-nums">$4,000</span>
             </div>
@@ -149,7 +149,7 @@ function ComparisonCards({ isActive }: { isActive: boolean }) {
             }`}
           />
           <span
-            className={`text-[9px] font-bold uppercase tracking-wider ${
+            className={`text-[11px] font-bold uppercase tracking-wider ${
               isActive ? "text-blue-700" : "text-slate-500"
             }`}
           >
@@ -157,7 +157,7 @@ function ComparisonCards({ isActive }: { isActive: boolean }) {
           </span>
         </div>
         <div className="space-y-0.5 relative">
-          <div className="flex justify-between text-[10px]">
+          <div className="flex justify-between text-[12px]">
             <span className={isActive ? "text-blue-600" : "text-slate-500"}>
               Patients
             </span>
@@ -169,7 +169,7 @@ function ComparisonCards({ isActive }: { isActive: boolean }) {
               1,000
             </span>
           </div>
-          <div className="flex justify-between text-[10px]">
+          <div className="flex justify-between text-[12px]">
             <span className={isActive ? "text-blue-600" : "text-slate-500"}>
               Nurse time
             </span>
@@ -186,7 +186,7 @@ function ComparisonCards({ isActive }: { isActive: boolean }) {
               isActive ? "border-blue-100" : "border-slate-200"
             }`}
           >
-            <div className="flex justify-between text-[10px]">
+            <div className="flex justify-between text-[12px]">
               <span
                 className={`font-medium ${
                   isActive ? "text-blue-700" : "text-slate-500"
@@ -195,7 +195,7 @@ function ComparisonCards({ isActive }: { isActive: boolean }) {
                 Net/month
               </span>
               <span
-                className={`font-bold tabular-nums text-[11px] ${
+                className={`font-bold tabular-nums text-[13px] ${
                   isActive ? "text-blue-800" : "text-slate-700"
                 }`}
               >
@@ -206,7 +206,7 @@ function ComparisonCards({ isActive }: { isActive: boolean }) {
         </div>
         {isActive && (
           <div className="flex justify-center relative">
-            <span className="inline-flex items-center gap-0.5 rounded-full bg-blue-600 px-2 py-0.5 text-[8px] font-bold text-white">
+            <span className="inline-flex items-center gap-0.5 rounded-full bg-blue-600 px-2 py-0.5 text-[10px] font-bold text-white">
               <svg
                 width="8"
                 height="8"
@@ -262,7 +262,7 @@ function BillingEventCard({
     >
       {/* CPT code badge */}
       <span
-        className={`inline-flex items-center text-[9px] font-bold font-mono rounded px-1.5 py-0.5 border ${
+        className={`inline-flex items-center text-[11px] font-bold font-mono rounded px-1.5 py-0.5 border ${
           event.unlocked
             ? "bg-emerald-100 border-emerald-300 text-emerald-700"
             : "bg-blue-50 border-blue-200 text-blue-700"
@@ -273,14 +273,14 @@ function BillingEventCard({
 
       {/* Description */}
       <div className="flex-1 min-w-0">
-        <p className="text-[10px] text-slate-700 font-medium truncate">
+        <p className="text-[12px] text-slate-700 font-medium truncate">
           {event.description}
         </p>
       </div>
 
       {/* Dollar amount */}
       <span
-        className={`text-[10px] font-bold tabular-nums whitespace-nowrap ${
+        className={`text-[12px] font-bold tabular-nums whitespace-nowrap ${
           event.unlocked ? "text-emerald-600" : "text-slate-400"
         }`}
       >
@@ -307,7 +307,7 @@ function BillingEventCard({
       )}
 
       {/* Timestamp */}
-      <span className="text-[8px] text-slate-400 whitespace-nowrap flex-shrink-0">
+      <span className="text-[10px] text-slate-400 whitespace-nowrap flex-shrink-0">
         {event.timestamp.toLocaleTimeString("en-US", {
           hour: "numeric",
           minute: "2-digit",
@@ -364,11 +364,11 @@ function CMSCodeTable({
 
   return (
     <div className="px-3 pb-2">
-      <h3 className="text-[9px] font-bold text-slate-500 uppercase tracking-wider mb-1.5">
+      <h3 className="text-[11px] font-bold text-slate-500 uppercase tracking-wider mb-1.5">
         CMS Billing Codes
       </h3>
       <div className="rounded-md border border-slate-200 overflow-hidden">
-        <table className="w-full text-[10px]">
+        <table className="w-full text-[12px]">
           <thead>
             <tr className="bg-slate-50 text-slate-500">
               <th className="text-left py-1 px-2 font-semibold">Code</th>
@@ -387,7 +387,7 @@ function CMSCodeTable({
                       <span className="font-mono font-bold text-slate-800">
                         {row.code}
                       </span>
-                      <span className="text-[9px] text-slate-400 hidden sm:inline">
+                      <span className="text-[11px] text-slate-400 hidden sm:inline">
                         {row.description}
                       </span>
                     </div>
@@ -397,7 +397,7 @@ function CMSCodeTable({
                   </td>
                   <td className="py-1 px-2 text-center">
                     <span
-                      className={`inline-flex items-center text-[8px] font-bold uppercase tracking-wider px-1.5 py-0.5 rounded border ${cfg.bg} ${cfg.text} ${cfg.border}`}
+                      className={`inline-flex items-center text-[10px] font-bold uppercase tracking-wider px-1.5 py-0.5 rounded border ${cfg.bg} ${cfg.text} ${cfg.border}`}
                     >
                       {status === "in-progress" && (
                         <span className="inline-block w-1 h-1 rounded-full bg-amber-500 animate-pulse mr-1" />
@@ -509,11 +509,11 @@ export function LiveBilling() {
             </svg>
           </div>
           <div className="leading-none">
-            <h1 className="text-[11px] font-bold text-slate-800 tracking-tight">
-              Revenue & Billing
+            <h1 className="text-[13px] font-bold text-slate-800 tracking-tight">
+              Billing Dashboard
             </h1>
-            <p className="text-[9px] text-slate-400 mt-0.5">
-              Live billing simulator
+            <p className="text-[11px] text-slate-400 mt-0.5">
+              Live reimbursement tracker
             </p>
           </div>
         </div>
@@ -523,7 +523,7 @@ export function LiveBilling() {
               <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-emerald-400 opacity-75" />
               <span className="relative inline-flex rounded-full h-1.5 w-1.5 bg-emerald-500" />
             </span>
-            <span className="text-[9px] text-emerald-600 font-semibold uppercase tracking-wide">
+            <span className="text-[11px] text-emerald-600 font-semibold uppercase tracking-wide">
               Live
             </span>
           </div>
@@ -555,10 +555,10 @@ export function LiveBilling() {
                 <path d="M12 6v12m-3-2.818l.879.659c1.171.879 3.07.879 4.242 0 1.172-.879 1.172-2.303 0-3.182C13.536 12.219 12.768 12 12 12c-.725 0-1.45-.22-2.003-.659-1.106-.879-1.106-2.303 0-3.182s2.9-.879 4.006 0l.415.33M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
               </svg>
             </div>
-            <p className="text-[11px] text-slate-400 font-medium">
+            <p className="text-[13px] text-slate-400 font-medium">
               Start demo to see live billing
             </p>
-            <p className="text-[9px] text-slate-300 mt-1">
+            <p className="text-[11px] text-slate-300 mt-1">
               CPT codes, revenue tracking, and CMS billing
             </p>
           </div>
@@ -587,18 +587,18 @@ export function LiveBilling() {
                 >
                   <polyline points="22 12 18 12 15 21 9 3 6 12 2 12" />
                 </svg>
-                <span className="text-[9px] font-bold uppercase tracking-wider text-slate-500">
+                <span className="text-[11px] font-bold uppercase tracking-wider text-slate-500">
                   Live Billing Events
                 </span>
               </div>
               <div className="flex items-center gap-3">
-                <span className="text-[9px] text-slate-500">
+                <span className="text-[11px] text-slate-500">
                   Duration:{" "}
                   <span className="font-bold text-slate-700 tabular-nums">
                     {fmtDuration(billingMinutes)}
                   </span>
                 </span>
-                <span className="text-[9px] text-slate-500">
+                <span className="text-[11px] text-slate-500">
                   Revenue:{" "}
                   <span className="font-bold text-emerald-600 tabular-nums">
                     {fmtDollar(animatedRevenue)}
@@ -610,10 +610,10 @@ export function LiveBilling() {
             {/* 99457 progress bar */}
             <div className="px-3 py-1.5 flex-shrink-0">
               <div className="flex items-center justify-between mb-0.5">
-                <span className="text-[9px] text-slate-500 font-medium">
+                <span className="text-[11px] text-slate-500 font-medium">
                   99457: {billingMinutes}/{goalMinutes} min
                 </span>
-                <span className="text-[9px] text-slate-400 font-semibold tabular-nums">
+                <span className="text-[11px] text-slate-400 font-semibold tabular-nums">
                   {pct99457}%
                 </span>
               </div>
@@ -634,7 +634,7 @@ export function LiveBilling() {
                 <div className="flex items-center justify-center h-full">
                   <div className="flex items-center gap-2">
                     <span className="inline-block w-1.5 h-1.5 rounded-full bg-blue-400 animate-pulse" />
-                    <span className="text-[10px] text-slate-400 italic">
+                    <span className="text-[12px] text-slate-400 italic">
                       Waiting for billing events...
                     </span>
                   </div>
@@ -679,7 +679,7 @@ export function LiveBilling() {
               clipRule="evenodd"
             />
           </svg>
-          <p className="text-[9px] leading-relaxed text-blue-800/80 font-medium">
+          <p className="text-[11px] leading-relaxed text-blue-800/80 font-medium">
             AI unlocks scale: 1 nurse + AI = 1,000 patients = $180K+/month
           </p>
         </div>

@@ -112,11 +112,11 @@ function StatsBar({
           isActive ? "bg-white border border-slate-200" : "bg-slate-50 border border-slate-100"
         }`}
       >
-        <span className="text-[9px] uppercase tracking-wider text-slate-400 font-medium leading-none">
+        <span className="text-[11px] uppercase tracking-wider text-slate-400 font-medium leading-none">
           Monitored
         </span>
         <span
-          className={`text-sm font-bold tabular-nums leading-tight ${
+          className={`text-[15px] font-bold tabular-nums leading-tight ${
             isActive ? "text-slate-800" : "text-slate-300"
           }`}
         >
@@ -133,14 +133,14 @@ function StatsBar({
         }`}
       >
         <span
-          className={`text-[9px] uppercase tracking-wider font-medium leading-none ${
+          className={`text-[11px] uppercase tracking-wider font-medium leading-none ${
             isActive ? "text-emerald-600" : "text-slate-400"
           }`}
         >
           AI-Handled
         </span>
         <span
-          className={`text-sm font-bold tabular-nums leading-tight ${
+          className={`text-[15px] font-bold tabular-nums leading-tight ${
             isActive ? "text-emerald-700" : "text-slate-300"
           }`}
         >
@@ -157,14 +157,14 @@ function StatsBar({
         }`}
       >
         <span
-          className={`text-[9px] uppercase tracking-wider font-medium leading-none ${
+          className={`text-[11px] uppercase tracking-wider font-medium leading-none ${
             isActive && flaggedCount > 0 ? "text-amber-600" : "text-slate-400"
           }`}
         >
           Flagged
         </span>
         <span
-          className={`text-sm font-bold tabular-nums leading-tight ${
+          className={`text-[15px] font-bold tabular-nums leading-tight ${
             isActive && flaggedCount > 0 ? "text-amber-700" : "text-slate-300"
           }`}
         >
@@ -181,14 +181,14 @@ function StatsBar({
         }`}
       >
         <span
-          className={`text-[9px] uppercase tracking-wider font-medium leading-none ${
+          className={`text-[11px] uppercase tracking-wider font-medium leading-none ${
             isActive && escalatedCount > 0 ? "text-red-600" : "text-slate-400"
           }`}
         >
           Escalated
         </span>
         <span
-          className={`text-sm font-bold tabular-nums leading-tight ${
+          className={`text-[15px] font-bold tabular-nums leading-tight ${
             isActive && escalatedCount > 0 ? "text-red-700" : "text-slate-300"
           }`}
         >
@@ -221,7 +221,7 @@ function SeverityBadge({ severity }: { severity: "critical" | "elevated" | "info
   const c = config[severity];
   return (
     <span
-      className={`inline-flex items-center text-[9px] font-bold uppercase tracking-wider px-1.5 py-0.5 rounded border ${c.bg}`}
+      className={`inline-flex items-center text-[11px] font-bold uppercase tracking-wider px-1.5 py-0.5 rounded border ${c.bg}`}
     >
       {c.label}
     </span>
@@ -274,22 +274,22 @@ function AlertCard({
           <div className="flex items-center gap-1.5 mb-0.5">
             <SeverityBadge severity={alert.severity} />
             {isResolved && (
-              <span className="text-[9px] font-medium text-emerald-600 bg-emerald-50 border border-emerald-200 rounded px-1 py-px">
+              <span className="text-[11px] font-medium text-emerald-600 bg-emerald-50 border border-emerald-200 rounded px-1 py-px">
                 Resolved
               </span>
             )}
           </div>
-          <p className="text-[11px] font-semibold text-slate-800 leading-tight">
+          <p className="text-[13px] font-semibold text-slate-800 leading-tight">
             {alert.patientName}
           </p>
-          <p className="text-[10px] text-slate-500 leading-tight mt-0.5">
+          <p className="text-[12px] text-slate-500 leading-tight mt-0.5">
             {alert.title}
           </p>
           {isResolved && alert.note && (
-            <p className="text-[9px] text-slate-400 italic mt-0.5">{alert.note}</p>
+            <p className="text-[11px] text-slate-400 italic mt-0.5">{alert.note}</p>
           )}
         </div>
-        <span className="text-[9px] text-slate-400 whitespace-nowrap flex-shrink-0">
+        <span className="text-[11px] text-slate-400 whitespace-nowrap flex-shrink-0">
           {timeAgo(alert.timestamp)}
         </span>
       </div>
@@ -321,14 +321,14 @@ function ChatBubble({
       }
     >
       <div
-        className={`max-w-[88%] rounded-lg px-2.5 py-1.5 text-[10px] leading-[1.5] ${
+        className={`max-w-[88%] rounded-lg px-2.5 py-1.5 text-[12px] leading-[1.5] ${
           isAi
             ? "bg-blue-50 border border-blue-200 text-slate-700 rounded-tl-sm"
             : "bg-slate-100 border border-slate-200 text-slate-700 rounded-tr-sm"
         }`}
       >
         <span
-          className={`block text-[8px] font-bold uppercase tracking-widest mb-0.5 ${
+          className={`block text-[10px] font-bold uppercase tracking-widest mb-0.5 ${
             isAi ? "text-blue-500" : "text-slate-400"
           }`}
         >
@@ -367,10 +367,10 @@ function BillingWidget({
   return (
     <div className="border-t border-slate-200 bg-slate-50 px-3 py-2">
       <div className="flex items-center justify-between mb-1">
-        <span className="text-[9px] font-semibold uppercase tracking-wider text-slate-500">
+        <span className="text-[11px] font-semibold uppercase tracking-wider text-slate-500">
           Billing Predictor
         </span>
-        <span className="text-[9px] font-medium text-slate-400">
+        <span className="text-[11px] font-medium text-slate-400">
           CPT 99457 ($52)
         </span>
       </div>
@@ -383,7 +383,7 @@ function BillingWidget({
             style={{ width: `${pct}%` }}
           />
         </div>
-        <span className="text-[10px] font-bold text-slate-700 tabular-nums whitespace-nowrap">
+        <span className="text-[12px] font-bold text-slate-700 tabular-nums whitespace-nowrap">
           {isActive ? billingMinutes : 0}/{goalMinutes} min
         </span>
       </div>
@@ -393,7 +393,7 @@ function BillingWidget({
         {billingEvents.map((evt) => (
           <span
             key={evt.code}
-            className={`inline-flex items-center gap-0.5 text-[9px] font-medium rounded px-1.5 py-0.5 border transition-all duration-300 ${
+            className={`inline-flex items-center gap-0.5 text-[11px] font-medium rounded px-1.5 py-0.5 border transition-all duration-300 ${
               evt.unlocked
                 ? "bg-emerald-50 border-emerald-300 text-emerald-700"
                 : "bg-slate-50 border-slate-200 text-slate-400"
@@ -417,21 +417,21 @@ function BillingWidget({
           </span>
         ))}
         {!isActive && (
-          <span className="text-[9px] text-slate-400 italic">
+          <span className="text-[11px] text-slate-400 italic">
             Start demo to track billing
           </span>
         )}
       </div>
 
       {isActive && remaining > 0 && (
-        <p className="text-[9px] text-slate-500 mt-1">
+        <p className="text-[11px] text-slate-500 mt-1">
           <span className="text-amber-600 font-semibold">{remaining} more min</span> to
           unlock CPT 99457{" "}
           <span className="text-emerald-600 font-semibold">($52)</span>
         </p>
       )}
       {isActive && cpt99457?.unlocked && (
-        <p className="text-[9px] text-emerald-600 font-semibold mt-1">
+        <p className="text-[11px] text-emerald-600 font-semibold mt-1">
           CPT 99457 unlocked - $52 billable
         </p>
       )}
@@ -541,10 +541,10 @@ export function LiveTriage() {
             </svg>
           </div>
           <div className="leading-none">
-            <h1 className="text-[11px] font-bold text-slate-800 tracking-tight">
-              Clinician Triage Dashboard
+            <h1 className="text-[13px] font-bold text-slate-800 tracking-tight">
+              Clinician Triage
             </h1>
-            <p className="text-[9px] text-slate-400 mt-0.5">CareCompanion AI</p>
+            <p className="text-[11px] text-slate-400 mt-0.5">CareCompanion AI</p>
           </div>
         </div>
         <div className="flex items-center gap-1.5">
@@ -554,7 +554,7 @@ export function LiveTriage() {
                 <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-emerald-400 opacity-75" />
                 <span className="relative inline-flex rounded-full h-1.5 w-1.5 bg-emerald-500" />
               </span>
-              <span className="text-[9px] text-emerald-600 font-semibold uppercase tracking-wide">
+              <span className="text-[11px] text-emerald-600 font-semibold uppercase tracking-wide">
                 Live
               </span>
             </>
@@ -591,10 +591,10 @@ export function LiveTriage() {
                 <path d="M22 16.92V19a2 2 0 0 1-2.18 2A19.79 19.79 0 0 1 3 4.18 2 2 0 0 1 5 2h2.09a2 2 0 0 1 2 1.72c.13.81.37 1.61.68 2.36a2 2 0 0 1-.45 2.11L8.09 9.41a16 16 0 0 0 6.5 6.5l1.22-1.22a2 2 0 0 1 2.11-.45c.75.31 1.55.55 2.36.68A2 2 0 0 1 22 16.92z" />
               </svg>
             </div>
-            <p className="text-[11px] text-slate-400 font-medium">
+            <p className="text-[13px] text-slate-400 font-medium">
               Start the demo to see real-time clinical triage
             </p>
-            <p className="text-[9px] text-slate-300 mt-1">
+            <p className="text-[11px] text-slate-300 mt-1">
               Alerts, transcripts, and billing will appear here
             </p>
           </div>
@@ -626,11 +626,11 @@ export function LiveTriage() {
                 <line x1="12" y1="9" x2="12" y2="13" />
                 <line x1="12" y1="17" x2="12.01" y2="17" />
               </svg>
-              <span className="text-[9px] font-bold uppercase tracking-wider text-slate-500">
+              <span className="text-[11px] font-bold uppercase tracking-wider text-slate-500">
                 Patient Alerts
               </span>
               {alerts.length > 0 && (
-                <span className="text-[9px] font-bold text-red-500 bg-red-50 rounded-full px-1.5 py-px border border-red-200">
+                <span className="text-[11px] font-bold text-red-500 bg-red-50 rounded-full px-1.5 py-px border border-red-200">
                   {alerts.length}
                 </span>
               )}
@@ -649,7 +649,7 @@ export function LiveTriage() {
             {demoPhase === "connecting" && alerts.length === 0 && (
               <div className="flex items-center gap-2 py-4 justify-center">
                 <span className="inline-block w-1.5 h-1.5 rounded-full bg-blue-400 animate-pulse" />
-                <span className="text-[10px] text-slate-400">
+                <span className="text-[12px] text-slate-400">
                   Connecting to patient monitoring...
                 </span>
               </div>
@@ -659,7 +659,7 @@ export function LiveTriage() {
             {alerts.length > 0 && (
               <div className="flex items-center gap-2 py-1.5">
                 <div className="flex-1 border-t border-slate-200" />
-                <span className="text-[8px] uppercase tracking-wider text-slate-400 font-medium">
+                <span className="text-[10px] uppercase tracking-wider text-slate-400 font-medium">
                   Earlier
                 </span>
                 <div className="flex-1 border-t border-slate-200" />
@@ -692,7 +692,7 @@ export function LiveTriage() {
               >
                 <path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z" />
               </svg>
-              <span className="text-[9px] font-bold uppercase tracking-wider text-slate-500">
+              <span className="text-[11px] font-bold uppercase tracking-wider text-slate-500">
                 Live AI Transcript
               </span>
               {transcript.length > 0 && (
@@ -706,7 +706,7 @@ export function LiveTriage() {
             <div className="flex-1 overflow-y-auto px-2 py-2 space-y-1.5 scrollbar-thin">
               {transcript.length === 0 && (
                 <div className="flex items-center justify-center h-full">
-                  <span className="text-[9px] text-slate-300 italic">
+                  <span className="text-[11px] text-slate-300 italic">
                     Waiting for conversation...
                   </span>
                 </div>
@@ -738,7 +738,7 @@ export function LiveTriage() {
                       />
                     ))}
                   </div>
-                  <span className="text-[9px] text-blue-500 font-medium italic">
+                  <span className="text-[11px] text-blue-500 font-medium italic">
                     Drafting clinical note...
                   </span>
                 </div>
@@ -764,11 +764,11 @@ export function LiveTriage() {
                       <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z" />
                       <polyline points="14 2 14 8 20 8" />
                     </svg>
-                    <span className="text-[8px] font-bold uppercase tracking-wider text-blue-600">
+                    <span className="text-[10px] font-bold uppercase tracking-wider text-blue-600">
                       AI-Drafted Clinical Note
                     </span>
                   </div>
-                  <p className="text-[9px] text-slate-600 leading-relaxed">
+                  <p className="text-[11px] text-slate-600 leading-relaxed">
                     Patient reports missed evening Lisinopril dose. BP elevated at
                     155/95 mmHg (baseline 130/85). AI confirmed non-adherence via
                     voice check-in. Reminder set for 6 PM evening dose. Flagged
@@ -787,7 +787,7 @@ export function LiveTriage() {
                     >
                       <path d="M20 6L9 17l-5-5" />
                     </svg>
-                    <span className="text-[8px] text-emerald-600 font-medium">
+                    <span className="text-[10px] text-emerald-600 font-medium">
                       Ready for EHR submission
                     </span>
                   </div>

@@ -181,7 +181,7 @@ function DemoPage() {
         <div className="flex-1 min-w-0 min-h-0 flex flex-col">
           <div className="flex items-center gap-2 mb-2 shrink-0">
             <span className="text-[11px] font-semibold px-2 py-0.5 rounded-full bg-amber-500/15 text-amber-400 border border-amber-500/30">
-              3. Revenue Model
+              3. Billing Dashboard
             </span>
             <span className="text-[10px] text-slate-500">The ROI</span>
           </div>

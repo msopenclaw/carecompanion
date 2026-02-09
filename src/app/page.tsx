@@ -4,6 +4,7 @@ import { useEffect, useState, useCallback } from "react";
 import { PatientSelector } from "@/components/shared/patient-selector";
 import { SafetyDisclaimer } from "@/components/shared/safety-disclaimer";
 import { IPhoneFrame } from "@/components/shared/iphone-frame";
+import { MonitorFrame } from "@/components/shared/monitor-frame";
 import { HealthStatusBadge } from "@/components/patient/health-status-badge";
 import { VitalsGrid } from "@/components/patient/vitals-grid";
 import { MedicationChecklist } from "@/components/patient/medication-checklist";
@@ -15,9 +16,7 @@ import { StatusCard } from "@/components/caregiver/status-card";
 import { TodaysVitals } from "@/components/caregiver/todays-vitals";
 import { AdherenceRing } from "@/components/caregiver/adherence-ring";
 import { AlertBanner } from "@/components/caregiver/alert-banner";
-import { ScrollArea } from "@/components/ui/scroll-area";
 import { Separator } from "@/components/ui/separator";
-import { Badge } from "@/components/ui/badge";
 
 interface Patient {
   id: string;
@@ -75,7 +74,7 @@ export default function Home() {
 
   if (!selectedPatient || !selectedPatientId) {
     return (
-      <div className="flex h-screen items-center justify-center bg-slate-50">
+      <div className="flex h-screen items-center justify-center bg-gradient-to-br from-slate-50 to-slate-100">
         <div className="animate-pulse text-muted-foreground">
           Loading CareCompanion AI...
         </div>
@@ -86,27 +85,29 @@ export default function Home() {
   const currentPatientId: string = selectedPatientId;
 
   return (
-    <div className="flex h-screen flex-col bg-slate-50">
+    <div className="flex h-screen flex-col bg-gradient-to-br from-slate-50 via-slate-50 to-blue-50/30">
       {/* Header */}
-      <header className="flex items-center justify-between border-b px-6 py-3 bg-white shrink-0 shadow-sm">
+      <header className="flex items-center justify-between border-b px-6 py-3 bg-white/80 backdrop-blur-sm shrink-0 shadow-sm z-10">
         <div className="flex items-center gap-3">
-          <div className="flex items-center gap-2">
-            <div className="h-8 w-8 rounded-lg bg-primary flex items-center justify-center">
-              <span className="text-primary-foreground font-bold text-sm">
-                CC
-              </span>
+          <div className="flex items-center gap-2.5">
+            <div className="h-9 w-9 rounded-xl bg-gradient-to-br from-blue-600 to-indigo-600 flex items-center justify-center shadow-sm">
+              <span className="text-white font-bold text-sm">CC</span>
             </div>
             <div>
-              <h1 className="text-lg font-bold leading-none">
+              <h1 className="text-lg font-bold leading-none bg-gradient-to-r from-gray-900 to-gray-600 bg-clip-text text-transparent">
                 CareCompanion AI
               </h1>
-              <p className="text-xs text-muted-foreground">
-                Chronic Care Co-Pilot Demo
+              <p className="text-[11px] text-muted-foreground mt-0.5">
+                Chronic Care Co-Pilot &mdash; All three views update together
               </p>
             </div>
           </div>
         </div>
-        <div className="flex items-center gap-3">
+        <div className="flex items-center gap-4">
+          <div className="text-right mr-2 hidden lg:block">
+            <p className="text-[11px] text-muted-foreground leading-tight">Switch patient to see</p>
+            <p className="text-[11px] text-muted-foreground leading-tight">all panels update live</p>
+          </div>
           <PatientSelector
             patients={patients}
             selectedId={currentPatientId}
@@ -118,54 +119,45 @@ export default function Home() {
         </div>
       </header>
 
-      {/* Main content: Provider (left) | Patient phone (center) | Caregiver phone (right) */}
-      <div className="flex flex-1 overflow-hidden">
-        {/* Provider View — desktop panel on the left */}
-        <div className="w-[420px] border-r bg-white flex flex-col min-w-0 shrink-0">
-          <div className="bg-purple-50 px-4 py-2 border-b flex items-center gap-2 shrink-0">
-            <Badge
-              variant="outline"
-              className="bg-purple-100 text-purple-700 border-purple-300 text-xs"
-            >
-              Provider View
-            </Badge>
-            <span className="text-xs text-muted-foreground">
-              Alert queue &amp; billing
-            </span>
-          </div>
-          <ScrollArea className="flex-1">
+      {/* Main: Provider monitor (left) | Patient phone (center) | Caregiver phone (right) */}
+      <div className="flex flex-1 overflow-hidden px-6 py-4 gap-6">
+        {/* Provider — PC Monitor on the left */}
+        <div className="w-[480px] shrink-0 flex flex-col min-h-0">
+          <MonitorFrame
+            label="Provider Dashboard"
+            labelColor="#7c3aed"
+            sublabel="Desktop EHR view"
+          >
             <div className="p-4 space-y-4">
               <AlertQueue
                 patientId={currentPatientId}
                 onResolve={handleRefresh}
                 key={`alerts-${currentPatientId}-${refreshKey}`}
               />
-
               <Separator />
-
               <BillingTracker
                 patientId={currentPatientId}
                 key={`billing-${currentPatientId}-${refreshKey}`}
               />
             </div>
-          </ScrollArea>
+          </MonitorFrame>
         </div>
 
-        {/* Phone displays area — centered */}
-        <div className="flex-1 flex items-center justify-center gap-10 py-6 overflow-auto">
-          {/* Patient Phone — Center */}
+        {/* Phones — centered in remaining space */}
+        <div className="flex-1 flex items-center justify-center gap-8 overflow-auto min-w-0">
+          {/* Patient Phone */}
           <IPhoneFrame
-            label="Patient View"
+            label="Patient App"
             labelColor="#2563eb"
-            sublabel="Mobile dashboard"
+            sublabel="What the patient sees"
           >
-            <div className="p-4 space-y-4">
+            {/* Mobile-optimized content */}
+            <div className="px-3.5 py-3 space-y-3">
+              {/* Greeting */}
               <div className="flex items-center justify-between">
                 <div>
-                  <p className="text-xs text-muted-foreground">
-                    Good morning,
-                  </p>
-                  <h2 className="text-lg font-bold">
+                  <p className="text-[11px] text-gray-500">Good morning,</p>
+                  <h2 className="text-base font-bold leading-tight">
                     {selectedPatient.firstName}
                   </h2>
                 </div>
@@ -176,23 +168,28 @@ export default function Home() {
                 />
               </div>
 
+              {/* Trend summary */}
               <TrendSummary
                 patientId={currentPatientId}
                 key={`trend-${currentPatientId}-${refreshKey}`}
               />
 
+              {/* Vitals */}
               <div>
-                <h3 className="text-xs font-semibold mb-1.5">Current Vitals</h3>
+                <h3 className="text-[11px] font-semibold text-gray-700 mb-1.5 uppercase tracking-wider">
+                  Current Vitals
+                </h3>
                 <VitalsGrid
                   patientId={currentPatientId}
                   key={`vitals-${currentPatientId}-${refreshKey}`}
                 />
               </div>
 
-              <Separator />
+              <div className="border-t border-gray-100" />
 
+              {/* Medications */}
               <div>
-                <h3 className="text-xs font-semibold mb-1.5">
+                <h3 className="text-[11px] font-semibold text-gray-700 mb-1.5 uppercase tracking-wider">
                   Today&apos;s Medications
                 </h3>
                 <MedicationChecklist
@@ -201,10 +198,11 @@ export default function Home() {
                 />
               </div>
 
-              <Separator />
+              <div className="border-t border-gray-100" />
 
+              {/* AI Chat */}
               <div>
-                <h3 className="text-xs font-semibold mb-1.5">
+                <h3 className="text-[11px] font-semibold text-gray-700 mb-1.5 uppercase tracking-wider">
                   AI Health Companion
                 </h3>
                 <AiChat
@@ -216,13 +214,14 @@ export default function Home() {
             </div>
           </IPhoneFrame>
 
-          {/* Caregiver Phone — Right */}
+          {/* Caregiver Phone */}
           <IPhoneFrame
-            label="Caregiver View"
+            label="Caregiver App"
             labelColor="#16a34a"
-            sublabel="Family view"
+            sublabel="What the family sees"
           >
-            <div className="p-4 space-y-4">
+            {/* Mobile-optimized content */}
+            <div className="px-3.5 py-3 space-y-3">
               <StatusCard
                 status={
                   selectedPatient.statusBadge as "green" | "yellow" | "red"
@@ -231,20 +230,20 @@ export default function Home() {
                 lastUpdated={new Date().toISOString()}
               />
 
-              <Separator />
+              <div className="border-t border-gray-100" />
 
               <TodaysVitals
                 patientId={currentPatientId}
                 key={`cg-vitals-${currentPatientId}-${refreshKey}`}
               />
 
-              <Separator />
+              <div className="border-t border-gray-100" />
 
-              <div className="flex justify-center">
+              <div className="flex justify-center py-1">
                 <AdherenceRing percentage={adherence} />
               </div>
 
-              <Separator />
+              <div className="border-t border-gray-100" />
 
               <AlertBanner
                 alerts={alerts.map((a) => ({
@@ -258,7 +257,7 @@ export default function Home() {
       </div>
 
       {/* Footer */}
-      <footer className="border-t px-4 py-2 bg-white shrink-0">
+      <footer className="border-t px-4 py-2 bg-white/80 backdrop-blur-sm shrink-0">
         <SafetyDisclaimer />
       </footer>
     </div>

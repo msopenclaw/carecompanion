@@ -8,7 +8,7 @@ export function SafetyDisclaimer({ className }: SafetyDisclaimerProps) {
   return (
     <div
       className={cn(
-        "border-t bg-muted/50 px-4 py-3 text-center text-xs text-muted-foreground",
+        "px-4 py-2 text-center text-[10px] text-slate-500",
         className
       )}
     >

@@ -165,10 +165,10 @@ SAFETY RULES - YOU MUST FOLLOW THESE AT ALL TIMES:
 9. If asked about your capabilities, be transparent that you are an AI assistant and not a medical professional.`;
 
     // -----------------------------------------------------------------------
-    // Check if ANTHROPIC_API_KEY is configured
+    // Check if GEMINI_API_KEY is configured
     // -----------------------------------------------------------------------
 
-    const apiKey = process.env.ANTHROPIC_API_KEY;
+    const apiKey = process.env.GEMINI_API_KEY;
 
     if (!apiKey) {
       // Return a mock streaming response
@@ -176,40 +176,43 @@ SAFETY RULES - YOU MUST FOLLOW THESE AT ALL TIMES:
     }
 
     // -----------------------------------------------------------------------
-    // Call Claude API with streaming
+    // Call Gemini API with streaming
     // -----------------------------------------------------------------------
 
-    const Anthropic = (await import("@anthropic-ai/sdk")).default;
-    const client = new Anthropic({ apiKey });
+    const { GoogleGenerativeAI } = await import("@google/generative-ai");
+    const genAI = new GoogleGenerativeAI(apiKey);
+    const model = genAI.getGenerativeModel({ model: "gemini-2.0-flash" });
 
-    const stream = await client.messages.stream({
-      model: "claude-sonnet-4-20250514",
-      max_tokens: 1024,
-      system: systemPrompt,
-      messages: messages.map((m) => ({
-        role: m.role as "user" | "assistant",
-        content: m.content,
-      })),
+    // Convert messages to Gemini format (system prompt goes separately)
+    const geminiHistory = messages.slice(0, -1).map((m) => ({
+      role: m.role === "assistant" ? "model" as const : "user" as const,
+      parts: [{ text: m.content }],
+    }));
+
+    const lastMessage = messages[messages.length - 1];
+
+    const chat = model.startChat({
+      history: geminiHistory,
+      systemInstruction: { role: "user" as const, parts: [{ text: systemPrompt }] },
     });
 
-    // Convert the Anthropic SDK stream to a ReadableStream for SSE
+    const result = await chat.sendMessageStream(lastMessage.content);
+
+    // Convert the Gemini stream to SSE
     const encoder = new TextEncoder();
     const readableStream = new ReadableStream({
       async start(controller) {
         try {
-          for await (const event of stream) {
-            if (
-              event.type === "content_block_delta" &&
-              event.delta.type === "text_delta"
-            ) {
-              const data = JSON.stringify({ text: event.delta.text });
+          for await (const chunk of result.stream) {
+            const text = chunk.text();
+            if (text) {
+              const data = JSON.stringify({ text });
               controller.enqueue(
                 encoder.encode(`data: ${data}\n\n`)
               );
             }
           }
 
-          // Send done event
           controller.enqueue(encoder.encode("data: [DONE]\n\n"));
           controller.close();
         } catch (error) {

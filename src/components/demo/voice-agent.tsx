@@ -114,6 +114,7 @@ export default function VoiceAgent({ patientName }: VoiceAgentProps) {
   const chatEndRef = useRef<HTMLDivElement>(null);
   const timerRef = useRef<ReturnType<typeof setInterval> | null>(null);
   const conversationRef = useRef<unknown>(null);
+  const micStreamRef = useRef<MediaStream | null>(null);
 
   // ------ Auto-scroll transcript ------
   useEffect(() => {
@@ -188,12 +189,36 @@ export default function VoiceAgent({ patientName }: VoiceAgentProps) {
     timeoutsRef.current.push(tEnd);
   }, [patientName, addTranscript, addLog, endDemo, updateBilling]);
 
+  // ------ Request microphone permission upfront ------
+  const requestMicPermission = useCallback(async (): Promise<boolean> => {
+    try {
+      addLog("voice", "Requesting microphone access...");
+      const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+      // Keep the stream active — some browsers release mic if we stop tracks
+      // Store it so we can clean up later
+      micStreamRef.current = stream;
+      addLog("voice", "Microphone access granted");
+      return true;
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : String(err);
+      addLog("voice", `Microphone denied: ${msg}`);
+      return false;
+    }
+  }, [addLog]);
+
   // ------ Connect to real ElevenLabs agent ------
   const connectToElevenLabs = useCallback(async () => {
     try {
-      const { Conversation } = await import("@elevenlabs/client");
+      // Step 1: Request mic permission first (user gesture context)
+      const micGranted = await requestMicPermission();
+      if (!micGranted) {
+        addLog("voice", "Cannot start voice call without microphone");
+        return false;
+      }
 
-      addLog("voice", "ElevenLabs SDK loaded, requesting microphone...");
+      // Step 2: Load SDK and start session
+      const { Conversation } = await import("@elevenlabs/client");
+      addLog("voice", "ElevenLabs SDK loaded, connecting...");
 
       const conversation = await Conversation.startSession({
         agentId: "agent_8601kh042d5yf7atvdqa6nbfm9yb",
@@ -248,7 +273,7 @@ export default function VoiceAgent({ patientName }: VoiceAgentProps) {
       addLog("voice", `ElevenLabs unavailable: ${errorMsg}`);
       return false;
     }
-  }, [addLog, addTranscript, endDemo]);
+  }, [addLog, addTranscript, endDemo, requestMicPermission]);
 
   // ------ Accept incoming call ------
   const acceptCall = useCallback(async () => {
@@ -268,6 +293,14 @@ export default function VoiceAgent({ patientName }: VoiceAgentProps) {
     }
   }, [setPhaseActive, connectToElevenLabs, addLog, runSimulatedConversation]);
 
+  // ------ Stop mic stream ------
+  const stopMicStream = useCallback(() => {
+    if (micStreamRef.current) {
+      micStreamRef.current.getTracks().forEach((t) => t.stop());
+      micStreamRef.current = null;
+    }
+  }, []);
+
   // ------ End call (hang up) ------
   const endCall = useCallback(async () => {
     if (conversationRef.current) {
@@ -278,6 +311,7 @@ export default function VoiceAgent({ patientName }: VoiceAgentProps) {
       }
       conversationRef.current = null;
     }
+    stopMicStream();
     timeoutsRef.current.forEach(clearTimeout);
     timeoutsRef.current = [];
     setAiSpeaking(false);
@@ -285,7 +319,7 @@ export default function VoiceAgent({ patientName }: VoiceAgentProps) {
     setPhonePhase("ended");
     endDemo();
     addLog("voice", "Call ended by user");
-  }, [endDemo, addLog]);
+  }, [endDemo, addLog, stopMicStream]);
 
   // ------ Demo phase transitions ------
   useEffect(() => {
@@ -344,6 +378,7 @@ export default function VoiceAgent({ patientName }: VoiceAgentProps) {
         }
         conversationRef.current = null;
       }
+      stopMicStream();
       setPhonePhase("app");
       setBpSys(130);
       setBpDia(85);
@@ -354,7 +389,7 @@ export default function VoiceAgent({ patientName }: VoiceAgentProps) {
       setElapsed(0);
       setIsLive(false);
     }
-  }, [demoPhase]);
+  }, [demoPhase, stopMicStream]);
 
   // ------ Cleanup on unmount ------
   useEffect(() => {
@@ -367,6 +402,9 @@ export default function VoiceAgent({ patientName }: VoiceAgentProps) {
         } catch {
           // ignore
         }
+      }
+      if (micStreamRef.current) {
+        micStreamRef.current.getTracks().forEach((t) => t.stop());
       }
     };
   }, []);

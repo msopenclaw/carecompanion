@@ -170,14 +170,14 @@ function DemoPage() {
             </span>
             <span className="text-[10px] text-slate-500">The Efficiency</span>
           </div>
-          <div className="flex-1 min-h-0 rounded-xl overflow-hidden border border-slate-700/50 shadow-2xl bg-white">
+          <div className="flex-1 min-h-0 rounded-xl overflow-hidden border border-slate-700/50 shadow-2xl bg-white text-slate-900">
             <div className="h-full overflow-y-auto">
               <LiveTriage key={`triage-${currentPatientId}-${refreshKey}`} />
             </div>
           </div>
         </div>
 
-        {/* Panel 3: Revenue Model — Window */}
+        {/* Panel 3: Billing Dashboard — Window */}
         <div className="flex-1 min-w-0 min-h-0 flex flex-col">
           <div className="flex items-center gap-2 mb-2 shrink-0">
             <span className="text-[11px] font-semibold px-2 py-0.5 rounded-full bg-amber-500/15 text-amber-400 border border-amber-500/30">
@@ -185,7 +185,7 @@ function DemoPage() {
             </span>
             <span className="text-[10px] text-slate-500">The ROI</span>
           </div>
-          <div className="flex-1 min-h-0 rounded-xl overflow-hidden border border-slate-700/50 shadow-2xl bg-white">
+          <div className="flex-1 min-h-0 rounded-xl overflow-hidden border border-slate-700/50 shadow-2xl bg-white text-slate-900">
             <div className="h-full overflow-y-auto">
               <LiveBilling key={`billing-${refreshKey}`} />
             </div>

@@ -37,12 +37,21 @@ export function PatientSelector({
 }: PatientSelectorProps) {
   return (
     <Select value={selectedId} onValueChange={onSelect}>
-      <SelectTrigger className={cn("w-[260px]", className)}>
+      <SelectTrigger
+        className={cn(
+          "w-[220px] h-8 text-xs bg-slate-800 border-slate-600 text-white hover:bg-slate-700 focus:ring-slate-500",
+          className
+        )}
+      >
         <SelectValue placeholder="Select a patient" />
       </SelectTrigger>
-      <SelectContent>
+      <SelectContent className="bg-slate-800 border-slate-600">
         {patients.map((patient) => (
-          <SelectItem key={patient.id} value={patient.id}>
+          <SelectItem
+            key={patient.id}
+            value={patient.id}
+            className="text-slate-200 text-xs focus:bg-slate-700 focus:text-white"
+          >
             <span className="flex items-center gap-2">
               <span
                 className={cn(

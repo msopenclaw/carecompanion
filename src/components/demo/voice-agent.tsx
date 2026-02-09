@@ -21,7 +21,7 @@ interface ScriptLine {
 }
 
 // ---------------------------------------------------------------------------
-// Conversation script (simulated ElevenLabs agent ↔ patient)
+// Fallback conversation script (if ElevenLabs SDK fails)
 // ---------------------------------------------------------------------------
 
 function buildScript(name: string): ScriptLine[] {
@@ -107,11 +107,13 @@ export default function VoiceAgent({ patientName }: VoiceAgentProps) {
   const [bpDia, setBpDia] = useState(85);
   const [statusColor, setStatusColor] = useState<"green" | "yellow">("green");
   const [showAlertBanner, setShowAlertBanner] = useState(false);
+  const [isLive, setIsLive] = useState(false);
 
   // Refs
   const timeoutsRef = useRef<ReturnType<typeof setTimeout>[]>([]);
   const chatEndRef = useRef<HTMLDivElement>(null);
   const timerRef = useRef<ReturnType<typeof setInterval> | null>(null);
+  const conversationRef = useRef<unknown>(null);
 
   // ------ Auto-scroll transcript ------
   useEffect(() => {
@@ -137,8 +139,8 @@ export default function VoiceAgent({ patientName }: VoiceAgentProps) {
     return `${m}:${sec.toString().padStart(2, "0")}`;
   };
 
-  // ------ Simulated conversation playback ------
-  const runConversation = useCallback(() => {
+  // ------ Simulated conversation (fallback) ------
+  const runSimulatedConversation = useCallback(() => {
     const script = buildScript(patientName);
     let cumDelay = 600;
 
@@ -186,17 +188,104 @@ export default function VoiceAgent({ patientName }: VoiceAgentProps) {
     timeoutsRef.current.push(tEnd);
   }, [patientName, addTranscript, addLog, endDemo, updateBilling]);
 
+  // ------ Connect to real ElevenLabs agent ------
+  const connectToElevenLabs = useCallback(async () => {
+    try {
+      const { Conversation } = await import("@elevenlabs/client");
+
+      addLog("voice", "ElevenLabs SDK loaded, requesting microphone...");
+
+      const conversation = await Conversation.startSession({
+        agentId: "agent_8601kh042d5yf7atvdqa6nbfm9yb",
+        connectionType: "webrtc",
+
+        onConnect: () => {
+          addLog("voice", "Connected — ElevenLabs Conversational AI active");
+          setIsLive(true);
+          setIsListening(true);
+        },
+
+        onDisconnect: () => {
+          setIsListening(false);
+          setAiSpeaking(false);
+          setPhonePhase("ended");
+          endDemo();
+          addLog("voice", "Call ended — session disconnected");
+          conversationRef.current = null;
+        },
+
+        onMessage: (message: { source?: string; message?: string }) => {
+          const speaker = message.source === "user" ? "patient" : "ai";
+          const text =
+            typeof message.message === "string"
+              ? message.message
+              : String(message.message ?? "");
+          if (text.trim()) {
+            addTranscript(speaker as "ai" | "patient", text);
+          }
+        },
+
+        onModeChange: ({ mode }: { mode: string }) => {
+          if (mode === "speaking") {
+            setAiSpeaking(true);
+            setIsListening(false);
+          } else {
+            setAiSpeaking(false);
+            setIsListening(true);
+          }
+        },
+
+        onError: (error: Error | string) => {
+          const msg = typeof error === "string" ? error : error?.message ?? "Unknown error";
+          addLog("voice", `ElevenLabs error: ${msg}`);
+        },
+      });
+
+      conversationRef.current = conversation;
+      return true;
+    } catch (err) {
+      const errorMsg = err instanceof Error ? err.message : String(err);
+      addLog("voice", `ElevenLabs unavailable: ${errorMsg}`);
+      return false;
+    }
+  }, [addLog, addTranscript, endDemo]);
+
   // ------ Accept incoming call ------
-  const acceptCall = useCallback(() => {
+  const acceptCall = useCallback(async () => {
     // Clear pending auto-accept timeout
     timeoutsRef.current.forEach(clearTimeout);
     timeoutsRef.current = [];
+
     setPhonePhase("call");
     setPhaseActive();
-    addLog("voice", "Connected — ElevenLabs Conversational AI active");
-    setIsListening(true);
-    runConversation();
-  }, [setPhaseActive, addLog, runConversation]);
+
+    // Try real ElevenLabs first, fall back to simulated
+    const connected = await connectToElevenLabs();
+    if (!connected) {
+      addLog("voice", "Falling back to simulated conversation");
+      setIsListening(true);
+      runSimulatedConversation();
+    }
+  }, [setPhaseActive, connectToElevenLabs, addLog, runSimulatedConversation]);
+
+  // ------ End call (hang up) ------
+  const endCall = useCallback(async () => {
+    if (conversationRef.current) {
+      try {
+        await (conversationRef.current as { endSession?: () => Promise<void> }).endSession?.();
+      } catch {
+        // ignore
+      }
+      conversationRef.current = null;
+    }
+    timeoutsRef.current.forEach(clearTimeout);
+    timeoutsRef.current = [];
+    setAiSpeaking(false);
+    setIsListening(false);
+    setPhonePhase("ended");
+    endDemo();
+    addLog("voice", "Call ended by user");
+  }, [endDemo, addLog]);
 
   // ------ Demo phase transitions ------
   useEffect(() => {
@@ -222,13 +311,16 @@ export default function VoiceAgent({ patientName }: VoiceAgentProps) {
       addLog("voice", "Initiating ElevenLabs voice call to patient...");
     }, 4000);
 
-    // Step 3: Auto-accept after 3s
-    const t3 = setTimeout(() => {
+    // Step 3: Auto-accept after 3s (user can tap Accept sooner)
+    const t3 = setTimeout(async () => {
       setPhonePhase("call");
       setPhaseActive();
-      addLog("voice", "Connected — ElevenLabs Conversational AI active");
-      setIsListening(true);
-      runConversation();
+      const connected = await connectToElevenLabs();
+      if (!connected) {
+        addLog("voice", "Falling back to simulated conversation");
+        setIsListening(true);
+        runSimulatedConversation();
+      }
     }, 7000);
 
     timeoutsRef.current.push(t1, t2, t3);
@@ -243,6 +335,15 @@ export default function VoiceAgent({ patientName }: VoiceAgentProps) {
   // ------ Reset on demo idle ------
   useEffect(() => {
     if (demoPhase === "idle") {
+      // End any live session
+      if (conversationRef.current) {
+        try {
+          (conversationRef.current as { endSession?: () => Promise<void> }).endSession?.();
+        } catch {
+          // ignore
+        }
+        conversationRef.current = null;
+      }
       setPhonePhase("app");
       setBpSys(130);
       setBpDia(85);
@@ -251,6 +352,7 @@ export default function VoiceAgent({ patientName }: VoiceAgentProps) {
       setAiSpeaking(false);
       setIsListening(false);
       setElapsed(0);
+      setIsLive(false);
     }
   }, [demoPhase]);
 
@@ -259,6 +361,13 @@ export default function VoiceAgent({ patientName }: VoiceAgentProps) {
     return () => {
       timeoutsRef.current.forEach(clearTimeout);
       if (timerRef.current) clearInterval(timerRef.current);
+      if (conversationRef.current) {
+        try {
+          (conversationRef.current as { endSession?: () => Promise<void> }).endSession?.();
+        } catch {
+          // ignore
+        }
+      }
     };
   }, []);
 
@@ -346,16 +455,7 @@ export default function VoiceAgent({ patientName }: VoiceAgentProps) {
               style={{ animation: "slideUp 0.3s ease-out both" }}
             >
               <div className="flex items-center gap-1.5">
-                <svg
-                  width="12"
-                  height="12"
-                  viewBox="0 0 24 24"
-                  fill="none"
-                  stroke="#f59e0b"
-                  strokeWidth="2.5"
-                  strokeLinecap="round"
-                  strokeLinejoin="round"
-                >
+                <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="#f59e0b" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
                   <path d="M10.29 3.86L1.82 18a2 2 0 0 0 1.71 3h16.94a2 2 0 0 0 1.71-3L13.71 3.86a2 2 0 0 0-3.42 0z" />
                   <line x1="12" y1="9" x2="12" y2="13" />
                   <line x1="12" y1="17" x2="12.01" y2="17" />
@@ -369,177 +469,87 @@ export default function VoiceAgent({ patientName }: VoiceAgentProps) {
 
           {/* Vitals 2x2 grid */}
           <div className="grid grid-cols-2 gap-2 px-3 py-1.5">
-            {/* Blood Pressure */}
             <div
               className={`rounded-lg p-2 transition-all duration-500 ${
                 phonePhase === "alert"
                   ? "bg-amber-500/10 border border-amber-500/30"
                   : "bg-slate-800/60 border border-slate-700/50"
               }`}
-              style={
-                phonePhase === "alert"
-                  ? { animation: "shake 0.5s ease-in-out" }
-                  : undefined
-              }
+              style={phonePhase === "alert" ? { animation: "shake 0.5s ease-in-out" } : undefined}
             >
               <div className="flex items-center justify-between mb-1">
-                <span className="text-[8px] text-slate-400 uppercase tracking-wider font-medium">
-                  Blood Pressure
-                </span>
+                <span className="text-[8px] text-slate-400 uppercase tracking-wider font-medium">Blood Pressure</span>
                 {phonePhase === "alert" && (
-                  <span className="text-[7px] font-bold text-amber-400 bg-amber-500/20 px-1 rounded">
-                    HIGH
-                  </span>
+                  <span className="text-[7px] font-bold text-amber-400 bg-amber-500/20 px-1 rounded">HIGH</span>
                 )}
               </div>
-              <div
-                className={`text-lg font-bold tabular-nums leading-none transition-colors duration-500 ${
-                  phonePhase === "alert" ? "text-amber-400" : "text-white"
-                }`}
-              >
+              <div className={`text-lg font-bold tabular-nums leading-none transition-colors duration-500 ${
+                phonePhase === "alert" ? "text-amber-400" : "text-white"
+              }`}>
                 {bpSys}/{bpDia}
               </div>
               <div className="text-[8px] text-slate-500 mt-0.5">mmHg</div>
             </div>
-
-            {/* Heart Rate */}
             <div className="rounded-lg p-2 bg-slate-800/60 border border-slate-700/50">
-              <div className="text-[8px] text-slate-400 uppercase tracking-wider font-medium mb-1">
-                Heart Rate
-              </div>
-              <div className="text-lg font-bold tabular-nums text-white leading-none">
-                72
-              </div>
+              <div className="text-[8px] text-slate-400 uppercase tracking-wider font-medium mb-1">Heart Rate</div>
+              <div className="text-lg font-bold tabular-nums text-white leading-none">72</div>
               <div className="text-[8px] text-emerald-400 mt-0.5">Normal</div>
             </div>
-
-            {/* Glucose */}
             <div className="rounded-lg p-2 bg-slate-800/60 border border-slate-700/50">
-              <div className="text-[8px] text-slate-400 uppercase tracking-wider font-medium mb-1">
-                Glucose
-              </div>
-              <div className="text-lg font-bold tabular-nums text-white leading-none">
-                118
-              </div>
+              <div className="text-[8px] text-slate-400 uppercase tracking-wider font-medium mb-1">Glucose</div>
+              <div className="text-lg font-bold tabular-nums text-white leading-none">118</div>
               <div className="text-[8px] text-emerald-400 mt-0.5">In Range</div>
             </div>
-
-            {/* SpO2 */}
             <div className="rounded-lg p-2 bg-slate-800/60 border border-slate-700/50">
-              <div className="text-[8px] text-slate-400 uppercase tracking-wider font-medium mb-1">
-                SpO2
-              </div>
-              <div className="text-lg font-bold tabular-nums text-white leading-none">
-                98%
-              </div>
+              <div className="text-[8px] text-slate-400 uppercase tracking-wider font-medium mb-1">SpO2</div>
+              <div className="text-lg font-bold tabular-nums text-white leading-none">98%</div>
               <div className="text-[8px] text-emerald-400 mt-0.5">Normal</div>
             </div>
           </div>
 
           {/* Medications */}
           <div className="px-3 py-1.5">
-            <div className="text-[9px] font-bold text-slate-400 uppercase tracking-wider mb-1.5">
-              Today&apos;s Medications
-            </div>
+            <div className="text-[9px] font-bold text-slate-400 uppercase tracking-wider mb-1.5">Today&apos;s Medications</div>
             <div className="space-y-1">
-              {/* Lisinopril morning - taken */}
               <div className="flex items-center gap-2 bg-slate-800/40 rounded-md px-2 py-1.5">
                 <div className="w-4 h-4 rounded bg-emerald-500/20 flex items-center justify-center">
-                  <svg
-                    width="10"
-                    height="10"
-                    viewBox="0 0 24 24"
-                    fill="none"
-                    stroke="#10b981"
-                    strokeWidth="3"
-                    strokeLinecap="round"
-                    strokeLinejoin="round"
-                  >
-                    <path d="M20 6L9 17l-5-5" />
-                  </svg>
+                  <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="#10b981" strokeWidth="3" strokeLinecap="round" strokeLinejoin="round"><path d="M20 6L9 17l-5-5" /></svg>
                 </div>
                 <div className="flex-1">
-                  <span className="text-[9px] text-white font-medium">
-                    Lisinopril 10mg
-                  </span>
+                  <span className="text-[9px] text-white font-medium">Lisinopril 10mg</span>
                   <span className="text-[8px] text-slate-500 ml-1">Morning</span>
                 </div>
-                <span className="text-[8px] text-emerald-400 font-medium">
-                  Taken
-                </span>
+                <span className="text-[8px] text-emerald-400 font-medium">Taken</span>
               </div>
-
-              {/* Lisinopril evening - missed */}
-              <div
-                className={`flex items-center gap-2 rounded-md px-2 py-1.5 transition-all duration-500 ${
-                  phonePhase === "alert"
-                    ? "bg-red-500/10 border border-red-500/20"
-                    : "bg-slate-800/40"
-                }`}
-              >
-                <div
-                  className={`w-4 h-4 rounded flex items-center justify-center ${
-                    phonePhase === "alert" ? "bg-red-500/20" : "bg-slate-700"
-                  }`}
-                >
+              <div className={`flex items-center gap-2 rounded-md px-2 py-1.5 transition-all duration-500 ${
+                phonePhase === "alert" ? "bg-red-500/10 border border-red-500/20" : "bg-slate-800/40"
+              }`}>
+                <div className={`w-4 h-4 rounded flex items-center justify-center ${phonePhase === "alert" ? "bg-red-500/20" : "bg-slate-700"}`}>
                   {phonePhase === "alert" ? (
-                    <svg
-                      width="8"
-                      height="8"
-                      viewBox="0 0 24 24"
-                      fill="none"
-                      stroke="#ef4444"
-                      strokeWidth="3"
-                      strokeLinecap="round"
-                      strokeLinejoin="round"
-                    >
-                      <line x1="18" y1="6" x2="6" y2="18" />
-                      <line x1="6" y1="6" x2="18" y2="18" />
+                    <svg width="8" height="8" viewBox="0 0 24 24" fill="none" stroke="#ef4444" strokeWidth="3" strokeLinecap="round" strokeLinejoin="round">
+                      <line x1="18" y1="6" x2="6" y2="18" /><line x1="6" y1="6" x2="18" y2="18" />
                     </svg>
                   ) : (
                     <div className="w-2 h-2 rounded-sm border border-slate-500" />
                   )}
                 </div>
                 <div className="flex-1">
-                  <span className="text-[9px] text-white font-medium">
-                    Lisinopril 10mg
-                  </span>
+                  <span className="text-[9px] text-white font-medium">Lisinopril 10mg</span>
                   <span className="text-[8px] text-slate-500 ml-1">Evening</span>
                 </div>
-                <span
-                  className={`text-[8px] font-medium ${
-                    phonePhase === "alert" ? "text-red-400" : "text-slate-500"
-                  }`}
-                >
+                <span className={`text-[8px] font-medium ${phonePhase === "alert" ? "text-red-400" : "text-slate-500"}`}>
                   {phonePhase === "alert" ? "Missed" : "Pending"}
                 </span>
               </div>
-
-              {/* Metformin - taken */}
               <div className="flex items-center gap-2 bg-slate-800/40 rounded-md px-2 py-1.5">
                 <div className="w-4 h-4 rounded bg-emerald-500/20 flex items-center justify-center">
-                  <svg
-                    width="10"
-                    height="10"
-                    viewBox="0 0 24 24"
-                    fill="none"
-                    stroke="#10b981"
-                    strokeWidth="3"
-                    strokeLinecap="round"
-                    strokeLinejoin="round"
-                  >
-                    <path d="M20 6L9 17l-5-5" />
-                  </svg>
+                  <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="#10b981" strokeWidth="3" strokeLinecap="round" strokeLinejoin="round"><path d="M20 6L9 17l-5-5" /></svg>
                 </div>
                 <div className="flex-1">
-                  <span className="text-[9px] text-white font-medium">
-                    Metformin 500mg
-                  </span>
+                  <span className="text-[9px] text-white font-medium">Metformin 500mg</span>
                   <span className="text-[8px] text-slate-500 ml-1">With meals</span>
                 </div>
-                <span className="text-[8px] text-emerald-400 font-medium">
-                  Taken
-                </span>
+                <span className="text-[8px] text-emerald-400 font-medium">Taken</span>
               </div>
             </div>
           </div>
@@ -548,20 +558,13 @@ export default function VoiceAgent({ patientName }: VoiceAgentProps) {
           <div className="mt-auto px-3 pb-3">
             <div className="text-center">
               <div className="text-[8px] text-slate-500">
-                {phonePhase === "alert"
-                  ? "CareCompanion AI is reviewing your readings..."
-                  : "Last check-in: Today, 8:00 AM"}
+                {phonePhase === "alert" ? "CareCompanion AI is reviewing your readings..." : "Last check-in: Today, 8:00 AM"}
               </div>
               {phonePhase === "alert" && (
                 <div className="flex items-center justify-center gap-1 mt-1">
                   {[0, 1, 2].map((i) => (
-                    <span
-                      key={i}
-                      className="inline-block w-1 h-1 rounded-full bg-amber-400"
-                      style={{
-                        animation: `fadeIn 0.6s ease-in-out ${i * 0.15}s infinite alternate`,
-                      }}
-                    />
+                    <span key={i} className="inline-block w-1 h-1 rounded-full bg-amber-400"
+                      style={{ animation: `fadeIn 0.6s ease-in-out ${i * 0.15}s infinite alternate` }} />
                   ))}
                 </div>
               )}
@@ -574,61 +577,29 @@ export default function VoiceAgent({ patientName }: VoiceAgentProps) {
       {/* INCOMING CALL SCREEN                                             */}
       {/* ================================================================ */}
       {phonePhase === "ringing" && (
-        <div
-          className="flex flex-col h-full items-center justify-center"
-          style={{ animation: "fadeIn 0.4s ease-out both" }}
-        >
-          {/* Avatar */}
+        <div className="flex flex-col h-full items-center justify-center" style={{ animation: "fadeIn 0.4s ease-out both" }}>
           <div
             className="w-20 h-20 rounded-full bg-gradient-to-br from-emerald-400 to-teal-600 flex items-center justify-center mb-4"
             style={{ animation: "ringPulse 1.5s ease-out infinite" }}
           >
-            <svg
-              width="36"
-              height="36"
-              viewBox="0 0 24 24"
-              fill="none"
-              stroke="white"
-              strokeWidth="1.5"
-              strokeLinecap="round"
-              strokeLinejoin="round"
-            >
+            <svg width="36" height="36" viewBox="0 0 24 24" fill="none" stroke="white" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round">
               <path d="M22 16.92V19a2 2 0 0 1-2.18 2A19.79 19.79 0 0 1 3 4.18 2 2 0 0 1 5 2h2.09a2 2 0 0 1 2 1.72c.13.81.37 1.61.68 2.36a2 2 0 0 1-.45 2.11L8.09 9.41a16 16 0 0 0 6.5 6.5l1.22-1.22a2 2 0 0 1 2.11-.45c.75.31 1.55.55 2.36.68A2 2 0 0 1 22 16.92z" />
             </svg>
           </div>
 
-          <h2 className="text-sm font-bold text-white mb-0.5">
-            CareCompanion AI
-          </h2>
-          <p className="text-[10px] text-slate-400 mb-1">
-            Health check-in call
-          </p>
-          <p className="text-[10px] text-emerald-400 animate-pulse mb-8">
-            Incoming call...
-          </p>
+          <h2 className="text-sm font-bold text-white mb-0.5">CareCompanion AI</h2>
+          <p className="text-[10px] text-slate-400 mb-1">Health check-in call</p>
+          <p className="text-[10px] text-emerald-400 animate-pulse mb-8">Incoming call...</p>
 
-          {/* ElevenLabs badge */}
           <div className="flex items-center gap-1.5 px-2.5 py-1 rounded-full bg-slate-800/60 border border-slate-700/40 mb-6">
             <div className="w-3 h-3 rounded-full bg-gradient-to-br from-blue-400 to-violet-500" />
-            <span className="text-[8px] text-slate-400">
-              Powered by ElevenLabs
-            </span>
+            <span className="text-[8px] text-slate-400">Powered by ElevenLabs</span>
           </div>
 
-          {/* Accept / Decline buttons */}
           <div className="flex items-center gap-8">
             <button className="flex flex-col items-center gap-1">
               <div className="w-12 h-12 rounded-full bg-red-500/20 border border-red-500/30 flex items-center justify-center">
-                <svg
-                  width="20"
-                  height="20"
-                  viewBox="0 0 24 24"
-                  fill="none"
-                  stroke="#ef4444"
-                  strokeWidth="2"
-                  strokeLinecap="round"
-                  strokeLinejoin="round"
-                >
+                <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="#ef4444" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
                   <path d="M10.68 13.31a16 16 0 0 0 3.41 2.6l1.1-1.1a2 2 0 0 1 2.11-.45c.75.31 1.55.55 2.36.68A2 2 0 0 1 22 16.92V19a2 2 0 0 1-2.18 2A19.79 19.79 0 0 1 3 4.18 2 2 0 0 1 5 2h2.09a2 2 0 0 1 2 1.72c.13.81.37 1.61.68 2.36a2 2 0 0 1-.45 2.11L8.09 9.41" />
                   <line x1="1" y1="1" x2="23" y2="23" />
                 </svg>
@@ -636,30 +607,16 @@ export default function VoiceAgent({ patientName }: VoiceAgentProps) {
               <span className="text-[8px] text-slate-500">Decline</span>
             </button>
 
-            <button
-              onClick={acceptCall}
-              className="flex flex-col items-center gap-1"
-            >
+            <button onClick={acceptCall} className="flex flex-col items-center gap-1">
               <div
                 className="w-14 h-14 rounded-full bg-emerald-500 flex items-center justify-center shadow-lg shadow-emerald-500/30"
                 style={{ animation: "ringPulse 1.5s ease-out infinite" }}
               >
-                <svg
-                  width="24"
-                  height="24"
-                  viewBox="0 0 24 24"
-                  fill="none"
-                  stroke="white"
-                  strokeWidth="2"
-                  strokeLinecap="round"
-                  strokeLinejoin="round"
-                >
+                <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="white" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
                   <path d="M22 16.92V19a2 2 0 0 1-2.18 2A19.79 19.79 0 0 1 3 4.18 2 2 0 0 1 5 2h2.09a2 2 0 0 1 2 1.72c.13.81.37 1.61.68 2.36a2 2 0 0 1-.45 2.11L8.09 9.41a16 16 0 0 0 6.5 6.5l1.22-1.22a2 2 0 0 1 2.11-.45c.75.31 1.55.55 2.36.68A2 2 0 0 1 22 16.92z" />
                 </svg>
               </div>
-              <span className="text-[8px] text-emerald-400 font-medium">
-                Accept
-              </span>
+              <span className="text-[8px] text-emerald-400 font-medium">Accept</span>
             </button>
           </div>
         </div>
@@ -676,16 +633,7 @@ export default function VoiceAgent({ patientName }: VoiceAgentProps) {
               <div className="flex items-center gap-2">
                 <div className="relative">
                   <div className="w-6 h-6 rounded-full bg-gradient-to-br from-emerald-400 to-teal-600 flex items-center justify-center">
-                    <svg
-                      width="11"
-                      height="11"
-                      viewBox="0 0 24 24"
-                      fill="none"
-                      stroke="white"
-                      strokeWidth="2"
-                      strokeLinecap="round"
-                      strokeLinejoin="round"
-                    >
+                    <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="white" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
                       <path d="M22 16.92V19a2 2 0 0 1-2.18 2A19.79 19.79 0 0 1 3 4.18 2 2 0 0 1 5 2h2.09a2 2 0 0 1 2 1.72c.13.81.37 1.61.68 2.36a2 2 0 0 1-.45 2.11L8.09 9.41a16 16 0 0 0 6.5 6.5l1.22-1.22a2 2 0 0 1 2.11-.45c.75.31 1.55.55 2.36.68A2 2 0 0 1 22 16.92z" />
                     </svg>
                   </div>
@@ -701,30 +649,27 @@ export default function VoiceAgent({ patientName }: VoiceAgentProps) {
                   </span>
                 </div>
                 <div className="leading-tight">
-                  <div className="text-[10px] font-semibold text-white">
-                    CareCompanion AI
-                  </div>
+                  <div className="text-[10px] font-semibold text-white">CareCompanion AI</div>
                   <div className="flex items-center gap-1">
-                    <span
-                      className={`text-[8px] font-medium ${
-                        phonePhase === "call"
-                          ? "text-emerald-400"
-                          : "text-slate-500"
-                      }`}
-                    >
-                      {phonePhase === "call" ? "In call" : "Call ended"}
+                    <span className={`text-[8px] font-medium ${phonePhase === "call" ? "text-emerald-400" : "text-slate-500"}`}>
+                      {phonePhase === "call" ? (isLive ? "Live call" : "In call") : "Call ended"}
                     </span>
                     <span className="text-[8px] text-slate-600">&bull;</span>
-                    <span className="text-[8px] text-slate-400 font-mono tabular-nums">
-                      {formatTime(elapsed)}
-                    </span>
+                    <span className="text-[8px] text-slate-400 font-mono tabular-nums">{formatTime(elapsed)}</span>
                   </div>
                 </div>
               </div>
-              {/* ElevenLabs badge */}
-              <div className="flex items-center gap-1 px-1.5 py-0.5 rounded-full bg-slate-800/60 border border-slate-700/40">
-                <div className="w-2.5 h-2.5 rounded-full bg-gradient-to-br from-blue-400 to-violet-500" />
-                <span className="text-[7px] text-slate-500">ElevenLabs</span>
+              <div className="flex items-center gap-2">
+                {isLive && (
+                  <span className="flex items-center gap-1 text-[8px] text-emerald-400 font-bold uppercase bg-emerald-500/10 border border-emerald-500/30 px-1.5 py-0.5 rounded-full">
+                    <span className="w-1.5 h-1.5 rounded-full bg-emerald-400 animate-pulse" />
+                    Live
+                  </span>
+                )}
+                <div className="flex items-center gap-1 px-1.5 py-0.5 rounded-full bg-slate-800/60 border border-slate-700/40">
+                  <div className="w-2.5 h-2.5 rounded-full bg-gradient-to-br from-blue-400 to-violet-500" />
+                  <span className="text-[7px] text-slate-500">ElevenLabs</span>
+                </div>
               </div>
             </div>
           </div>
@@ -737,8 +682,19 @@ export default function VoiceAgent({ patientName }: VoiceAgentProps) {
           {/* Transcript */}
           <div className="flex-1 overflow-y-auto px-2.5 pb-2 space-y-1.5 scrollbar-hide">
             {transcript.length === 0 && phonePhase === "call" && (
-              <div className="flex items-center justify-center h-full">
-                <p className="text-[9px] text-slate-500">Listening...</p>
+              <div className="flex flex-col items-center justify-center h-full gap-2">
+                <div className="flex items-center gap-1">
+                  {[0, 1, 2].map((d) => (
+                    <span
+                      key={d}
+                      className="inline-block w-1.5 h-1.5 rounded-full bg-emerald-400"
+                      style={{ animation: `fadeIn 0.6s ease-in-out ${d * 0.15}s infinite alternate` }}
+                    />
+                  ))}
+                </div>
+                <p className="text-[9px] text-slate-500">
+                  {isLive ? "Speak into your microphone..." : "Waiting for conversation..."}
+                </p>
               </div>
             )}
 
@@ -752,16 +708,7 @@ export default function VoiceAgent({ patientName }: VoiceAgentProps) {
                 >
                   {isAi && (
                     <div className="flex-shrink-0 w-5 h-5 rounded-full bg-gradient-to-br from-emerald-400 to-teal-600 flex items-center justify-center">
-                      <svg
-                        width="9"
-                        height="9"
-                        viewBox="0 0 24 24"
-                        fill="none"
-                        stroke="white"
-                        strokeWidth="2.5"
-                        strokeLinecap="round"
-                        strokeLinejoin="round"
-                      >
+                      <svg width="9" height="9" viewBox="0 0 24 24" fill="none" stroke="white" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
                         <path d="M22 16.92V19a2 2 0 0 1-2.18 2A19.79 19.79 0 0 1 3 4.18 2 2 0 0 1 5 2h2.09" />
                       </svg>
                     </div>
@@ -773,11 +720,9 @@ export default function VoiceAgent({ patientName }: VoiceAgentProps) {
                         : "bg-emerald-600/90 text-white rounded-tr-sm"
                     }`}
                   >
-                    <div
-                      className={`text-[7px] font-bold uppercase tracking-widest mb-0.5 ${
-                        isAi ? "text-emerald-400" : "text-emerald-200"
-                      }`}
-                    >
+                    <div className={`text-[7px] font-bold uppercase tracking-widest mb-0.5 ${
+                      isAi ? "text-emerald-400" : "text-emerald-200"
+                    }`}>
                       {isAi ? "CareCompanion" : patientName}
                     </div>
                     {entry.text}
@@ -788,59 +733,58 @@ export default function VoiceAgent({ patientName }: VoiceAgentProps) {
             <div ref={chatEndRef} />
           </div>
 
-          {/* Bottom: mic + status */}
+          {/* Bottom: mic + end call */}
           <div className="flex-shrink-0 px-3 pb-3 pt-1">
-            <div className="flex flex-col items-center gap-1">
-              <button
-                className={`w-11 h-11 rounded-full flex items-center justify-center transition-all ${
-                  isListening
-                    ? "bg-red-500 shadow-lg"
-                    : aiSpeaking
-                      ? "bg-slate-700"
-                      : phonePhase === "call"
-                        ? "bg-slate-600"
-                        : "bg-slate-700/50"
-                }`}
-                style={
-                  isListening
-                    ? { animation: "micPulse 1.5s ease-out infinite" }
-                    : undefined
-                }
-                disabled={phonePhase !== "call"}
-              >
-                <svg
-                  width="16"
-                  height="16"
-                  viewBox="0 0 24 24"
-                  fill="none"
-                  stroke="currentColor"
-                  strokeWidth="2"
-                  strokeLinecap="round"
-                  strokeLinejoin="round"
-                  className={
-                    isListening
-                      ? "text-white"
-                      : aiSpeaking
-                        ? "text-slate-400"
-                        : "text-slate-300"
-                  }
+            <div className="flex items-center justify-center gap-6">
+              {/* End call button */}
+              {phonePhase === "call" && (
+                <button
+                  onClick={endCall}
+                  className="w-10 h-10 rounded-full bg-red-500 flex items-center justify-center shadow-lg shadow-red-500/30 hover:bg-red-600 transition-colors"
                 >
-                  <path d="M12 1a3 3 0 0 0-3 3v8a3 3 0 0 0 6 0V4a3 3 0 0 0-3-3z" />
-                  <path d="M19 10v2a7 7 0 0 1-14 0v-2" />
-                  <line x1="12" y1="19" x2="12" y2="23" />
-                  <line x1="8" y1="23" x2="16" y2="23" />
-                </svg>
-              </button>
-              <div className="text-[8px] text-slate-500">
-                {phonePhase === "ended" ? (
-                  "Call complete"
-                ) : aiSpeaking ? (
-                  <span className="text-emerald-400">AI speaking...</span>
-                ) : isListening ? (
-                  <span className="text-red-400">Listening...</span>
-                ) : (
-                  "Tap to speak"
-                )}
+                  <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="white" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                    <path d="M10.68 13.31a16 16 0 0 0 3.41 2.6l1.1-1.1a2 2 0 0 1 2.11-.45c.75.31 1.55.55 2.36.68A2 2 0 0 1 22 16.92V19a2 2 0 0 1-2.18 2A19.79 19.79 0 0 1 3 4.18 2 2 0 0 1 5 2h2.09a2 2 0 0 1 2 1.72c.13.81.37 1.61.68 2.36a2 2 0 0 1-.45 2.11L8.09 9.41" />
+                    <line x1="1" y1="1" x2="23" y2="23" />
+                  </svg>
+                </button>
+              )}
+
+              {/* Mic indicator */}
+              <div className="flex flex-col items-center gap-1">
+                <div
+                  className={`w-11 h-11 rounded-full flex items-center justify-center transition-all ${
+                    isListening
+                      ? "bg-red-500 shadow-lg"
+                      : aiSpeaking
+                        ? "bg-slate-700"
+                        : phonePhase === "call"
+                          ? "bg-slate-600"
+                          : "bg-slate-700/50"
+                  }`}
+                  style={isListening ? { animation: "micPulse 1.5s ease-out infinite" } : undefined}
+                >
+                  <svg
+                    width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor"
+                    strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"
+                    className={isListening ? "text-white" : aiSpeaking ? "text-slate-400" : "text-slate-300"}
+                  >
+                    <path d="M12 1a3 3 0 0 0-3 3v8a3 3 0 0 0 6 0V4a3 3 0 0 0-3-3z" />
+                    <path d="M19 10v2a7 7 0 0 1-14 0v-2" />
+                    <line x1="12" y1="19" x2="12" y2="23" />
+                    <line x1="8" y1="23" x2="16" y2="23" />
+                  </svg>
+                </div>
+                <div className="text-[8px] text-slate-500">
+                  {phonePhase === "ended" ? (
+                    "Call complete"
+                  ) : aiSpeaking ? (
+                    <span className="text-emerald-400">AI speaking...</span>
+                  ) : isListening ? (
+                    <span className="text-red-400">Listening...</span>
+                  ) : (
+                    "Connecting..."
+                  )}
+                </div>
               </div>
             </div>
           </div>

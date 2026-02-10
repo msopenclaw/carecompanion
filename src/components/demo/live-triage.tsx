@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useEffect, useRef } from "react";
+import { useState, useEffect, useRef, useMemo } from "react";
 import { useDemo } from "./demo-context";
 
 // ---------------------------------------------------------------------------
@@ -16,7 +16,7 @@ function useCountUp(target: number, durationMs = 1400): number {
     const step = (now: number) => {
       const elapsed = now - start;
       const progress = Math.min(elapsed / durationMs, 1);
-      const eased = 1 - Math.pow(1 - progress, 3);
+      const eased = 1 - Math.pow(1 - progress, 3); // cubic ease-out
       setValue(Math.round(eased * target));
       if (progress < 1) {
         frameRef.current = requestAnimationFrame(step);
@@ -32,411 +32,185 @@ function useCountUp(target: number, durationMs = 1400): number {
 }
 
 // ---------------------------------------------------------------------------
-// Relative-time formatter
+// Risk color helpers
 // ---------------------------------------------------------------------------
 
-function timeAgo(date: Date): string {
-  const seconds = Math.floor((Date.now() - date.getTime()) / 1000);
-  if (seconds < 10) return "just now";
-  if (seconds < 60) return `${seconds}s ago`;
-  const minutes = Math.floor(seconds / 60);
-  if (minutes < 60) return `${minutes} min ago`;
-  const hours = Math.floor(minutes / 60);
-  return `${hours}h ago`;
+function riskBadgeClasses(score: number): string {
+  if (score <= 30) return "bg-emerald-100 text-emerald-700 border-emerald-300";
+  if (score <= 60) return "bg-amber-100 text-amber-700 border-amber-300";
+  return "bg-red-100 text-red-700 border-red-300";
+}
+
+function riskDotColor(score: number): string {
+  if (score <= 30) return "bg-emerald-500";
+  if (score <= 60) return "bg-amber-500";
+  return "bg-red-500";
 }
 
 // ---------------------------------------------------------------------------
-// Static "already resolved" alerts for history feel
+// Patient data
 // ---------------------------------------------------------------------------
 
-const RESOLVED_ALERTS = [
+interface PatientRow {
+  name: string;
+  age: number;
+  riskIdle: number;
+  riskActive: number;
+  conditions: string;
+  vital: string;
+  lastCheckIn: string;
+}
+
+const PATIENTS: PatientRow[] = [
   {
-    id: "hist-1",
-    severity: "elevated" as const,
-    title: "Heart rate irregular, 98 bpm",
-    patientName: "James Rodriguez",
-    timestamp: new Date(Date.now() - 45 * 60_000),
-    status: "resolved" as const,
-    note: "Resolved by Dr. Patel",
+    name: "Margaret Chen",
+    age: 74,
+    riskIdle: 72,
+    riskActive: 84,
+    conditions: "HTN + T2D + CHF",
+    vital: "BP 155/95 \u2191\u2191",
+    lastCheckIn: "2 min ago",
   },
   {
-    id: "hist-2",
-    severity: "informational" as const,
-    title: "Missed evening medication dose",
-    patientName: "Dorothy Harris",
-    timestamp: new Date(Date.now() - 2 * 3600_000),
-    status: "resolved" as const,
-    note: "Patient confirmed adherence",
+    name: "James Rodriguez",
+    age: 68,
+    riskIdle: 58,
+    riskActive: 58,
+    conditions: "CHF + HTN",
+    vital: "Wt +2.1 lbs \u2191",
+    lastCheckIn: "18 min ago",
   },
   {
-    id: "hist-3",
-    severity: "elevated" as const,
-    title: "Weight gain +2 lbs in 3 days",
-    patientName: "Robert Kim",
-    timestamp: new Date(Date.now() - 4 * 3600_000),
-    status: "resolved" as const,
-    note: "Dietary counseling completed",
+    name: "Walter Brooks",
+    age: 83,
+    riskIdle: 51,
+    riskActive: 51,
+    conditions: "CHF + COPD",
+    vital: "HR 88 \u2191",
+    lastCheckIn: "35 min ago",
   },
   {
-    id: "hist-4",
-    severity: "informational" as const,
-    title: "SpO2 reading 91% - single occurrence",
-    patientName: "Helen Murray",
-    timestamp: new Date(Date.now() - 6 * 3600_000),
-    status: "resolved" as const,
-    note: "Subsequent readings normal",
+    name: "Robert Kim",
+    age: 81,
+    riskIdle: 45,
+    riskActive: 45,
+    conditions: "COPD + HTN",
+    vital: "SpO2 93% \u2192",
+    lastCheckIn: "1h ago",
+  },
+  {
+    name: "Helen Murray",
+    age: 77,
+    riskIdle: 38,
+    riskActive: 38,
+    conditions: "HTN",
+    vital: "BP 138/88 \u2192",
+    lastCheckIn: "1h ago",
+  },
+  {
+    name: "Aisha Patel",
+    age: 45,
+    riskIdle: 28,
+    riskActive: 28,
+    conditions: "HTN",
+    vital: "BP 134/86 \u2192",
+    lastCheckIn: "2h ago",
+  },
+  {
+    name: "Dorothy Harris",
+    age: 70,
+    riskIdle: 22,
+    riskActive: 22,
+    conditions: "T2D",
+    vital: "Glucose 112 \u2713",
+    lastCheckIn: "3h ago",
+  },
+  {
+    name: "Sarah Williams",
+    age: 52,
+    riskIdle: 15,
+    riskActive: 15,
+    conditions: "T2D",
+    vital: "Glucose 98 \u2713",
+    lastCheckIn: "4h ago",
   },
 ];
 
 // ---------------------------------------------------------------------------
-// Stats bar
+// AI insight data
 // ---------------------------------------------------------------------------
 
-function StatsBar({
-  isActive,
-  flaggedCount,
-  escalatedCount,
-}: {
-  isActive: boolean;
-  flaggedCount: number;
-  escalatedCount: number;
-}) {
-  const monitored = useCountUp(isActive ? 1247 : 0, 1400);
-  const aiHandled = useCountUp(isActive ? 1180 : 0, 1600);
-
-  return (
-    <div className="flex gap-1.5 px-3 py-2">
-      {/* Monitored */}
-      <div
-        className={`flex-1 flex flex-col items-center rounded-md px-2 py-1.5 ${
-          isActive ? "bg-white border border-slate-200" : "bg-slate-50 border border-slate-100"
-        }`}
-      >
-        <span className="text-[11px] uppercase tracking-wider text-slate-400 font-medium leading-none">
-          Monitored
-        </span>
-        <span
-          className={`text-[15px] font-bold tabular-nums leading-tight ${
-            isActive ? "text-slate-800" : "text-slate-300"
-          }`}
-        >
-          {isActive ? monitored.toLocaleString() : "0"}
-        </span>
-      </div>
-
-      {/* AI-handled */}
-      <div
-        className={`flex-1 flex flex-col items-center rounded-md px-2 py-1.5 ${
-          isActive
-            ? "bg-emerald-50 border border-emerald-200"
-            : "bg-slate-50 border border-slate-100"
-        }`}
-      >
-        <span
-          className={`text-[11px] uppercase tracking-wider font-medium leading-none ${
-            isActive ? "text-emerald-600" : "text-slate-400"
-          }`}
-        >
-          AI-Handled
-        </span>
-        <span
-          className={`text-[15px] font-bold tabular-nums leading-tight ${
-            isActive ? "text-emerald-700" : "text-slate-300"
-          }`}
-        >
-          {isActive ? aiHandled.toLocaleString() : "0"}
-        </span>
-      </div>
-
-      {/* Flagged */}
-      <div
-        className={`flex-1 flex flex-col items-center rounded-md px-2 py-1.5 ${
-          isActive && flaggedCount > 0
-            ? "bg-amber-50 border border-amber-200"
-            : "bg-slate-50 border border-slate-100"
-        }`}
-      >
-        <span
-          className={`text-[11px] uppercase tracking-wider font-medium leading-none ${
-            isActive && flaggedCount > 0 ? "text-amber-600" : "text-slate-400"
-          }`}
-        >
-          Flagged
-        </span>
-        <span
-          className={`text-[15px] font-bold tabular-nums leading-tight ${
-            isActive && flaggedCount > 0 ? "text-amber-700" : "text-slate-300"
-          }`}
-        >
-          {isActive ? flaggedCount : "0"}
-        </span>
-      </div>
-
-      {/* Escalated */}
-      <div
-        className={`flex-1 flex flex-col items-center rounded-md px-2 py-1.5 ${
-          isActive && escalatedCount > 0
-            ? "bg-red-50 border border-red-200"
-            : "bg-slate-50 border border-slate-100"
-        }`}
-      >
-        <span
-          className={`text-[11px] uppercase tracking-wider font-medium leading-none ${
-            isActive && escalatedCount > 0 ? "text-red-600" : "text-slate-400"
-          }`}
-        >
-          Escalated
-        </span>
-        <span
-          className={`text-[15px] font-bold tabular-nums leading-tight ${
-            isActive && escalatedCount > 0 ? "text-red-700" : "text-slate-300"
-          }`}
-        >
-          {isActive ? escalatedCount : "0"}
-        </span>
-      </div>
-    </div>
-  );
-}
-
-// ---------------------------------------------------------------------------
-// Severity badge
-// ---------------------------------------------------------------------------
-
-function SeverityBadge({ severity }: { severity: "critical" | "elevated" | "informational" }) {
-  const config = {
-    critical: {
-      bg: "bg-red-100 border-red-300 text-red-700",
-      label: "Critical",
-    },
-    elevated: {
-      bg: "bg-amber-100 border-amber-300 text-amber-700",
-      label: "Elevated",
-    },
-    informational: {
-      bg: "bg-slate-100 border-slate-300 text-slate-600",
-      label: "Info",
-    },
-  };
-  const c = config[severity];
-  return (
-    <span
-      className={`inline-flex items-center text-[11px] font-bold uppercase tracking-wider px-1.5 py-0.5 rounded border ${c.bg}`}
-    >
-      {c.label}
-    </span>
-  );
-}
-
-// ---------------------------------------------------------------------------
-// Alert card
-// ---------------------------------------------------------------------------
-
-function AlertCard({
-  alert,
-  isNew,
-  isResolved,
-}: {
-  alert: {
-    id: string;
-    severity: "critical" | "elevated" | "informational";
-    title: string;
-    patientName: string;
-    timestamp: Date;
-    status: string;
-    note?: string;
-  };
-  isNew: boolean;
-  isResolved?: boolean;
-}) {
-  const borderColor =
-    alert.severity === "critical"
-      ? "border-l-red-500"
-      : alert.severity === "elevated"
-        ? "border-l-amber-400"
-        : "border-l-slate-300";
-
-  return (
-    <div
-      className={`border-l-[3px] ${borderColor} rounded-r-md bg-white border border-slate-200 px-2.5 py-2 ${
-        isResolved ? "opacity-45" : ""
-      }`}
-      style={
-        isNew
-          ? {
-              animation: "alertSlideIn 0.4s ease-out both",
-            }
-          : undefined
-      }
-    >
-      <div className="flex items-start justify-between gap-2">
-        <div className="flex-1 min-w-0">
-          <div className="flex items-center gap-1.5 mb-0.5">
-            <SeverityBadge severity={alert.severity} />
-            {isResolved && (
-              <span className="text-[11px] font-medium text-emerald-600 bg-emerald-50 border border-emerald-200 rounded px-1 py-px">
-                Resolved
-              </span>
-            )}
-          </div>
-          <p className="text-[13px] font-semibold text-slate-800 leading-tight">
-            {alert.patientName}
-          </p>
-          <p className="text-[12px] text-slate-500 leading-tight mt-0.5">
-            {alert.title}
-          </p>
-          {isResolved && alert.note && (
-            <p className="text-[11px] text-slate-400 italic mt-0.5">{alert.note}</p>
-          )}
-        </div>
-        <span className="text-[11px] text-slate-400 whitespace-nowrap flex-shrink-0">
-          {timeAgo(alert.timestamp)}
-        </span>
-      </div>
-    </div>
-  );
-}
-
-// ---------------------------------------------------------------------------
-// Chat bubble for transcript
-// ---------------------------------------------------------------------------
-
-function ChatBubble({
-  speaker,
-  text,
-  isNew,
-}: {
-  speaker: "ai" | "patient";
+interface InsightCard {
+  id: string;
+  severity: "info" | "elevated" | "positive";
   text: string;
-  isNew: boolean;
-}) {
-  const isAi = speaker === "ai";
-  return (
-    <div
-      className={`flex ${isAi ? "justify-start" : "justify-end"}`}
-      style={
-        isNew
-          ? { animation: "alertSlideIn 0.35s ease-out both" }
-          : undefined
-      }
-    >
-      <div
-        className={`max-w-[88%] rounded-lg px-2.5 py-1.5 text-[12px] leading-[1.5] ${
-          isAi
-            ? "bg-blue-50 border border-blue-200 text-slate-700 rounded-tl-sm"
-            : "bg-slate-100 border border-slate-200 text-slate-700 rounded-tr-sm"
-        }`}
-      >
-        <span
-          className={`block text-[10px] font-bold uppercase tracking-widest mb-0.5 ${
-            isAi ? "text-blue-500" : "text-slate-400"
-          }`}
-        >
-          {isAi ? "CareCompanion AI" : "Patient"}
-        </span>
-        {text}
-      </div>
-    </div>
-  );
+  timestamp: string;
+  showOnlyWhenActive?: boolean;
 }
 
+const AI_INSIGHTS: InsightCard[] = [
+  {
+    id: "insight-1",
+    severity: "info",
+    text: "4 patients showing weight gain + BP elevation pattern (possible fluid retention cluster)",
+    timestamp: "12 min ago",
+  },
+  {
+    id: "insight-2",
+    severity: "elevated",
+    text: "Margaret Chen: BP trending up 3 days, correlates with 2 missed lisinopril doses",
+    timestamp: "Just now",
+    showOnlyWhenActive: true,
+  },
+  {
+    id: "insight-3",
+    severity: "elevated",
+    text: "James Rodriguez: CHF composite alert \u2014 weight gain + HR elevation detected",
+    timestamp: "18 min ago",
+  },
+  {
+    id: "insight-4",
+    severity: "positive",
+    text: "Population adherence: 94.2% this week, up from 91.8% last week",
+    timestamp: "1h ago",
+  },
+];
+
 // ---------------------------------------------------------------------------
-// Billing predictor widget
+// Insight severity styling
 // ---------------------------------------------------------------------------
 
-function BillingWidget({
-  billingMinutes,
-  billingEvents,
-  isActive,
-}: {
-  billingMinutes: number;
-  billingEvents: {
-    code: string;
-    description: string;
-    unlocked: boolean;
-    timestamp: Date;
-  }[];
-  isActive: boolean;
-}) {
-  const goalMinutes = 20;
-  const pct = isActive ? Math.min(Math.round((billingMinutes / goalMinutes) * 100), 100) : 0;
-  const remaining = Math.max(goalMinutes - billingMinutes, 0);
+function insightBorderColor(severity: InsightCard["severity"]): string {
+  switch (severity) {
+    case "info":
+      return "border-l-blue-400";
+    case "elevated":
+      return "border-l-amber-500";
+    case "positive":
+      return "border-l-emerald-500";
+  }
+}
 
-  const cpt99457 = billingEvents.find((e) => e.code === "99457");
+function insightLabelColor(severity: InsightCard["severity"]): string {
+  switch (severity) {
+    case "info":
+      return "text-blue-600";
+    case "elevated":
+      return "text-amber-600";
+    case "positive":
+      return "text-emerald-600";
+  }
+}
 
-  return (
-    <div className="border-t border-slate-200 bg-slate-50 px-3 py-2">
-      <div className="flex items-center justify-between mb-1">
-        <span className="text-[11px] font-semibold uppercase tracking-wider text-slate-500">
-          Billing Predictor
-        </span>
-        <span className="text-[11px] font-medium text-slate-400">
-          CPT 99457 ($52)
-        </span>
-      </div>
-
-      {/* Progress bar */}
-      <div className="flex items-center gap-2 mb-1">
-        <div className="flex-1 h-2 bg-slate-200 rounded-full overflow-hidden">
-          <div
-            className="h-full rounded-full bg-gradient-to-r from-blue-500 to-blue-400 transition-all duration-700 ease-out"
-            style={{ width: `${pct}%` }}
-          />
-        </div>
-        <span className="text-[12px] font-bold text-slate-700 tabular-nums whitespace-nowrap">
-          {isActive ? billingMinutes : 0}/{goalMinutes} min
-        </span>
-      </div>
-
-      {/* CPT codes row */}
-      <div className="flex items-center gap-1.5 flex-wrap">
-        {billingEvents.map((evt) => (
-          <span
-            key={evt.code}
-            className={`inline-flex items-center gap-0.5 text-[11px] font-medium rounded px-1.5 py-0.5 border transition-all duration-300 ${
-              evt.unlocked
-                ? "bg-emerald-50 border-emerald-300 text-emerald-700"
-                : "bg-slate-50 border-slate-200 text-slate-400"
-            }`}
-          >
-            {evt.unlocked && (
-              <svg
-                width="8"
-                height="8"
-                viewBox="0 0 24 24"
-                fill="none"
-                stroke="currentColor"
-                strokeWidth="3"
-                strokeLinecap="round"
-                strokeLinejoin="round"
-              >
-                <path d="M20 6L9 17l-5-5" />
-              </svg>
-            )}
-            {evt.code}
-          </span>
-        ))}
-        {!isActive && (
-          <span className="text-[11px] text-slate-400 italic">
-            Start demo to track billing
-          </span>
-        )}
-      </div>
-
-      {isActive && remaining > 0 && (
-        <p className="text-[11px] text-slate-500 mt-1">
-          <span className="text-amber-600 font-semibold">{remaining} more min</span> to
-          unlock CPT 99457{" "}
-          <span className="text-emerald-600 font-semibold">($52)</span>
-        </p>
-      )}
-      {isActive && cpt99457?.unlocked && (
-        <p className="text-[11px] text-emerald-600 font-semibold mt-1">
-          CPT 99457 unlocked - $52 billable
-        </p>
-      )}
-    </div>
-  );
+function insightLabel(severity: InsightCard["severity"]): string {
+  switch (severity) {
+    case "info":
+      return "Pattern";
+    case "elevated":
+      return "Alert";
+    case "positive":
+      return "Trend";
+  }
 }
 
 // ---------------------------------------------------------------------------
@@ -444,75 +218,77 @@ function BillingWidget({
 // ---------------------------------------------------------------------------
 
 export function LiveTriage() {
-  const { demoPhase, transcript, alerts, billingMinutes, billingEvents, logs } =
-    useDemo();
+  const { demoPhase, alerts } = useDemo();
 
-  const isActive = demoPhase !== "idle";
-  const transcriptEndRef = useRef<HTMLDivElement>(null);
-  const alertFeedRef = useRef<HTMLDivElement>(null);
+  const isActive = demoPhase === "active" || demoPhase === "complete";
+  const isLive = demoPhase === "active";
 
-  // Track which transcript/alert IDs are "new" for entrance animation
-  const [seenTranscriptCount, setSeenTranscriptCount] = useState(0);
-  const [seenAlertIds, setSeenAlertIds] = useState<Set<string>>(new Set());
+  // Animated counters
+  const readingsToday = useCountUp(847, 1200);
+  const aiProcessed = useCountUp(835, 1400);
 
-  // Detect new entries for animation tracking
-  useEffect(() => {
-    if (transcript.length > seenTranscriptCount) {
-      const timer = setTimeout(
-        () => setSeenTranscriptCount(transcript.length),
-        500
-      );
-      return () => clearTimeout(timer);
-    }
-  }, [transcript.length, seenTranscriptCount]);
-
-  useEffect(() => {
-    if (alerts.length > seenAlertIds.size) {
-      const timer = setTimeout(() => {
-        setSeenAlertIds(new Set(alerts.map((a) => a.id)));
-      }, 500);
-      return () => clearTimeout(timer);
-    }
-  }, [alerts, seenAlertIds.size]);
-
-  // Auto-scroll transcript
-  useEffect(() => {
-    transcriptEndRef.current?.scrollIntoView({ behavior: "smooth" });
-  }, [transcript.length]);
-
-  // Count alerts by type
-  const flaggedCount = alerts.filter(
-    (a) => a.severity === "elevated" || a.severity === "informational"
-  ).length;
-  const escalatedCount = alerts.filter(
+  // Track urgent count — starts at 3, can increment with live alerts
+  const baseUrgent = 3;
+  const criticalAlertCount = alerts.filter(
     (a) => a.severity === "critical"
   ).length;
+  const urgentCount = baseUrgent + criticalAlertCount;
 
-  // Check for EHR log entry for "drafting note" animation
-  const hasEhrLog = logs.some(
-    (l) =>
-      typeof l === "object" &&
-      l !== null &&
-      ("type" in l ? (l as { type?: string }).type === "ehr" : false)
+  // Sort patients by risk score descending
+  const sortedPatients = useMemo(() => {
+    return [...PATIENTS].sort((a, b) => {
+      const aScore = isActive ? a.riskActive : a.riskIdle;
+      const bScore = isActive ? b.riskActive : b.riskIdle;
+      return bScore - aScore;
+    });
+  }, [isActive]);
+
+  // Margaret highlight state — pulse when active and alerts exist
+  const [margaretPulse, setMargaretPulse] = useState(false);
+  useEffect(() => {
+    if (isActive && alerts.length > 0) {
+      setMargaretPulse(true);
+      const timer = setTimeout(() => setMargaretPulse(false), 3000);
+      return () => clearTimeout(timer);
+    }
+  }, [isActive, alerts.length]);
+
+  // Insight card entrance tracking
+  const [insightMounted, setInsightMounted] = useState(false);
+  useEffect(() => {
+    const timer = setTimeout(() => setInsightMounted(true), 400);
+    return () => clearTimeout(timer);
+  }, []);
+
+  // Visible insights
+  const visibleInsights = AI_INSIGHTS.filter(
+    (i) => !i.showOnlyWhenActive || isActive
   );
-  const showDraftingNote =
-    isActive &&
-    !hasEhrLog &&
-    transcript.length >= 3 &&
-    demoPhase !== "complete";
-  const showDraftedNote = demoPhase === "complete" || hasEhrLog;
 
   return (
     <div className="flex flex-col h-full w-full bg-white text-slate-800 font-sans select-none overflow-hidden">
       {/* Keyframes */}
       <style>{`
-        @keyframes alertSlideIn {
-          0% { opacity: 0; transform: translateY(12px); }
+        @keyframes fadeSlideIn {
+          0% { opacity: 0; transform: translateY(8px); }
           100% { opacity: 1; transform: translateY(0); }
         }
-        @keyframes notePulse {
-          0%, 100% { opacity: 0.5; }
-          50% { opacity: 1; }
+        @keyframes rowPulse {
+          0%, 100% { background-color: transparent; }
+          50% { background-color: rgb(254 226 226 / 0.6); }
+        }
+        @keyframes livePing {
+          0% { transform: scale(1); opacity: 1; }
+          75% { transform: scale(2.2); opacity: 0; }
+          100% { transform: scale(2.2); opacity: 0; }
+        }
+        @keyframes insightHighlight {
+          0% { background-color: rgb(254 243 199 / 0.8); }
+          100% { background-color: transparent; }
+        }
+        @keyframes countIn {
+          0% { opacity: 0; transform: scale(0.8); }
+          100% { opacity: 1; transform: scale(1); }
         }
         .scrollbar-thin::-webkit-scrollbar { width: 3px; }
         .scrollbar-thin::-webkit-scrollbar-track { background: transparent; }
@@ -521,41 +297,53 @@ export function LiveTriage() {
       `}</style>
 
       {/* ------------------------------------------------------------------ */}
-      {/* Header                                                             */}
+      {/* 1. Header                                                          */}
       {/* ------------------------------------------------------------------ */}
       <div className="flex items-center justify-between px-3 py-2 border-b border-slate-200 bg-white flex-shrink-0">
         <div className="flex items-center gap-2">
           <div className="flex items-center justify-center w-6 h-6 rounded-md bg-gradient-to-br from-blue-500 to-indigo-600">
             <svg
-              className="w-3 h-3 text-white"
+              className="w-3.5 h-3.5 text-white"
               fill="none"
               viewBox="0 0 24 24"
               stroke="currentColor"
-              strokeWidth={2.5}
+              strokeWidth={2}
             >
               <path
                 strokeLinecap="round"
                 strokeLinejoin="round"
-                d="M4.5 12.75l6 6 9-13.5"
+                d="M3 13.125C3 12.504 3.504 12 4.125 12h2.25c.621 0 1.125.504 1.125 1.125v6.75C7.5 20.496 6.996 21 6.375 21h-2.25A1.125 1.125 0 013 19.875v-6.75zM9.75 8.625c0-.621.504-1.125 1.125-1.125h2.25c.621 0 1.125.504 1.125 1.125v11.25c0 .621-.504 1.125-1.125 1.125h-2.25a1.125 1.125 0 01-1.125-1.125V8.625zM16.5 4.125c0-.621.504-1.125 1.125-1.125h2.25C20.496 3 21 3.504 21 4.125v15.75c0 .621-.504 1.125-1.125 1.125h-2.25a1.125 1.125 0 01-1.125-1.125V4.125z"
               />
             </svg>
           </div>
           <div className="leading-none">
             <h1 className="text-[13px] font-bold text-slate-800 tracking-tight">
-              Clinician Triage
+              Population Health Dashboard
             </h1>
-            <p className="text-[11px] text-slate-400 mt-0.5">CareCompanion AI</p>
+            <p className="text-[11px] text-slate-400 mt-0.5">
+              CareCompanion AI
+            </p>
           </div>
         </div>
         <div className="flex items-center gap-1.5">
-          {isActive && (
+          {isLive ? (
             <>
               <span className="relative flex h-1.5 w-1.5">
-                <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-emerald-400 opacity-75" />
+                <span
+                  className="absolute inline-flex h-full w-full rounded-full bg-emerald-400"
+                  style={{ animation: "livePing 1.5s cubic-bezier(0,0,0.2,1) infinite" }}
+                />
                 <span className="relative inline-flex rounded-full h-1.5 w-1.5 bg-emerald-500" />
               </span>
               <span className="text-[11px] text-emerald-600 font-semibold uppercase tracking-wide">
                 Live
+              </span>
+            </>
+          ) : (
+            <>
+              <span className="relative inline-flex rounded-full h-1.5 w-1.5 bg-emerald-500" />
+              <span className="text-[11px] text-emerald-600 font-semibold uppercase tracking-wide">
+                Monitoring
               </span>
             </>
           )}
@@ -563,251 +351,306 @@ export function LiveTriage() {
       </div>
 
       {/* ------------------------------------------------------------------ */}
-      {/* Stats bar                                                          */}
+      {/* 2. Summary Stats Bar                                               */}
       {/* ------------------------------------------------------------------ */}
-      <StatsBar
-        isActive={isActive}
-        flaggedCount={flaggedCount}
-        escalatedCount={escalatedCount}
-      />
-
-      {/* ------------------------------------------------------------------ */}
-      {/* Idle state                                                         */}
-      {/* ------------------------------------------------------------------ */}
-      {demoPhase === "idle" && (
-        <div className="flex-1 flex items-center justify-center px-6">
-          <div className="text-center">
-            <div className="w-10 h-10 rounded-full bg-slate-100 flex items-center justify-center mx-auto mb-3">
-              <svg
-                width="20"
-                height="20"
-                viewBox="0 0 24 24"
-                fill="none"
-                stroke="#94a3b8"
-                strokeWidth="1.5"
-                strokeLinecap="round"
-                strokeLinejoin="round"
-              >
-                <path d="M22 16.92V19a2 2 0 0 1-2.18 2A19.79 19.79 0 0 1 3 4.18 2 2 0 0 1 5 2h2.09a2 2 0 0 1 2 1.72c.13.81.37 1.61.68 2.36a2 2 0 0 1-.45 2.11L8.09 9.41a16 16 0 0 0 6.5 6.5l1.22-1.22a2 2 0 0 1 2.11-.45c.75.31 1.55.55 2.36.68A2 2 0 0 1 22 16.92z" />
-              </svg>
-            </div>
-            <p className="text-[13px] text-slate-400 font-medium">
-              Start the demo to see real-time clinical triage
-            </p>
-            <p className="text-[11px] text-slate-300 mt-1">
-              Alerts, transcripts, and billing will appear here
-            </p>
-          </div>
+      <div className="flex gap-1.5 px-3 py-2 flex-shrink-0">
+        {/* Readings Today */}
+        <div className="flex-1 flex flex-col items-center rounded-md px-2 py-1.5 bg-white border border-slate-200">
+          <span className="text-[11px] uppercase tracking-wider text-slate-400 font-medium leading-none">
+            Readings Today
+          </span>
+          <span className="text-[15px] font-bold tabular-nums leading-tight text-slate-800">
+            {readingsToday.toLocaleString()}
+          </span>
         </div>
-      )}
 
-      {/* ------------------------------------------------------------------ */}
-      {/* Active content: Two-column layout                                  */}
-      {/* ------------------------------------------------------------------ */}
-      {isActive && (
-        <div className="flex-1 flex min-h-0 overflow-hidden">
-          {/* LEFT COLUMN (60%): Alert feed */}
-          <div
-            ref={alertFeedRef}
-            className="w-[60%] border-r border-slate-200 overflow-y-auto px-2.5 py-2 space-y-1.5 scrollbar-thin"
+        {/* AI-Processed */}
+        <div className="flex-1 flex flex-col items-center rounded-md px-2 py-1.5 bg-emerald-50 border border-emerald-200">
+          <span className="text-[11px] uppercase tracking-wider font-medium leading-none text-emerald-600">
+            AI-Processed
+          </span>
+          <span className="text-[15px] font-bold tabular-nums leading-tight text-emerald-700">
+            {aiProcessed.toLocaleString()}
+          </span>
+          <span className="text-[10px] text-emerald-500 font-medium leading-none mt-0.5">
+            98.6%
+          </span>
+        </div>
+
+        {/* Needs Review */}
+        <div className="flex-1 flex flex-col items-center rounded-md px-2 py-1.5 bg-amber-50 border border-amber-200">
+          <span className="text-[11px] uppercase tracking-wider font-medium leading-none text-amber-600">
+            Needs Review
+          </span>
+          <span className="text-[15px] font-bold tabular-nums leading-tight text-amber-700">
+            12
+          </span>
+        </div>
+
+        {/* Urgent */}
+        <div className="flex-1 flex flex-col items-center rounded-md px-2 py-1.5 bg-red-50 border border-red-200">
+          <span className="text-[11px] uppercase tracking-wider font-medium leading-none text-red-600">
+            Urgent
+          </span>
+          <span
+            className="text-[15px] font-bold tabular-nums leading-tight text-red-700"
+            style={
+              urgentCount > baseUrgent
+                ? { animation: "countIn 0.3s ease-out" }
+                : undefined
+            }
+            key={urgentCount}
           >
-            <div className="flex items-center gap-1 mb-1">
-              <svg
-                width="10"
-                height="10"
-                viewBox="0 0 24 24"
-                fill="none"
-                stroke="#ef4444"
-                strokeWidth="2.5"
-                strokeLinecap="round"
-                strokeLinejoin="round"
-              >
-                <path d="M10.29 3.86L1.82 18a2 2 0 0 0 1.71 3h16.94a2 2 0 0 0 1.71-3L13.71 3.86a2 2 0 0 0-3.42 0z" />
-                <line x1="12" y1="9" x2="12" y2="13" />
-                <line x1="12" y1="17" x2="12.01" y2="17" />
-              </svg>
-              <span className="text-[11px] font-bold uppercase tracking-wider text-slate-500">
-                Patient Alerts
-              </span>
-              {alerts.length > 0 && (
-                <span className="text-[11px] font-bold text-red-500 bg-red-50 rounded-full px-1.5 py-px border border-red-200">
-                  {alerts.length}
-                </span>
-              )}
-            </div>
+            {urgentCount}
+          </span>
+        </div>
+      </div>
 
-            {/* Live alerts */}
-            {alerts.map((alert) => (
-              <AlertCard
-                key={alert.id}
-                alert={alert}
-                isNew={!seenAlertIds.has(alert.id)}
-              />
-            ))}
-
-            {/* Connecting state placeholder */}
-            {demoPhase === "connecting" && alerts.length === 0 && (
-              <div className="flex items-center gap-2 py-4 justify-center">
-                <span className="inline-block w-1.5 h-1.5 rounded-full bg-blue-400 animate-pulse" />
-                <span className="text-[12px] text-slate-400">
-                  Connecting to patient monitoring...
-                </span>
-              </div>
-            )}
-
-            {/* Divider before history */}
-            {alerts.length > 0 && (
-              <div className="flex items-center gap-2 py-1.5">
-                <div className="flex-1 border-t border-slate-200" />
-                <span className="text-[10px] uppercase tracking-wider text-slate-400 font-medium">
-                  Earlier
-                </span>
-                <div className="flex-1 border-t border-slate-200" />
-              </div>
-            )}
-
-            {/* Static resolved alerts */}
-            {RESOLVED_ALERTS.map((alert) => (
-              <AlertCard
-                key={alert.id}
-                alert={alert}
-                isNew={false}
-                isResolved
-              />
-            ))}
+      {/* ------------------------------------------------------------------ */}
+      {/* Scrollable content area                                            */}
+      {/* ------------------------------------------------------------------ */}
+      <div className="flex-1 min-h-0 overflow-y-auto scrollbar-thin">
+        {/* ---------------------------------------------------------------- */}
+        {/* 3. Patient Risk Grid                                             */}
+        {/* ---------------------------------------------------------------- */}
+        <div className="px-3 pb-2">
+          <div className="flex items-center gap-1.5 mb-1.5">
+            <svg
+              width="10"
+              height="10"
+              viewBox="0 0 24 24"
+              fill="none"
+              stroke="#64748b"
+              strokeWidth="2.5"
+              strokeLinecap="round"
+              strokeLinejoin="round"
+            >
+              <path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2" />
+              <circle cx="9" cy="7" r="4" />
+              <path d="M23 21v-2a4 4 0 0 0-3-3.87" />
+              <path d="M16 3.13a4 4 0 0 1 0 7.75" />
+            </svg>
+            <span className="text-[11px] font-bold uppercase tracking-wider text-slate-500">
+              Patient Risk Grid
+            </span>
+            <span className="text-[10px] text-slate-400 ml-auto">
+              {PATIENTS.length} active patients
+            </span>
           </div>
 
-          {/* RIGHT COLUMN (40%): Transcript monitor */}
-          <div className="w-[40%] flex flex-col overflow-hidden">
-            <div className="flex items-center gap-1.5 px-2.5 py-1.5 border-b border-slate-200 flex-shrink-0">
-              <svg
-                width="10"
-                height="10"
-                viewBox="0 0 24 24"
-                fill="none"
-                stroke="#3b82f6"
-                strokeWidth="2"
-                strokeLinecap="round"
-                strokeLinejoin="round"
+          {/* Table header */}
+          <div className="grid grid-cols-[14px_1fr_32px_48px_1fr_1fr_64px] gap-x-1.5 items-center px-1.5 py-1 border-b border-slate-200">
+            <span className="text-[10px] font-medium text-slate-400"></span>
+            <span className="text-[10px] font-medium text-slate-400 uppercase tracking-wider">
+              Patient
+            </span>
+            <span className="text-[10px] font-medium text-slate-400 uppercase tracking-wider">
+              Age
+            </span>
+            <span className="text-[10px] font-medium text-slate-400 uppercase tracking-wider">
+              Risk
+            </span>
+            <span className="text-[10px] font-medium text-slate-400 uppercase tracking-wider">
+              Conditions
+            </span>
+            <span className="text-[10px] font-medium text-slate-400 uppercase tracking-wider">
+              Latest Vital
+            </span>
+            <span className="text-[10px] font-medium text-slate-400 uppercase tracking-wider text-right">
+              AI Check-in
+            </span>
+          </div>
+
+          {/* Patient rows */}
+          {sortedPatients.map((patient) => {
+            const risk = isActive ? patient.riskActive : patient.riskIdle;
+            const isMargaret = patient.name === "Margaret Chen";
+            const shouldPulse = isMargaret && margaretPulse;
+
+            return (
+              <div
+                key={patient.name}
+                className={`grid grid-cols-[14px_1fr_32px_48px_1fr_1fr_64px] gap-x-1.5 items-center px-1.5 py-[5px] border-b border-slate-100 ${
+                  isMargaret && isActive ? "bg-red-50/40" : ""
+                }`}
+                style={
+                  shouldPulse
+                    ? { animation: "rowPulse 1.5s ease-in-out 3" }
+                    : undefined
+                }
               >
-                <path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z" />
-              </svg>
-              <span className="text-[11px] font-bold uppercase tracking-wider text-slate-500">
-                Live AI Transcript
-              </span>
-              {transcript.length > 0 && (
-                <span className="relative flex h-1.5 w-1.5 ml-auto">
-                  <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-blue-400 opacity-75" />
-                  <span className="relative inline-flex rounded-full h-1.5 w-1.5 bg-blue-500" />
+                {/* Status dot */}
+                <div className="flex items-center justify-center">
+                  <span
+                    className={`inline-block w-[7px] h-[7px] rounded-full ${riskDotColor(risk)}`}
+                  />
+                </div>
+
+                {/* Name */}
+                <span
+                  className={`text-[12px] font-medium truncate ${
+                    isMargaret && isActive
+                      ? "text-red-700 font-semibold"
+                      : "text-slate-700"
+                  }`}
+                >
+                  {patient.name}
                 </span>
-              )}
-            </div>
 
-            <div className="flex-1 overflow-y-auto px-2 py-2 space-y-1.5 scrollbar-thin">
-              {transcript.length === 0 && (
-                <div className="flex items-center justify-center h-full">
-                  <span className="text-[11px] text-slate-300 italic">
-                    Waiting for conversation...
-                  </span>
-                </div>
-              )}
+                {/* Age */}
+                <span className="text-[12px] text-slate-500 tabular-nums">
+                  {patient.age}
+                </span>
 
-              {transcript.map((entry, idx) => (
-                <ChatBubble
-                  key={idx}
-                  speaker={entry.speaker}
-                  text={entry.text}
-                  isNew={idx >= seenTranscriptCount}
+                {/* Risk badge */}
+                <span
+                  className={`inline-flex items-center justify-center text-[11px] font-bold rounded px-1 py-px border tabular-nums ${riskBadgeClasses(risk)}`}
+                  key={risk}
+                  style={
+                    isMargaret && isActive && risk !== patient.riskIdle
+                      ? { animation: "countIn 0.4s ease-out" }
+                      : undefined
+                  }
+                >
+                  {risk}
+                </span>
+
+                {/* Conditions */}
+                <span className="text-[11px] text-slate-500 truncate">
+                  {patient.conditions}
+                </span>
+
+                {/* Latest vital */}
+                <span
+                  className={`text-[11px] font-medium truncate ${
+                    patient.vital.includes("\u2191\u2191")
+                      ? "text-red-600"
+                      : patient.vital.includes("\u2191")
+                        ? "text-amber-600"
+                        : patient.vital.includes("\u2713")
+                          ? "text-emerald-600"
+                          : "text-slate-500"
+                  }`}
+                >
+                  {patient.vital}
+                </span>
+
+                {/* Last AI check-in */}
+                <span className="text-[10px] text-slate-400 text-right whitespace-nowrap">
+                  {isMargaret && isActive ? "Just now" : patient.lastCheckIn}
+                </span>
+              </div>
+            );
+          })}
+        </div>
+
+        {/* ---------------------------------------------------------------- */}
+        {/* 4. AI Pattern Detection Feed                                     */}
+        {/* ---------------------------------------------------------------- */}
+        <div className="px-3 pb-2 pt-1">
+          <div className="flex items-center gap-1.5 mb-1.5">
+            <svg
+              width="10"
+              height="10"
+              viewBox="0 0 24 24"
+              fill="none"
+              stroke="#6366f1"
+              strokeWidth="2.5"
+              strokeLinecap="round"
+              strokeLinejoin="round"
+            >
+              <circle cx="12" cy="12" r="10" />
+              <path d="M12 16v-4" />
+              <path d="M12 8h.01" />
+            </svg>
+            <span className="text-[11px] font-bold uppercase tracking-wider text-slate-500">
+              AI Pattern Detection
+            </span>
+            {isActive && (
+              <span className="relative flex h-1.5 w-1.5 ml-1">
+                <span
+                  className="absolute inline-flex h-full w-full rounded-full bg-indigo-400"
+                  style={{ animation: "livePing 1.5s cubic-bezier(0,0,0.2,1) infinite" }}
                 />
-              ))}
+                <span className="relative inline-flex rounded-full h-1.5 w-1.5 bg-indigo-500" />
+              </span>
+            )}
+          </div>
 
-              {/* Drafting clinical note animation */}
-              {showDraftingNote && (
+          <div className="space-y-1.5">
+            {visibleInsights.map((insight, idx) => {
+              const isNewActive =
+                insight.showOnlyWhenActive && isActive;
+              return (
                 <div
-                  className="flex items-center gap-1.5 px-2 py-1.5 mt-1"
-                  style={{ animation: "notePulse 1.5s ease-in-out infinite" }}
+                  key={insight.id}
+                  className={`border-l-[3px] ${insightBorderColor(insight.severity)} rounded-r-md bg-white border border-slate-200 px-2.5 py-2`}
+                  style={{
+                    animation: insightMounted
+                      ? isNewActive
+                        ? "fadeSlideIn 0.5s ease-out both, insightHighlight 2s ease-out 0.5s both"
+                        : undefined
+                      : `fadeSlideIn 0.4s ease-out ${idx * 0.1}s both`,
+                  }}
                 >
-                  <div className="flex gap-0.5">
-                    {[0, 1, 2].map((i) => (
+                  <div className="flex items-start justify-between gap-2">
+                    <div className="flex-1 min-w-0">
                       <span
-                        key={i}
-                        className="inline-block w-1 h-1 rounded-full bg-blue-400"
-                        style={{
-                          animation: `notePulse 1.2s ease-in-out ${i * 0.2}s infinite`,
-                        }}
-                      />
-                    ))}
-                  </div>
-                  <span className="text-[11px] text-blue-500 font-medium italic">
-                    Drafting clinical note...
-                  </span>
-                </div>
-              )}
-
-              {/* Drafted note card */}
-              {showDraftedNote && (
-                <div
-                  className="mt-2 rounded-md border border-blue-200 bg-blue-50/50 px-2.5 py-2"
-                  style={{ animation: "alertSlideIn 0.5s ease-out both" }}
-                >
-                  <div className="flex items-center gap-1 mb-1">
-                    <svg
-                      width="9"
-                      height="9"
-                      viewBox="0 0 24 24"
-                      fill="none"
-                      stroke="#3b82f6"
-                      strokeWidth="2.5"
-                      strokeLinecap="round"
-                      strokeLinejoin="round"
-                    >
-                      <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z" />
-                      <polyline points="14 2 14 8 20 8" />
-                    </svg>
-                    <span className="text-[10px] font-bold uppercase tracking-wider text-blue-600">
-                      AI-Drafted Clinical Note
-                    </span>
-                  </div>
-                  <p className="text-[11px] text-slate-600 leading-relaxed">
-                    Patient reports missed evening Lisinopril dose. BP elevated at
-                    155/95 mmHg (baseline 130/85). AI confirmed non-adherence via
-                    voice check-in. Reminder set for 6 PM evening dose. Flagged
-                    for Dr. Patel review. Follow-up BP check in 2 hours.
-                  </p>
-                  <div className="flex items-center gap-1 mt-1.5">
-                    <svg
-                      width="8"
-                      height="8"
-                      viewBox="0 0 24 24"
-                      fill="none"
-                      stroke="#10b981"
-                      strokeWidth="3"
-                      strokeLinecap="round"
-                      strokeLinejoin="round"
-                    >
-                      <path d="M20 6L9 17l-5-5" />
-                    </svg>
-                    <span className="text-[10px] text-emerald-600 font-medium">
-                      Ready for EHR submission
+                        className={`text-[10px] font-bold uppercase tracking-wider ${insightLabelColor(insight.severity)}`}
+                      >
+                        {insightLabel(insight.severity)}
+                      </span>
+                      <p className="text-[12px] text-slate-700 leading-snug mt-0.5">
+                        {insight.text}
+                      </p>
+                    </div>
+                    <span className="text-[10px] text-slate-400 whitespace-nowrap flex-shrink-0 mt-0.5">
+                      {isNewActive ? "Just now" : insight.timestamp}
                     </span>
                   </div>
                 </div>
-              )}
-
-              <div ref={transcriptEndRef} />
-            </div>
+              );
+            })}
           </div>
         </div>
-      )}
+      </div>
 
       {/* ------------------------------------------------------------------ */}
-      {/* Billing predictor                                                  */}
+      {/* 5. Billing Capture Summary (footer)                                */}
       {/* ------------------------------------------------------------------ */}
-      <BillingWidget
-        billingMinutes={billingMinutes}
-        billingEvents={billingEvents}
-        isActive={isActive}
-      />
+      <div className="flex items-center gap-3 px-3 py-2 border-t border-slate-200 bg-slate-50 flex-shrink-0">
+        <div className="flex items-center gap-1">
+          <svg
+            width="9"
+            height="9"
+            viewBox="0 0 24 24"
+            fill="none"
+            stroke="#10b981"
+            strokeWidth="2.5"
+            strokeLinecap="round"
+            strokeLinejoin="round"
+          >
+            <line x1="12" y1="1" x2="12" y2="23" />
+            <path d="M17 5H9.5a3.5 3.5 0 0 0 0 7h5a3.5 3.5 0 0 1 0 7H6" />
+          </svg>
+          <span className="text-[11px] font-semibold text-emerald-700">
+            $14,200/mo
+          </span>
+          <span className="text-[10px] text-slate-400">
+            RPM revenue &middot; 120 patients
+          </span>
+        </div>
+        <div className="w-px h-3 bg-slate-300" />
+        <span className="text-[10px] text-amber-600 font-medium">
+          8 near 20-min threshold
+        </span>
+        <div className="w-px h-3 bg-slate-300" />
+        <span className="text-[10px] text-slate-500">
+          <span className="font-medium">99457:</span> 67 eligible
+          <span className="mx-1 text-slate-300">|</span>
+          <span className="font-medium">99458:</span> 12 eligible
+        </span>
+      </div>
     </div>
   );
 }

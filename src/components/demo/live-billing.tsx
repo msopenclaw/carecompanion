@@ -1,430 +1,585 @@
 "use client";
 
-import { useState, useEffect, useRef } from "react";
 import { useDemo } from "./demo-context";
 
 // ---------------------------------------------------------------------------
-// Animated counter hook
+// Static data
 // ---------------------------------------------------------------------------
 
-function useCountUp(target: number, durationMs = 1400, trigger = true): number {
-  const [value, setValue] = useState(0);
-  const frameRef = useRef<number | null>(null);
-
-  useEffect(() => {
-    if (!trigger) {
-      setValue(0);
-      return;
-    }
-    const start = performance.now();
-    const step = (now: number) => {
-      const elapsed = now - start;
-      const progress = Math.min(elapsed / durationMs, 1);
-      const eased = 1 - Math.pow(1 - progress, 3);
-      setValue(Math.round(eased * target));
-      if (progress < 1) {
-        frameRef.current = requestAnimationFrame(step);
-      }
-    };
-    frameRef.current = requestAnimationFrame(step);
-    return () => {
-      if (frameRef.current) cancelAnimationFrame(frameRef.current);
-    };
-  }, [target, durationMs, trigger]);
-
-  return value;
+interface DayData {
+  day: number;
+  label: string;
+  systolic: number;
+  morningMed: boolean;
+  eveningMed: boolean | null; // null = today (no evening yet)
 }
 
-// ---------------------------------------------------------------------------
-// Format helpers
-// ---------------------------------------------------------------------------
-
-function fmtDollar(n: number): string {
-  return "$" + n.toLocaleString("en-US");
-}
-
-function fmtDuration(minutes: number): string {
-  const m = Math.floor(minutes);
-  const s = Math.round((minutes - m) * 60);
-  return `${m}:${s.toString().padStart(2, "0")}`;
-}
-
-// ---------------------------------------------------------------------------
-// CMS code rate lookup
-// ---------------------------------------------------------------------------
-
-const CMS_RATES: Record<string, number> = {
-  "99453": 19,
-  "99454": 55,
-  "99457": 52,
-  "99458": 42,
-  "99490": 64,
-  "99491": 87,
-};
-
-// ---------------------------------------------------------------------------
-// CMS code table data
-// ---------------------------------------------------------------------------
-
-interface CMSCodeRow {
-  code: string;
-  rate: number;
-  description: string;
-}
-
-const CMS_TABLE: CMSCodeRow[] = [
-  { code: "99453", rate: 19, description: "RPM Setup" },
-  { code: "99454", rate: 55, description: "Device Supply (16+ days)" },
-  { code: "99457", rate: 52, description: "First 20 min clinical" },
-  { code: "99458", rate: 42, description: "Addl 20 min clinical" },
-  { code: "99490", rate: 64, description: "CCM first 20 min" },
-  { code: "99491", rate: 87, description: "CCM complex 30 min" },
+const TIMELINE_DATA: DayData[] = [
+  { day: 1, label: "Mon", systolic: 128, morningMed: true, eveningMed: true },
+  { day: 2, label: "Tue", systolic: 131, morningMed: true, eveningMed: true },
+  { day: 3, label: "Wed", systolic: 130, morningMed: true, eveningMed: true },
+  { day: 4, label: "Thu", systolic: 132, morningMed: true, eveningMed: true },
+  { day: 5, label: "Fri", systolic: 142, morningMed: true, eveningMed: false },
+  { day: 6, label: "Sat", systolic: 148, morningMed: true, eveningMed: false },
+  { day: 7, label: "Sun", systolic: 155, morningMed: false, eveningMed: null },
 ];
 
-// Default initial statuses for codes
-const INITIAL_ELIGIBLE = new Set(["99453", "99454"]);
+// Chart range constants
+const BP_MIN = 110;
+const BP_MAX = 170;
+const NORMAL_LOW = 120;
+const NORMAL_HIGH = 140;
+
+function bpBarPercent(systolic: number): number {
+  return ((systolic - BP_MIN) / (BP_MAX - BP_MIN)) * 100;
+}
+
+function normalBandBottom(): number {
+  return ((NORMAL_LOW - BP_MIN) / (BP_MAX - BP_MIN)) * 100;
+}
+
+function normalBandHeight(): number {
+  return ((NORMAL_HIGH - NORMAL_LOW) / (BP_MAX - BP_MIN)) * 100;
+}
+
+function bpColor(systolic: number): string {
+  if (systolic <= 135) return "#22c55e"; // green
+  if (systolic <= 143) return "#eab308"; // yellow
+  if (systolic <= 150) return "#f59e0b"; // amber
+  return "#ef4444"; // red
+}
 
 // ---------------------------------------------------------------------------
 // Sub-components
 // ---------------------------------------------------------------------------
 
-function ComparisonCards({ isActive }: { isActive: boolean }) {
+function ConditionBadge({ label, color }: { label: string; color: string }) {
+  const colorMap: Record<string, string> = {
+    blue: "bg-blue-100 text-blue-700 border-blue-200",
+    rose: "bg-rose-100 text-rose-700 border-rose-200",
+    purple: "bg-purple-100 text-purple-700 border-purple-200",
+  };
   return (
-    <div className="grid grid-cols-2 gap-2 px-3 py-2">
-      {/* Legacy RPM */}
-      <div
-        className={`rounded-lg border p-2.5 space-y-1.5 transition-opacity duration-300 ${
-          isActive
-            ? "border-slate-200 bg-slate-50 opacity-70"
-            : "border-slate-200 bg-slate-50 opacity-40"
-        }`}
-      >
-        <div className="flex items-center gap-1.5">
-          <div className="h-1.5 w-1.5 rounded-full bg-slate-400" />
-          <span className="text-[11px] font-bold text-slate-500 uppercase tracking-wider">
-            Legacy RPM
+    <span
+      className={`inline-flex items-center text-[10px] font-bold px-1.5 py-0.5 rounded-full border ${colorMap[color] ?? colorMap.blue}`}
+    >
+      {label}
+    </span>
+  );
+}
+
+// ---------------------------------------------------------------------------
+// BP Timeline Chart (pure CSS)
+// ---------------------------------------------------------------------------
+
+function BPTimeline({ isActive }: { isActive: boolean }) {
+  const chartHeight = 120;
+
+  return (
+    <div className="px-3 py-2">
+      <div className="flex items-center justify-between mb-1.5">
+        <h3 className="text-[11px] font-bold text-slate-500 uppercase tracking-wider">
+          7-Day Vital Timeline
+        </h3>
+        <div className="flex items-center gap-2">
+          <span className="flex items-center gap-1 text-[10px] text-slate-400">
+            <span className="inline-block w-2 h-2 rounded-sm bg-green-200 border border-green-300" />
+            Normal
           </span>
-        </div>
-        <div className="space-y-0.5">
-          <div className="flex justify-between text-[12px]">
-            <span className="text-slate-500">Patients</span>
-            <span className="text-slate-600 font-semibold tabular-nums">100</span>
-          </div>
-          <div className="flex justify-between text-[12px]">
-            <span className="text-slate-500">Nurse time</span>
-            <span className="text-slate-600 font-semibold">40 hrs/wk</span>
-          </div>
-          <div className="border-t border-slate-200 pt-0.5 mt-0.5">
-            <div className="flex justify-between text-[12px]">
-              <span className="text-slate-500 font-medium">Net/month</span>
-              <span className="text-slate-700 font-bold tabular-nums">$4,000</span>
-            </div>
-          </div>
+          <span className="flex items-center gap-1 text-[10px] text-slate-400">
+            <span className="inline-block w-2 h-2 rounded-sm bg-red-400" />
+            Elevated
+          </span>
         </div>
       </div>
 
-      {/* AI Co-Pilot */}
-      <div
-        className={`rounded-lg border p-2.5 space-y-1.5 relative overflow-hidden transition-all duration-300 ${
-          isActive
-            ? "border-blue-200 bg-gradient-to-br from-blue-50 via-white to-blue-50"
-            : "border-slate-200 bg-slate-50 opacity-40"
-        }`}
-        style={
-          isActive
-            ? {
-                boxShadow:
-                  "0 0 16px -4px rgba(59, 130, 246, 0.15), 0 0 4px -1px rgba(59, 130, 246, 0.08)",
-              }
-            : undefined
-        }
-      >
-        {isActive && (
-          <div className="absolute -top-6 -right-6 w-20 h-20 rounded-full bg-blue-400/8 blur-xl pointer-events-none" />
-        )}
-        <div className="flex items-center gap-1.5 relative">
+      {/* Chart container */}
+      <div className="rounded-lg border border-slate-200 bg-white p-2 pb-0">
+        {/* Y-axis labels + chart area */}
+        <div className="flex gap-1">
+          {/* Y-axis */}
           <div
-            className={`h-1.5 w-1.5 rounded-full ${
-              isActive ? "bg-blue-500 animate-pulse" : "bg-slate-400"
-            }`}
-          />
-          <span
-            className={`text-[11px] font-bold uppercase tracking-wider ${
-              isActive ? "text-blue-700" : "text-slate-500"
-            }`}
+            className="flex flex-col justify-between text-[9px] text-slate-400 font-mono pr-0.5 flex-shrink-0"
+            style={{ height: chartHeight }}
           >
-            AI Co-Pilot
-          </span>
-        </div>
-        <div className="space-y-0.5 relative">
-          <div className="flex justify-between text-[12px]">
-            <span className={isActive ? "text-blue-600" : "text-slate-500"}>
-              Patients
-            </span>
-            <span
-              className={`font-semibold tabular-nums ${
-                isActive ? "text-blue-800" : "text-slate-600"
-              }`}
-            >
-              1,000
-            </span>
+            <span>170</span>
+            <span>150</span>
+            <span>130</span>
+            <span>110</span>
           </div>
-          <div className="flex justify-between text-[12px]">
-            <span className={isActive ? "text-blue-600" : "text-slate-500"}>
-              Nurse time
-            </span>
-            <span
-              className={`font-semibold ${
-                isActive ? "text-blue-800" : "text-slate-600"
-              }`}
+
+          {/* Bars area */}
+          <div className="flex-1 relative" style={{ height: chartHeight }}>
+            {/* Normal range band */}
+            <div
+              className="absolute left-0 right-0 bg-green-50 border-y border-green-200/50 rounded-sm"
+              style={{
+                bottom: `${normalBandBottom()}%`,
+                height: `${normalBandHeight()}%`,
+              }}
+            />
+
+            {/* Threshold line at 140 */}
+            <div
+              className="absolute left-0 right-0 border-t border-dashed border-red-300/60"
+              style={{
+                bottom: `${((NORMAL_HIGH - BP_MIN) / (BP_MAX - BP_MIN)) * 100}%`,
+              }}
             >
-              10 hrs/wk
-            </span>
-          </div>
-          <div
-            className={`border-t pt-0.5 mt-0.5 ${
-              isActive ? "border-blue-100" : "border-slate-200"
-            }`}
-          >
-            <div className="flex justify-between text-[12px]">
-              <span
-                className={`font-medium ${
-                  isActive ? "text-blue-700" : "text-slate-500"
-                }`}
-              >
-                Net/month
+              <span className="absolute right-0 -top-3 text-[8px] text-red-400 font-medium">
+                140
               </span>
-              <span
-                className={`font-bold tabular-nums text-[13px] ${
-                  isActive ? "text-blue-800" : "text-slate-700"
-                }`}
-              >
-                $165,000
-              </span>
+            </div>
+
+            {/* Bar columns */}
+            <div className="relative flex items-end justify-between h-full px-1 gap-1">
+              {TIMELINE_DATA.map((d) => {
+                const pct = bpBarPercent(d.systolic);
+                const color = bpColor(d.systolic);
+                const isToday = d.day === 7;
+                return (
+                  <div
+                    key={d.day}
+                    className="flex-1 flex flex-col items-center justify-end h-full relative"
+                  >
+                    {/* BP value label */}
+                    <span
+                      className="text-[9px] font-bold mb-0.5 tabular-nums"
+                      style={{ color }}
+                    >
+                      {d.systolic}
+                    </span>
+                    {/* Bar */}
+                    <div
+                      className={`w-full max-w-[20px] rounded-t-sm transition-all duration-500 relative ${isToday && isActive ? "dd-pulse-bar" : ""}`}
+                      style={{
+                        height: `${pct}%`,
+                        backgroundColor: color,
+                        opacity: isToday && isActive ? 1 : 0.85,
+                      }}
+                    >
+                      {isToday && (
+                        <div
+                          className="absolute -top-1 left-1/2 -translate-x-1/2 w-2 h-2 rounded-full border-2 border-white"
+                          style={{ backgroundColor: color }}
+                        />
+                      )}
+                    </div>
+                  </div>
+                );
+              })}
             </div>
           </div>
         </div>
-        {isActive && (
-          <div className="flex justify-center relative">
-            <span className="inline-flex items-center gap-0.5 rounded-full bg-blue-600 px-2 py-0.5 text-[10px] font-bold text-white">
-              <svg
-                width="8"
-                height="8"
-                viewBox="0 0 20 20"
-                fill="currentColor"
-                className="shrink-0"
+
+        {/* X-axis day labels */}
+        <div className="flex pl-7 pr-1 mt-1 mb-1">
+          <div className="flex-1 flex justify-between gap-1 px-1">
+            {TIMELINE_DATA.map((d) => (
+              <div
+                key={d.day}
+                className={`flex-1 text-center text-[9px] font-medium ${d.day === 7 ? "text-red-500 font-bold" : "text-slate-400"}`}
               >
-                <path
-                  fillRule="evenodd"
-                  d="M12.577 4.878a.75.75 0 01.919-.53l4.78 1.281a.75.75 0 01.531.919l-1.281 4.78a.75.75 0 01-1.449-.387l.81-3.022a19.407 19.407 0 00-5.594 5.203.75.75 0 01-1.139.093L7 10.06l-4.72 4.72a.75.75 0 01-1.06-1.06l5.25-5.25a.75.75 0 011.06 0l3.074 3.073a20.923 20.923 0 015.545-4.931l-3.042.815a.75.75 0 01-.53-.919z"
-                  clipRule="evenodd"
-                />
-              </svg>
-              41x net revenue
+                {d.day === 7 ? "Today" : d.label}
+              </div>
+            ))}
+          </div>
+        </div>
+
+        {/* Medication adherence row */}
+        <div className="border-t border-slate-100 pt-1 pb-1.5 mt-0.5">
+          <div className="flex items-center gap-1 pl-1 mb-1">
+            <span className="text-[9px] font-semibold text-slate-400 uppercase tracking-wider">
+              Medication
             </span>
           </div>
-        )}
+          <div className="flex pl-7 pr-1">
+            <div className="flex-1 flex justify-between gap-1 px-1">
+              {TIMELINE_DATA.map((d) => (
+                <div
+                  key={d.day}
+                  className="flex-1 flex flex-col items-center gap-0.5"
+                >
+                  {/* Morning dose */}
+                  <span
+                    className={`text-[10px] leading-none ${d.morningMed ? "text-green-500" : "text-red-500 font-bold"}`}
+                    title={
+                      d.morningMed ? "AM dose taken" : "AM dose missed"
+                    }
+                  >
+                    {d.morningMed ? "\u2713" : "\u2717"}
+                  </span>
+                  {/* Evening dose */}
+                  {d.eveningMed !== null ? (
+                    <span
+                      className={`text-[10px] leading-none ${d.eveningMed ? "text-green-500" : "text-red-500 font-bold"}`}
+                      title={
+                        d.eveningMed ? "PM dose taken" : "PM dose missed"
+                      }
+                    >
+                      {d.eveningMed ? "\u2713" : "\u2717"}
+                    </span>
+                  ) : (
+                    <span
+                      className="text-[10px] leading-none text-slate-300"
+                      title="PM dose pending"
+                    >
+                      --
+                    </span>
+                  )}
+                </div>
+              ))}
+            </div>
+          </div>
+          <div className="flex items-center gap-3 pl-7 mt-1">
+            <span className="flex items-center gap-0.5 text-[9px] text-slate-400">
+              <span className="text-green-500">{"\u2713"}</span> Taken
+            </span>
+            <span className="flex items-center gap-0.5 text-[9px] text-slate-400">
+              <span className="text-red-500">{"\u2717"}</span> Missed
+            </span>
+          </div>
+        </div>
       </div>
     </div>
   );
 }
 
 // ---------------------------------------------------------------------------
-// Billing event card
+// AI Clinical Summary Card
 // ---------------------------------------------------------------------------
 
-function BillingEventCard({
-  event,
-  isNew,
-}: {
-  event: {
-    code: string;
-    description: string;
-    unlocked: boolean;
-    timestamp: Date;
-  };
-  isNew: boolean;
-}) {
-  const rate = CMS_RATES[event.code] || 0;
-
+function AIClinicalSummary({ isActive }: { isActive: boolean }) {
   return (
-    <div
-      className={`flex items-center gap-2 rounded-md border px-2.5 py-1.5 transition-all duration-300 ${
-        event.unlocked
-          ? "border-emerald-200 bg-emerald-50/50"
-          : "border-slate-200 bg-white"
-      }`}
-      style={
-        isNew
-          ? { animation: "billingSlideIn 0.4s ease-out both" }
-          : undefined
-      }
-    >
-      {/* CPT code badge */}
-      <span
-        className={`inline-flex items-center text-[11px] font-bold font-mono rounded px-1.5 py-0.5 border ${
-          event.unlocked
-            ? "bg-emerald-100 border-emerald-300 text-emerald-700"
-            : "bg-blue-50 border-blue-200 text-blue-700"
+    <div className="px-3 py-1">
+      <div
+        className={`rounded-lg border-2 p-2.5 transition-all duration-500 ${
+          isActive
+            ? "border-amber-400 bg-amber-50/40 dd-highlight-pulse"
+            : "border-amber-300 bg-amber-50/30"
         }`}
       >
-        {event.code}
-      </span>
+        <div className="flex items-center justify-between mb-1.5">
+          <div className="flex items-center gap-1.5">
+            <svg
+              width="12"
+              height="12"
+              viewBox="0 0 24 24"
+              fill="none"
+              className="text-amber-600"
+              stroke="currentColor"
+              strokeWidth={2}
+            >
+              <path
+                strokeLinecap="round"
+                strokeLinejoin="round"
+                d="M12 9v3.75m-9.303 3.376c-.866 1.5.217 3.374 1.948 3.374h14.71c1.73 0 2.813-1.874 1.948-3.374L13.949 3.378c-.866-1.5-3.032-1.5-3.898 0L2.697 16.126zM12 15.75h.007v.008H12v-.008z"
+              />
+            </svg>
+            <h3 className="text-[12px] font-bold text-slate-800">
+              AI Clinical Summary
+            </h3>
+          </div>
+          <div className="flex items-center gap-1.5">
+            <span className="inline-flex items-center text-[9px] font-bold px-1.5 py-0.5 rounded-full bg-amber-100 text-amber-700 border border-amber-200">
+              Severity: Elevated
+            </span>
+            <span className="inline-flex items-center text-[9px] font-bold px-1.5 py-0.5 rounded-full bg-blue-100 text-blue-700 border border-blue-200">
+              87% confidence
+            </span>
+          </div>
+        </div>
+        <p className="text-[12px] leading-relaxed text-slate-700">
+          3-day BP escalation (142{"\u2192"}148{"\u2192"}155 systolic) temporally
+          correlated with 2 missed evening lisinopril doses. Weight +1.2 lbs
+          over same period suggests early fluid retention. Given CHF history,
+          recommend provider review within 48 hours.
+        </p>
+        <div className="flex items-center gap-1 mt-2 pt-1.5 border-t border-amber-200/60">
+          <svg
+            width="10"
+            height="10"
+            viewBox="0 0 24 24"
+            fill="none"
+            stroke="#64748b"
+            strokeWidth={2}
+          >
+            <path
+              strokeLinecap="round"
+              strokeLinejoin="round"
+              d="M9.813 15.904L9 18.75l-.813-2.846a4.5 4.5 0 00-3.09-3.09L2.25 12l2.846-.813a4.5 4.5 0 003.09-3.09L9 5.25l.813 2.846a4.5 4.5 0 003.09 3.09L15.75 12l-2.846.813a4.5 4.5 0 00-3.09 3.09z"
+            />
+          </svg>
+          <span className="text-[10px] text-slate-500 italic">
+            Generated by CareCompanion AI
+          </span>
+        </div>
+      </div>
+    </div>
+  );
+}
 
-      {/* Description */}
-      <div className="flex-1 min-w-0">
-        <p className="text-[12px] text-slate-700 font-medium truncate">
-          {event.description}
+// ---------------------------------------------------------------------------
+// Historical Pattern Match Card
+// ---------------------------------------------------------------------------
+
+function HistoricalPatternMatch() {
+  return (
+    <div className="px-3 py-1">
+      <div className="rounded-lg border border-slate-200 bg-slate-50/50 p-2.5">
+        <div className="flex items-center justify-between mb-1">
+          <div className="flex items-center gap-1.5">
+            <svg
+              width="11"
+              height="11"
+              viewBox="0 0 24 24"
+              fill="none"
+              stroke="#6366f1"
+              strokeWidth={2}
+            >
+              <path
+                strokeLinecap="round"
+                strokeLinejoin="round"
+                d="M12 6v6h4.5m4.5 0a9 9 0 11-18 0 9 9 0 0118 0z"
+              />
+            </svg>
+            <h3 className="text-[11px] font-bold text-slate-700">
+              Historical Pattern Match
+            </h3>
+          </div>
+          <span className="inline-flex items-center text-[9px] font-bold px-1.5 py-0.5 rounded-full bg-indigo-100 text-indigo-700 border border-indigo-200">
+            91% similarity
+          </span>
+        </div>
+        <p className="text-[11px] leading-relaxed text-slate-600">
+          This pattern previously occurred Oct 12{"\u2013"}18, 2024. Resolved
+          after medication adherence restored. BP normalized within 5 days.
         </p>
       </div>
-
-      {/* Dollar amount */}
-      <span
-        className={`text-[12px] font-bold tabular-nums whitespace-nowrap ${
-          event.unlocked ? "text-emerald-600" : "text-slate-400"
-        }`}
-      >
-        {rate > 0 ? fmtDollar(rate) : "---"}
-      </span>
-
-      {/* Check or pending */}
-      {event.unlocked ? (
-        <svg
-          width="12"
-          height="12"
-          viewBox="0 0 24 24"
-          fill="none"
-          stroke="#10b981"
-          strokeWidth="3"
-          strokeLinecap="round"
-          strokeLinejoin="round"
-          className="flex-shrink-0"
-        >
-          <path d="M20 6L9 17l-5-5" />
-        </svg>
-      ) : (
-        <div className="w-3 h-3 rounded-full border-2 border-slate-300 border-t-blue-500 animate-spin flex-shrink-0" />
-      )}
-
-      {/* Timestamp */}
-      <span className="text-[10px] text-slate-400 whitespace-nowrap flex-shrink-0">
-        {event.timestamp.toLocaleTimeString("en-US", {
-          hour: "numeric",
-          minute: "2-digit",
-        })}
-      </span>
     </div>
   );
 }
 
 // ---------------------------------------------------------------------------
-// CMS Code Table
+// Recommended Actions
 // ---------------------------------------------------------------------------
 
-function CMSCodeTable({
-  billingEvents,
+interface ActionItem {
+  id: number;
+  label: string;
+  statusIdle: "complete" | "pending";
+  statusActive: "complete" | "pending";
+  detail: string;
+}
+
+const ACTIONS: ActionItem[] = [
+  {
+    id: 1,
+    label: "Medication reminder set for 6 PM",
+    statusIdle: "complete",
+    statusActive: "complete",
+    detail: "Lisinopril 10mg",
+  },
+  {
+    id: 2,
+    label: "Flag for Dr. Patel review",
+    statusIdle: "pending",
+    statusActive: "complete",
+    detail: "Priority: elevated",
+  },
+  {
+    id: 3,
+    label: "Schedule follow-up BP check in 48 hrs",
+    statusIdle: "pending",
+    statusActive: "pending",
+    detail: "Auto-schedule",
+  },
+];
+
+function RecommendedActions({ isActive }: { isActive: boolean }) {
+  return (
+    <div className="px-3 py-1">
+      <h3 className="text-[11px] font-bold text-slate-500 uppercase tracking-wider mb-1.5">
+        Recommended Actions
+      </h3>
+      <div className="space-y-1">
+        {ACTIONS.map((action) => {
+          const status = isActive ? action.statusActive : action.statusIdle;
+          const isComplete = status === "complete";
+          return (
+            <div
+              key={action.id}
+              className={`flex items-center gap-2 rounded-md border px-2.5 py-1.5 transition-all duration-300 ${
+                isComplete
+                  ? "border-green-200 bg-green-50/50"
+                  : "border-blue-200 bg-blue-50/30"
+              }`}
+            >
+              {/* Status indicator / button */}
+              {isComplete ? (
+                <div className="flex items-center justify-center w-5 h-5 rounded-full bg-green-500 flex-shrink-0">
+                  <svg
+                    width="10"
+                    height="10"
+                    viewBox="0 0 24 24"
+                    fill="none"
+                    stroke="white"
+                    strokeWidth={3}
+                    strokeLinecap="round"
+                    strokeLinejoin="round"
+                  >
+                    <path d="M20 6L9 17l-5-5" />
+                  </svg>
+                </div>
+              ) : (
+                <div className="flex items-center justify-center w-5 h-5 rounded-full border-2 border-blue-400 bg-white flex-shrink-0 cursor-pointer hover:bg-blue-50 transition-colors">
+                  <div className="w-1.5 h-1.5 rounded-full bg-blue-400" />
+                </div>
+              )}
+
+              {/* Label + detail */}
+              <div className="flex-1 min-w-0">
+                <p
+                  className={`text-[12px] font-medium truncate ${isComplete ? "text-slate-600" : "text-slate-800"}`}
+                >
+                  {action.label}
+                </p>
+                <p className="text-[10px] text-slate-400">{action.detail}</p>
+              </div>
+
+              {/* Status badge */}
+              <span
+                className={`text-[10px] font-bold px-1.5 py-0.5 rounded-full flex-shrink-0 ${
+                  isComplete
+                    ? "bg-green-100 text-green-700"
+                    : "bg-blue-100 text-blue-700"
+                }`}
+              >
+                {isComplete ? "Complete" : "Pending"}
+              </span>
+            </div>
+          );
+        })}
+      </div>
+    </div>
+  );
+}
+
+// ---------------------------------------------------------------------------
+// Billing Documentation Footer
+// ---------------------------------------------------------------------------
+
+function BillingFooter({
+  billingMinutes,
   isActive,
 }: {
-  billingEvents: {
-    code: string;
-    description: string;
-    unlocked: boolean;
-    timestamp: Date;
-  }[];
+  billingMinutes: number;
   isActive: boolean;
 }) {
-  const getStatus = (code: string) => {
-    const event = billingEvents.find((e) => e.code === code);
-    if (event?.unlocked) return "eligible";
-    if (event && !event.unlocked) return "in-progress";
-    if (INITIAL_ELIGIBLE.has(code) && isActive) return "eligible";
-    return "pending";
-  };
-
-  const statusConfig = {
-    eligible: {
-      bg: "bg-emerald-50",
-      text: "text-emerald-700",
-      border: "border-emerald-200",
-      label: "Eligible",
-    },
-    "in-progress": {
-      bg: "bg-amber-50",
-      text: "text-amber-700",
-      border: "border-amber-200",
-      label: "In Progress",
-    },
-    pending: {
-      bg: "bg-slate-50",
-      text: "text-slate-400",
-      border: "border-slate-200",
-      label: "Pending",
-    },
-  };
+  const displayMinutes = isActive ? billingMinutes : 14;
+  const minuteStr =
+    displayMinutes === 0
+      ? "0 min"
+      : `${Math.floor(displayMinutes)} min`;
 
   return (
-    <div className="px-3 pb-2">
-      <h3 className="text-[11px] font-bold text-slate-500 uppercase tracking-wider mb-1.5">
-        CMS Billing Codes
-      </h3>
-      <div className="rounded-md border border-slate-200 overflow-hidden">
-        <table className="w-full text-[12px]">
-          <thead>
-            <tr className="bg-slate-50 text-slate-500">
-              <th className="text-left py-1 px-2 font-semibold">Code</th>
-              <th className="text-right py-1 px-2 font-semibold">Rate</th>
-              <th className="text-center py-1 px-2 font-semibold">Status</th>
-            </tr>
-          </thead>
-          <tbody className="divide-y divide-slate-100">
-            {CMS_TABLE.map((row) => {
-              const status = getStatus(row.code);
-              const cfg = statusConfig[status];
-              return (
-                <tr key={row.code} className="hover:bg-slate-50/50">
-                  <td className="py-1 px-2">
-                    <div className="flex items-center gap-1.5">
-                      <span className="font-mono font-bold text-slate-800">
-                        {row.code}
-                      </span>
-                      <span className="text-[11px] text-slate-400 hidden sm:inline">
-                        {row.description}
-                      </span>
-                    </div>
-                  </td>
-                  <td className="py-1 px-2 text-right text-slate-600 font-semibold tabular-nums">
-                    {fmtDollar(row.rate)}
-                  </td>
-                  <td className="py-1 px-2 text-center">
-                    <span
-                      className={`inline-flex items-center text-[10px] font-bold uppercase tracking-wider px-1.5 py-0.5 rounded border ${cfg.bg} ${cfg.text} ${cfg.border}`}
-                    >
-                      {status === "in-progress" && (
-                        <span className="inline-block w-1 h-1 rounded-full bg-amber-500 animate-pulse mr-1" />
-                      )}
-                      {status === "eligible" && (
-                        <svg
-                          width="7"
-                          height="7"
-                          viewBox="0 0 24 24"
-                          fill="none"
-                          stroke="currentColor"
-                          strokeWidth="3"
-                          strokeLinecap="round"
-                          strokeLinejoin="round"
-                          className="mr-0.5"
-                        >
-                          <path d="M20 6L9 17l-5-5" />
-                        </svg>
-                      )}
-                      {cfg.label}
-                    </span>
-                  </td>
-                </tr>
-              );
-            })}
-          </tbody>
-        </table>
+    <div className="flex-shrink-0 border-t border-slate-200 bg-slate-50/80 px-3 py-2">
+      <div className="flex items-center justify-between mb-1">
+        <h3 className="text-[11px] font-bold text-slate-500 uppercase tracking-wider">
+          Billing Documentation
+        </h3>
+        <span className="text-[10px] text-slate-400">Auto-generated</span>
+      </div>
+      <div className="grid grid-cols-2 gap-x-3 gap-y-1">
+        {/* Time tracked */}
+        <div className="flex items-center gap-1.5">
+          <svg
+            width="10"
+            height="10"
+            viewBox="0 0 24 24"
+            fill="none"
+            stroke="#64748b"
+            strokeWidth={2}
+          >
+            <path
+              strokeLinecap="round"
+              strokeLinejoin="round"
+              d="M12 6v6h4.5m4.5 0a9 9 0 11-18 0 9 9 0 0118 0z"
+            />
+          </svg>
+          <span className="text-[11px] text-slate-600">
+            Time tracked:{" "}
+            <span className="font-bold text-slate-800 tabular-nums">
+              {minuteStr}
+            </span>
+          </span>
+        </div>
+
+        {/* Codes suggested */}
+        <div className="flex items-center gap-1.5">
+          <svg
+            width="10"
+            height="10"
+            viewBox="0 0 24 24"
+            fill="none"
+            stroke="#64748b"
+            strokeWidth={2}
+          >
+            <path
+              strokeLinecap="round"
+              strokeLinejoin="round"
+              d="M17.25 6.75L22.5 12l-5.25 5.25m-10.5 0L1.5 12l5.25-5.25m7.5-3l-4.5 16.5"
+            />
+          </svg>
+          <span className="text-[11px] text-slate-600">
+            <span className="font-mono font-bold text-amber-600">99457</span>
+            <span className="text-slate-400 mx-0.5">(In Progress)</span>
+            <span className="font-mono font-bold text-green-600">99454</span>
+            <span className="text-slate-400 mx-0.5">(Eligible)</span>
+          </span>
+        </div>
+
+        {/* Clinical note */}
+        <div className="flex items-center gap-1.5">
+          <svg
+            width="10"
+            height="10"
+            viewBox="0 0 24 24"
+            fill="none"
+            stroke="#22c55e"
+            strokeWidth={2.5}
+          >
+            <path
+              strokeLinecap="round"
+              strokeLinejoin="round"
+              d="M9 12.75L11.25 15 15 9.75M21 12a9 9 0 11-18 0 9 9 0 0118 0z"
+            />
+          </svg>
+          <span className="text-[11px] text-slate-600">
+            AI-drafted clinical note ready
+          </span>
+        </div>
+
+        {/* Compliant */}
+        <div className="flex items-center gap-1.5">
+          <svg
+            width="10"
+            height="10"
+            viewBox="0 0 24 24"
+            fill="none"
+            stroke="#22c55e"
+            strokeWidth={2.5}
+          >
+            <path
+              strokeLinecap="round"
+              strokeLinejoin="round"
+              d="M9 12.75L11.25 15 15 9.75m-3-7.036A11.959 11.959 0 013.598 6 11.99 11.99 0 003 9.749c0 5.592 3.824 10.29 9 11.623 5.176-1.332 9-6.03 9-11.622 0-1.31-.21-2.571-.598-3.751h-.152c-3.196 0-6.1-1.248-8.25-3.285z"
+            />
+          </svg>
+          <span className="text-[11px] text-slate-600">
+            Compliant documentation auto-generated
+          </span>
+        </div>
       </div>
     </div>
   );
@@ -435,52 +590,26 @@ function CMSCodeTable({
 // ---------------------------------------------------------------------------
 
 export function LiveBilling() {
-  const { demoPhase, billingMinutes, billingEvents } = useDemo();
-
+  const { demoPhase, billingMinutes } = useDemo();
   const isActive = demoPhase !== "idle";
-  const feedRef = useRef<HTMLDivElement>(null);
-
-  // Track which events we've already "seen" for entrance animation
-  const [seenEventCount, setSeenEventCount] = useState(0);
-
-  useEffect(() => {
-    if (billingEvents.length > seenEventCount) {
-      const timer = setTimeout(
-        () => setSeenEventCount(billingEvents.length),
-        500
-      );
-      return () => clearTimeout(timer);
-    }
-  }, [billingEvents.length, seenEventCount]);
-
-  // Auto-scroll feed
-  useEffect(() => {
-    if (feedRef.current) {
-      feedRef.current.scrollTop = feedRef.current.scrollHeight;
-    }
-  }, [billingEvents.length]);
-
-  // Compute session revenue from unlocked events
-  const sessionRevenue = billingEvents
-    .filter((e) => e.unlocked)
-    .reduce((sum, e) => sum + (CMS_RATES[e.code] || 0), 0);
-
-  const animatedRevenue = useCountUp(sessionRevenue, 800, isActive);
-
-  // 99457 progress
-  const goalMinutes = 20;
-  const pct99457 = Math.min(
-    Math.round((billingMinutes / goalMinutes) * 100),
-    100
-  );
 
   return (
     <div className="flex flex-col h-full w-full bg-white text-slate-800 font-sans select-none overflow-hidden">
       {/* Keyframes */}
       <style>{`
-        @keyframes billingSlideIn {
-          0% { opacity: 0; transform: translateY(10px); }
-          100% { opacity: 1; transform: translateY(0); }
+        @keyframes ddHighlightPulse {
+          0%, 100% { box-shadow: 0 0 0 0 rgba(245, 158, 11, 0); }
+          50% { box-shadow: 0 0 12px 2px rgba(245, 158, 11, 0.25); }
+        }
+        @keyframes ddBarPulse {
+          0%, 100% { opacity: 0.85; }
+          50% { opacity: 1; }
+        }
+        .dd-highlight-pulse {
+          animation: ddHighlightPulse 2s ease-in-out infinite;
+        }
+        .dd-pulse-bar {
+          animation: ddBarPulse 1.5s ease-in-out infinite;
         }
         .scrollbar-thin::-webkit-scrollbar { width: 3px; }
         .scrollbar-thin::-webkit-scrollbar-track { background: transparent; }
@@ -493,7 +622,7 @@ export function LiveBilling() {
       {/* ------------------------------------------------------------------ */}
       <div className="flex items-center justify-between px-3 py-2 border-b border-slate-200 bg-white flex-shrink-0">
         <div className="flex items-center gap-2">
-          <div className="flex items-center justify-center w-6 h-6 rounded-md bg-gradient-to-br from-emerald-500 to-teal-600">
+          <div className="flex items-center justify-center w-6 h-6 rounded-md bg-gradient-to-br from-violet-500 to-indigo-600">
             <svg
               className="w-3 h-3 text-white"
               fill="none"
@@ -504,186 +633,72 @@ export function LiveBilling() {
               <path
                 strokeLinecap="round"
                 strokeLinejoin="round"
-                d="M12 6v12m-3-2.818l.879.659c1.171.879 3.07.879 4.242 0 1.172-.879 1.172-2.303 0-3.182C13.536 12.219 12.768 12 12 12c-.725 0-1.45-.22-2.003-.659-1.106-.879-1.106-2.303 0-3.182s2.9-.879 4.006 0l.415.33M21 12a9 9 0 11-18 0 9 9 0 0118 0z"
+                d="M15.75 6a3.75 3.75 0 11-7.5 0 3.75 3.75 0 017.5 0zM4.501 20.118a7.5 7.5 0 0114.998 0A17.933 17.933 0 0112 21.75c-2.676 0-5.216-.584-7.499-1.632z"
               />
             </svg>
           </div>
           <div className="leading-none">
-            <h1 className="text-[13px] font-bold text-slate-800 tracking-tight">
-              Billing Dashboard
-            </h1>
-            <p className="text-[11px] text-slate-400 mt-0.5">
-              Live reimbursement tracker
-            </p>
+            <div className="flex items-center gap-1.5">
+              <h1 className="text-[13px] font-bold text-slate-800 tracking-tight">
+                Patient Deep Dive
+              </h1>
+              <span className="text-[11px] text-slate-400 font-medium">
+                {"\u2014"} Margaret Chen, 74F
+              </span>
+            </div>
+            <div className="flex items-center gap-1 mt-1">
+              <ConditionBadge label="HTN" color="blue" />
+              <ConditionBadge label="T2D" color="purple" />
+              <ConditionBadge label="CHF" color="rose" />
+              <span className="text-[10px] text-slate-400 ml-1">
+                Provider: <span className="font-semibold text-slate-600">Dr. Patel</span>
+              </span>
+            </div>
           </div>
         </div>
-        {isActive && (
-          <div className="flex items-center gap-1.5">
-            <span className="relative flex h-1.5 w-1.5">
-              <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-emerald-400 opacity-75" />
-              <span className="relative inline-flex rounded-full h-1.5 w-1.5 bg-emerald-500" />
-            </span>
-            <span className="text-[11px] text-emerald-600 font-semibold uppercase tracking-wide">
-              Live
-            </span>
-          </div>
-        )}
+        <div className="flex items-center gap-1.5 flex-shrink-0">
+          {isActive ? (
+            <>
+              <span className="relative flex h-1.5 w-1.5">
+                <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-amber-400 opacity-75" />
+                <span className="relative inline-flex rounded-full h-1.5 w-1.5 bg-amber-500" />
+              </span>
+              <span className="inline-flex items-center text-[10px] font-bold px-2 py-0.5 rounded-full bg-amber-100 text-amber-700 border border-amber-200">
+                Attention
+              </span>
+            </>
+          ) : (
+            <>
+              <span className="relative inline-flex rounded-full h-1.5 w-1.5 bg-green-500" />
+              <span className="inline-flex items-center text-[10px] font-bold px-2 py-0.5 rounded-full bg-green-100 text-green-700 border border-green-200">
+                Stable
+              </span>
+            </>
+          )}
+        </div>
+      </div>
+
+      {/* ------------------------------------------------------------------ */}
+      {/* Scrollable content                                                 */}
+      {/* ------------------------------------------------------------------ */}
+      <div className="flex-1 min-h-0 overflow-y-auto scrollbar-thin">
+        {/* Multi-Vital Timeline */}
+        <BPTimeline isActive={isActive} />
+
+        {/* AI Clinical Summary */}
+        <AIClinicalSummary isActive={isActive} />
+
+        {/* Historical Pattern Match */}
+        <HistoricalPatternMatch />
+
+        {/* Recommended Actions */}
+        <RecommendedActions isActive={isActive} />
       </div>
 
       {/* ------------------------------------------------------------------ */}
-      {/* Side-by-side comparison                                            */}
+      {/* Billing Documentation Footer                                       */}
       {/* ------------------------------------------------------------------ */}
-      <ComparisonCards isActive={isActive} />
-
-      {/* ------------------------------------------------------------------ */}
-      {/* Idle overlay                                                       */}
-      {/* ------------------------------------------------------------------ */}
-      {demoPhase === "idle" && (
-        <div className="flex-1 flex items-center justify-center px-6 relative">
-          <div className="text-center">
-            <div className="w-10 h-10 rounded-full bg-slate-100 flex items-center justify-center mx-auto mb-3">
-              <svg
-                width="20"
-                height="20"
-                viewBox="0 0 24 24"
-                fill="none"
-                stroke="#94a3b8"
-                strokeWidth="1.5"
-                strokeLinecap="round"
-                strokeLinejoin="round"
-              >
-                <path d="M12 6v12m-3-2.818l.879.659c1.171.879 3.07.879 4.242 0 1.172-.879 1.172-2.303 0-3.182C13.536 12.219 12.768 12 12 12c-.725 0-1.45-.22-2.003-.659-1.106-.879-1.106-2.303 0-3.182s2.9-.879 4.006 0l.415.33M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
-              </svg>
-            </div>
-            <p className="text-[13px] text-slate-400 font-medium">
-              Start demo to see live billing
-            </p>
-            <p className="text-[11px] text-slate-300 mt-1">
-              CPT codes, revenue tracking, and CMS billing
-            </p>
-          </div>
-        </div>
-      )}
-
-      {/* ------------------------------------------------------------------ */}
-      {/* Active content                                                     */}
-      {/* ------------------------------------------------------------------ */}
-      {isActive && (
-        <>
-          {/* Live Billing Feed */}
-          <div className="flex-1 min-h-0 flex flex-col border-t border-slate-200">
-            {/* Feed header + stats row */}
-            <div className="flex items-center justify-between px-3 py-1.5 bg-slate-50/50 border-b border-slate-100 flex-shrink-0">
-              <div className="flex items-center gap-1.5">
-                <svg
-                  width="10"
-                  height="10"
-                  viewBox="0 0 24 24"
-                  fill="none"
-                  stroke="#3b82f6"
-                  strokeWidth="2"
-                  strokeLinecap="round"
-                  strokeLinejoin="round"
-                >
-                  <polyline points="22 12 18 12 15 21 9 3 6 12 2 12" />
-                </svg>
-                <span className="text-[11px] font-bold uppercase tracking-wider text-slate-500">
-                  Live Billing Events
-                </span>
-              </div>
-              <div className="flex items-center gap-3">
-                <span className="text-[11px] text-slate-500">
-                  Duration:{" "}
-                  <span className="font-bold text-slate-700 tabular-nums">
-                    {fmtDuration(billingMinutes)}
-                  </span>
-                </span>
-                <span className="text-[11px] text-slate-500">
-                  Revenue:{" "}
-                  <span className="font-bold text-emerald-600 tabular-nums">
-                    {fmtDollar(animatedRevenue)}
-                  </span>
-                </span>
-              </div>
-            </div>
-
-            {/* 99457 progress bar */}
-            <div className="px-3 py-1.5 flex-shrink-0">
-              <div className="flex items-center justify-between mb-0.5">
-                <span className="text-[11px] text-slate-500 font-medium">
-                  99457: {billingMinutes}/{goalMinutes} min
-                </span>
-                <span className="text-[11px] text-slate-400 font-semibold tabular-nums">
-                  {pct99457}%
-                </span>
-              </div>
-              <div className="h-1.5 bg-slate-200 rounded-full overflow-hidden">
-                <div
-                  className="h-full rounded-full bg-gradient-to-r from-blue-500 to-blue-400 transition-all duration-700 ease-out"
-                  style={{ width: `${pct99457}%` }}
-                />
-              </div>
-            </div>
-
-            {/* Event feed */}
-            <div
-              ref={feedRef}
-              className="flex-1 overflow-y-auto px-3 py-1.5 space-y-1.5 scrollbar-thin"
-            >
-              {billingEvents.length === 0 && (
-                <div className="flex items-center justify-center h-full">
-                  <div className="flex items-center gap-2">
-                    <span className="inline-block w-1.5 h-1.5 rounded-full bg-blue-400 animate-pulse" />
-                    <span className="text-[12px] text-slate-400 italic">
-                      Waiting for billing events...
-                    </span>
-                  </div>
-                </div>
-              )}
-
-              {billingEvents.map((event, idx) => (
-                <BillingEventCard
-                  key={`${event.code}-${idx}`}
-                  event={event}
-                  isNew={idx >= seenEventCount}
-                />
-              ))}
-            </div>
-          </div>
-
-          {/* CMS Code Table */}
-          <div className="border-t border-slate-200 pt-2 flex-shrink-0">
-            <CMSCodeTable
-              billingEvents={billingEvents}
-              isActive={isActive}
-            />
-          </div>
-        </>
-      )}
-
-      {/* ------------------------------------------------------------------ */}
-      {/* Key insight footer (always visible)                                */}
-      {/* ------------------------------------------------------------------ */}
-      <div className="flex-shrink-0 border-t border-slate-200 bg-blue-50/60 px-3 py-2">
-        <div className="flex items-start gap-1.5">
-          <svg
-            width="12"
-            height="12"
-            viewBox="0 0 20 20"
-            fill="currentColor"
-            className="text-blue-600 shrink-0 mt-px"
-          >
-            <path
-              fillRule="evenodd"
-              d="M18 10a8 8 0 11-16 0 8 8 0 0116 0zm-7-4a1 1 0 11-2 0 1 1 0 012 0zM9 9a.75.75 0 000 1.5h.253a.25.25 0 01.244.304l-.459 2.066A1.75 1.75 0 0010.747 15H11a.75.75 0 000-1.5h-.253a.25.25 0 01-.244-.304l.459-2.066A1.75 1.75 0 009.253 9H9z"
-              clipRule="evenodd"
-            />
-          </svg>
-          <p className="text-[11px] leading-relaxed text-blue-800/80 font-medium">
-            AI unlocks scale: 1 nurse + AI = 1,000 patients = $180K+/month
-          </p>
-        </div>
-      </div>
+      <BillingFooter billingMinutes={billingMinutes} isActive={isActive} />
     </div>
   );
 }

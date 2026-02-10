@@ -148,10 +148,10 @@ function DemoPage() {
 
       {/* Three-panel layout */}
       <div className="flex flex-1 overflow-hidden p-3 gap-3 min-h-0">
-        {/* Panel 1: Patient Voice — iPhone */}
+        {/* Panel 1: Patient View — iPhone */}
         <div className="flex items-center justify-center shrink-0">
           <IPhoneFrame
-            label="1. Patient Voice"
+            label="1. Patient View"
             labelColor="#10b981"
             sublabel="The Hook"
           >
@@ -162,13 +162,13 @@ function DemoPage() {
           </IPhoneFrame>
         </div>
 
-        {/* Panel 2: Clinician Triage — Window */}
+        {/* Panel 2: Population Health Dashboard */}
         <div className="flex-1 min-w-0 min-h-0 flex flex-col">
           <div className="flex items-center gap-2 mb-2 shrink-0">
             <span className="text-[11px] font-semibold px-2 py-0.5 rounded-full bg-purple-500/15 text-purple-400 border border-purple-500/30">
-              2. Clinician Triage
+              2. Population Health
             </span>
-            <span className="text-[10px] text-slate-500">The Efficiency</span>
+            <span className="text-[10px] text-slate-500">The Dashboard</span>
           </div>
           <div className="flex-1 min-h-0 rounded-xl overflow-hidden border border-slate-700/50 shadow-2xl bg-white text-slate-900">
             <div className="h-full overflow-y-auto">
@@ -177,13 +177,13 @@ function DemoPage() {
           </div>
         </div>
 
-        {/* Panel 3: Billing Dashboard — Window */}
+        {/* Panel 3: Patient Deep Dive */}
         <div className="flex-1 min-w-0 min-h-0 flex flex-col">
           <div className="flex items-center gap-2 mb-2 shrink-0">
             <span className="text-[11px] font-semibold px-2 py-0.5 rounded-full bg-amber-500/15 text-amber-400 border border-amber-500/30">
-              3. Billing Dashboard
+              3. Patient Deep Dive
             </span>
-            <span className="text-[10px] text-slate-500">The ROI</span>
+            <span className="text-[10px] text-slate-500">Clinical Intelligence</span>
           </div>
           <div className="flex-1 min-h-0 rounded-xl overflow-hidden border border-slate-700/50 shadow-2xl bg-white text-slate-900">
             <div className="h-full overflow-y-auto">

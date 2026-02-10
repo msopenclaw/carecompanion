@@ -21,6 +21,23 @@ interface ScriptLine {
 }
 
 // ---------------------------------------------------------------------------
+// 3-day BP trend data
+// ---------------------------------------------------------------------------
+
+interface BPReading {
+  label: string;
+  sys: number;
+  dia: number;
+  color: "green" | "yellow" | "red";
+}
+
+const BP_TREND: BPReading[] = [
+  { label: "2 days ago", sys: 132, dia: 86, color: "green" },
+  { label: "Yesterday", sys: 142, dia: 90, color: "yellow" },
+  { label: "Today", sys: 155, dia: 95, color: "red" },
+];
+
+// ---------------------------------------------------------------------------
 // Fallback conversation script (if ElevenLabs SDK fails)
 // ---------------------------------------------------------------------------
 
@@ -84,6 +101,85 @@ function VoiceWaveform({ active }: { active: boolean }) {
 }
 
 // ---------------------------------------------------------------------------
+// 3-day BP Trend mini-timeline component
+// ---------------------------------------------------------------------------
+
+function BPTrendTimeline({ visibleCount }: { visibleCount: number }) {
+  const colorMap = {
+    green: {
+      dot: "bg-emerald-400",
+      line: "bg-emerald-400/40",
+      text: "text-emerald-400",
+      bg: "bg-emerald-500/10",
+      border: "border-emerald-500/30",
+    },
+    yellow: {
+      dot: "bg-amber-400",
+      line: "bg-amber-400/40",
+      text: "text-amber-400",
+      bg: "bg-amber-500/10",
+      border: "border-amber-500/30",
+    },
+    red: {
+      dot: "bg-red-400",
+      line: "bg-red-400/40",
+      text: "text-red-400",
+      bg: "bg-red-500/10",
+      border: "border-red-500/30",
+    },
+  };
+
+  return (
+    <div
+      className="mx-3 mb-1.5 px-2.5 py-2 rounded-lg bg-slate-800/80 border border-slate-700/50"
+      style={{ animation: "slideUp 0.3s ease-out both" }}
+    >
+      <div className="text-[8px] text-slate-400 uppercase tracking-wider font-bold mb-2">
+        3-Day BP Trend
+      </div>
+      <div className="flex items-end justify-between gap-1">
+        {BP_TREND.map((reading, idx) => {
+          const visible = idx < visibleCount;
+          const colors = colorMap[reading.color];
+          // Bar height proportional to systolic (scale: 120=min, 160=max)
+          const minSys = 120;
+          const maxSys = 165;
+          const barHeight = ((reading.sys - minSys) / (maxSys - minSys)) * 40 + 12;
+
+          return (
+            <div
+              key={idx}
+              className="flex-1 flex flex-col items-center gap-1"
+              style={{
+                opacity: visible ? 1 : 0,
+                transform: visible ? "translateY(0)" : "translateY(8px)",
+                transition: "opacity 0.4s ease-out, transform 0.4s ease-out",
+              }}
+            >
+              <div
+                className={`text-[10px] font-bold tabular-nums ${colors.text}`}
+              >
+                {reading.sys}/{reading.dia}
+              </div>
+              <div
+                className={`w-full rounded-t-sm ${colors.dot}`}
+                style={{
+                  height: `${barHeight}px`,
+                  transition: "height 0.4s ease-out",
+                }}
+              />
+              <div className="text-[7px] text-slate-500 leading-tight text-center">
+                {reading.label}
+              </div>
+            </div>
+          );
+        })}
+      </div>
+    </div>
+  );
+}
+
+// ---------------------------------------------------------------------------
 // Main component
 // ---------------------------------------------------------------------------
 
@@ -94,7 +190,7 @@ export default function VoiceAgent({ patientName }: VoiceAgentProps) {
     addTranscript,
     addLog,
     setPhaseActive,
-    endDemo,
+    completeCall,
     updateBilling,
   } = useDemo();
 
@@ -108,6 +204,9 @@ export default function VoiceAgent({ patientName }: VoiceAgentProps) {
   const [statusColor, setStatusColor] = useState<"green" | "yellow">("green");
   const [showAlertBanner, setShowAlertBanner] = useState(false);
   const [isLive, setIsLive] = useState(false);
+  const [trendVisible, setTrendVisible] = useState(0); // 0-3 how many trend bars shown
+  const [showTrend, setShowTrend] = useState(false);
+  const [showAnalyzingHint, setShowAnalyzingHint] = useState(false);
 
   // Refs
   const timeoutsRef = useRef<ReturnType<typeof setTimeout>[]>([]);
@@ -183,11 +282,11 @@ export default function VoiceAgent({ patientName }: VoiceAgentProps) {
       setAiSpeaking(false);
       setIsListening(false);
       setPhonePhase("ended");
-      endDemo();
+      completeCall();
       addLog("voice", "Call ended — session complete");
     }, cumDelay + 1200);
     timeoutsRef.current.push(tEnd);
-  }, [patientName, addTranscript, addLog, endDemo, updateBilling]);
+  }, [patientName, addTranscript, addLog, completeCall, updateBilling]);
 
   // ------ Request microphone permission upfront ------
   const requestMicPermission = useCallback(async (): Promise<boolean> => {
@@ -220,6 +319,8 @@ export default function VoiceAgent({ patientName }: VoiceAgentProps) {
       const { Conversation } = await import("@elevenlabs/client");
       addLog("voice", "ElevenLabs SDK loaded, connecting...");
 
+      const firstMsg = `Good morning, ${patientName}! This is CareCompanion AI calling. I noticed your blood pressure reading this morning was 155 over 95, which is a bit higher than your usual range. I wanted to check in with you — did you remember to take your Lisinopril last evening?`;
+
       const conversation = await Conversation.startSession({
         agentId: "agent_8601kh042d5yf7atvdqa6nbfm9yb",
         connectionType: "webrtc",
@@ -251,7 +352,7 @@ SAFETY RULES — you MUST follow these:
 - Always offer to connect them with Dr. Patel for clinical decisions.
 - Speak in simple, clear language appropriate for a senior patient.`,
             },
-            firstMessage: `Good morning, ${patientName}! This is CareCompanion AI calling. I noticed your blood pressure reading this morning was 155 over 95, which is a bit higher than your usual range. I wanted to check in with you — did you remember to take your Lisinopril last evening?`,
+            firstMessage: firstMsg,
             language: "en",
           },
         },
@@ -266,7 +367,7 @@ SAFETY RULES — you MUST follow these:
           setIsListening(false);
           setAiSpeaking(false);
           setPhonePhase("ended");
-          endDemo();
+          completeCall();
           addLog("voice", "Call ended — session disconnected");
           conversationRef.current = null;
         },
@@ -305,7 +406,7 @@ SAFETY RULES — you MUST follow these:
       addLog("voice", `ElevenLabs unavailable: ${errorMsg}`);
       return false;
     }
-  }, [addLog, addTranscript, endDemo, requestMicPermission, patientName]);
+  }, [addLog, addTranscript, completeCall, requestMicPermission, patientName]);
 
   // ------ Accept incoming call ------
   const acceptCall = useCallback(async () => {
@@ -349,19 +450,37 @@ SAFETY RULES — you MUST follow these:
     setAiSpeaking(false);
     setIsListening(false);
     setPhonePhase("ended");
-    endDemo();
+    completeCall();
     addLog("voice", "Call ended by user");
-  }, [endDemo, addLog, stopMicStream]);
+  }, [completeCall, addLog, stopMicStream]);
 
-  // ------ Demo phase transitions ------
+  // ------ Demo phase: "detecting" — animate 3-day BP trend ------
   useEffect(() => {
-    if (demoPhase !== "connecting") return;
+    if (demoPhase !== "detecting") return;
     if (phonePhase !== "app") return;
 
     addLog("voice", "AI monitoring detected vitals anomaly...");
 
-    // Step 1: BP spikes, alert appears
+    // Show the trend container
+    const t0 = setTimeout(() => {
+      setShowTrend(true);
+    }, 300);
+
+    // Animate each day appearing 500ms apart
     const t1 = setTimeout(() => {
+      setTrendVisible(1); // Day 1: 132/86 green
+    }, 800);
+
+    const t2 = setTimeout(() => {
+      setTrendVisible(2); // Day 2: 142/90 yellow
+    }, 1300);
+
+    const t3 = setTimeout(() => {
+      setTrendVisible(3); // Day 3: 155/95 red
+    }, 1800);
+
+    // After all 3 shown, update the main BP card to 155/95 + alert state
+    const t4 = setTimeout(() => {
       setPhonePhase("alert");
       setBpSys(155);
       setBpDia(95);
@@ -369,16 +488,38 @@ SAFETY RULES — you MUST follow these:
       setShowAlertBanner(true);
       addLog("rules", "Threshold rule: BP 155/95 exceeds 140/90 limit");
       addLog("nlp", "Composite: missed dose + elevated BP detected");
-    }, 1000);
+    }, 2500);
 
-    // Step 2: Incoming call
-    const t2 = setTimeout(() => {
-      setPhonePhase("ringing");
-      addLog("voice", "Initiating ElevenLabs voice call to patient...");
-    }, 4000);
+    // Do NOT auto-advance to ringing — that's controlled by Panel 2 via triggerCall
 
-    // Step 3: Auto-accept after 3s (user can tap Accept sooner)
-    const t3 = setTimeout(async () => {
+    timeoutsRef.current.push(t0, t1, t2, t3, t4);
+
+    return () => {
+      timeoutsRef.current.forEach(clearTimeout);
+      timeoutsRef.current = [];
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [demoPhase]);
+
+  // ------ Demo phase: "analyzing" — show hint text ------
+  useEffect(() => {
+    if (demoPhase === "analyzing") {
+      setShowAnalyzingHint(true);
+    } else {
+      setShowAnalyzingHint(false);
+    }
+  }, [demoPhase]);
+
+  // ------ Demo phase: "calling" — show incoming call, auto-accept after 3s ------
+  useEffect(() => {
+    if (demoPhase !== "calling") return;
+
+    // Show incoming call screen
+    setPhonePhase("ringing");
+    addLog("voice", "Initiating ElevenLabs voice call to patient...");
+
+    // Auto-accept after 3s (user can tap Accept sooner)
+    const tAutoAccept = setTimeout(async () => {
       setPhonePhase("call");
       setPhaseActive();
       const connected = await connectToElevenLabs();
@@ -387,9 +528,9 @@ SAFETY RULES — you MUST follow these:
         setIsListening(true);
         runSimulatedConversation();
       }
-    }, 7000);
+    }, 3000);
 
-    timeoutsRef.current.push(t1, t2, t3);
+    timeoutsRef.current.push(tAutoAccept);
 
     return () => {
       timeoutsRef.current.forEach(clearTimeout);
@@ -411,6 +552,8 @@ SAFETY RULES — you MUST follow these:
         conversationRef.current = null;
       }
       stopMicStream();
+      timeoutsRef.current.forEach(clearTimeout);
+      timeoutsRef.current = [];
       setPhonePhase("app");
       setBpSys(130);
       setBpDia(85);
@@ -420,6 +563,9 @@ SAFETY RULES — you MUST follow these:
       setIsListening(false);
       setElapsed(0);
       setIsLive(false);
+      setTrendVisible(0);
+      setShowTrend(false);
+      setShowAnalyzingHint(false);
     }
   }, [demoPhase, stopMicStream]);
 
@@ -485,7 +631,7 @@ SAFETY RULES — you MUST follow these:
       `}</style>
 
       {/* ================================================================ */}
-      {/* PATIENT APP SCREEN (idle / alert)                                */}
+      {/* PATIENT APP SCREEN (idle / detecting / analyzing / alert)        */}
       {/* ================================================================ */}
       {(phonePhase === "app" || phonePhase === "alert") && (
         <div className="flex flex-col h-full">
@@ -517,6 +663,11 @@ SAFETY RULES — you MUST follow these:
               {statusColor === "green" ? "All Good" : "Attention"}
             </div>
           </div>
+
+          {/* 3-Day BP Trend Timeline (shown during detecting phase) */}
+          {showTrend && (
+            <BPTrendTimeline visibleCount={trendVisible} />
+          )}
 
           {/* Alert banner */}
           {showAlertBanner && (
@@ -628,9 +779,13 @@ SAFETY RULES — you MUST follow these:
           <div className="mt-auto px-3 pb-3">
             <div className="text-center">
               <div className="text-[8px] text-slate-500">
-                {phonePhase === "alert" ? "CareCompanion AI is reviewing your readings..." : "Last check-in: Today, 8:00 AM"}
+                {showAnalyzingHint
+                  ? "AI reviewing your readings..."
+                  : phonePhase === "alert"
+                    ? "CareCompanion AI is reviewing your readings..."
+                    : "Last check-in: Today, 8:00 AM"}
               </div>
-              {phonePhase === "alert" && (
+              {(phonePhase === "alert" || showAnalyzingHint) && (
                 <div className="flex items-center justify-center gap-1 mt-1">
                   {[0, 1, 2].map((i) => (
                     <span key={i} className="inline-block w-1 h-1 rounded-full bg-amber-400"

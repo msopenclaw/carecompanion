@@ -1,588 +1,165 @@
 "use client";
 
 import { useDemo } from "./demo-context";
+import { useState, useEffect } from "react";
 
 // ---------------------------------------------------------------------------
-// Static data
+// Static flowsheet data — last 5 readings for Margaret Chen
 // ---------------------------------------------------------------------------
 
-interface DayData {
-  day: number;
+interface FlowsheetRow {
   label: string;
-  systolic: number;
-  morningMed: boolean;
-  eveningMed: boolean | null; // null = today (no evening yet)
+  unit: string;
+  values: { date: string; value: number; flag?: "high" | "low" | "critical" }[];
 }
 
-const TIMELINE_DATA: DayData[] = [
-  { day: 1, label: "Mon", systolic: 128, morningMed: true, eveningMed: true },
-  { day: 2, label: "Tue", systolic: 131, morningMed: true, eveningMed: true },
-  { day: 3, label: "Wed", systolic: 130, morningMed: true, eveningMed: true },
-  { day: 4, label: "Thu", systolic: 132, morningMed: true, eveningMed: true },
-  { day: 5, label: "Fri", systolic: 142, morningMed: true, eveningMed: false },
-  { day: 6, label: "Sat", systolic: 148, morningMed: true, eveningMed: false },
-  { day: 7, label: "Sun", systolic: 155, morningMed: false, eveningMed: null },
-];
-
-// Chart range constants
-const BP_MIN = 110;
-const BP_MAX = 170;
-const NORMAL_LOW = 120;
-const NORMAL_HIGH = 140;
-
-function bpBarPercent(systolic: number): number {
-  return ((systolic - BP_MIN) / (BP_MAX - BP_MIN)) * 100;
-}
-
-function normalBandBottom(): number {
-  return ((NORMAL_LOW - BP_MIN) / (BP_MAX - BP_MIN)) * 100;
-}
-
-function normalBandHeight(): number {
-  return ((NORMAL_HIGH - NORMAL_LOW) / (BP_MAX - BP_MIN)) * 100;
-}
-
-function bpColor(systolic: number): string {
-  if (systolic <= 135) return "#22c55e"; // green
-  if (systolic <= 143) return "#eab308"; // yellow
-  if (systolic <= 150) return "#f59e0b"; // amber
-  return "#ef4444"; // red
-}
-
-// ---------------------------------------------------------------------------
-// Sub-components
-// ---------------------------------------------------------------------------
-
-function ConditionBadge({ label, color }: { label: string; color: string }) {
-  const colorMap: Record<string, string> = {
-    blue: "bg-blue-100 text-blue-700 border-blue-200",
-    rose: "bg-rose-100 text-rose-700 border-rose-200",
-    purple: "bg-purple-100 text-purple-700 border-purple-200",
-  };
-  return (
-    <span
-      className={`inline-flex items-center text-[10px] font-bold px-1.5 py-0.5 rounded-full border ${colorMap[color] ?? colorMap.blue}`}
-    >
-      {label}
-    </span>
-  );
-}
-
-// ---------------------------------------------------------------------------
-// BP Timeline Chart (pure CSS)
-// ---------------------------------------------------------------------------
-
-function BPTimeline({ isActive }: { isActive: boolean }) {
-  const chartHeight = 120;
-
-  return (
-    <div className="px-3 py-2">
-      <div className="flex items-center justify-between mb-1.5">
-        <h3 className="text-[11px] font-bold text-slate-500 uppercase tracking-wider">
-          7-Day Vital Timeline
-        </h3>
-        <div className="flex items-center gap-2">
-          <span className="flex items-center gap-1 text-[10px] text-slate-400">
-            <span className="inline-block w-2 h-2 rounded-sm bg-green-200 border border-green-300" />
-            Normal
-          </span>
-          <span className="flex items-center gap-1 text-[10px] text-slate-400">
-            <span className="inline-block w-2 h-2 rounded-sm bg-red-400" />
-            Elevated
-          </span>
-        </div>
-      </div>
-
-      {/* Chart container */}
-      <div className="rounded-lg border border-slate-200 bg-white p-2 pb-0">
-        {/* Y-axis labels + chart area */}
-        <div className="flex gap-1">
-          {/* Y-axis */}
-          <div
-            className="flex flex-col justify-between text-[9px] text-slate-400 font-mono pr-0.5 flex-shrink-0"
-            style={{ height: chartHeight }}
-          >
-            <span>170</span>
-            <span>150</span>
-            <span>130</span>
-            <span>110</span>
-          </div>
-
-          {/* Bars area */}
-          <div className="flex-1 relative" style={{ height: chartHeight }}>
-            {/* Normal range band */}
-            <div
-              className="absolute left-0 right-0 bg-green-50 border-y border-green-200/50 rounded-sm"
-              style={{
-                bottom: `${normalBandBottom()}%`,
-                height: `${normalBandHeight()}%`,
-              }}
-            />
-
-            {/* Threshold line at 140 */}
-            <div
-              className="absolute left-0 right-0 border-t border-dashed border-red-300/60"
-              style={{
-                bottom: `${((NORMAL_HIGH - BP_MIN) / (BP_MAX - BP_MIN)) * 100}%`,
-              }}
-            >
-              <span className="absolute right-0 -top-3 text-[8px] text-red-400 font-medium">
-                140
-              </span>
-            </div>
-
-            {/* Bar columns */}
-            <div className="relative flex items-end justify-between h-full px-1 gap-1">
-              {TIMELINE_DATA.map((d) => {
-                const pct = bpBarPercent(d.systolic);
-                const color = bpColor(d.systolic);
-                const isToday = d.day === 7;
-                return (
-                  <div
-                    key={d.day}
-                    className="flex-1 flex flex-col items-center justify-end h-full relative"
-                  >
-                    {/* BP value label */}
-                    <span
-                      className="text-[9px] font-bold mb-0.5 tabular-nums"
-                      style={{ color }}
-                    >
-                      {d.systolic}
-                    </span>
-                    {/* Bar */}
-                    <div
-                      className={`w-full max-w-[20px] rounded-t-sm transition-all duration-500 relative ${isToday && isActive ? "dd-pulse-bar" : ""}`}
-                      style={{
-                        height: `${pct}%`,
-                        backgroundColor: color,
-                        opacity: isToday && isActive ? 1 : 0.85,
-                      }}
-                    >
-                      {isToday && (
-                        <div
-                          className="absolute -top-1 left-1/2 -translate-x-1/2 w-2 h-2 rounded-full border-2 border-white"
-                          style={{ backgroundColor: color }}
-                        />
-                      )}
-                    </div>
-                  </div>
-                );
-              })}
-            </div>
-          </div>
-        </div>
-
-        {/* X-axis day labels */}
-        <div className="flex pl-7 pr-1 mt-1 mb-1">
-          <div className="flex-1 flex justify-between gap-1 px-1">
-            {TIMELINE_DATA.map((d) => (
-              <div
-                key={d.day}
-                className={`flex-1 text-center text-[9px] font-medium ${d.day === 7 ? "text-red-500 font-bold" : "text-slate-400"}`}
-              >
-                {d.day === 7 ? "Today" : d.label}
-              </div>
-            ))}
-          </div>
-        </div>
-
-        {/* Medication adherence row */}
-        <div className="border-t border-slate-100 pt-1 pb-1.5 mt-0.5">
-          <div className="flex items-center gap-1 pl-1 mb-1">
-            <span className="text-[9px] font-semibold text-slate-400 uppercase tracking-wider">
-              Medication
-            </span>
-          </div>
-          <div className="flex pl-7 pr-1">
-            <div className="flex-1 flex justify-between gap-1 px-1">
-              {TIMELINE_DATA.map((d) => (
-                <div
-                  key={d.day}
-                  className="flex-1 flex flex-col items-center gap-0.5"
-                >
-                  {/* Morning dose */}
-                  <span
-                    className={`text-[10px] leading-none ${d.morningMed ? "text-green-500" : "text-red-500 font-bold"}`}
-                    title={
-                      d.morningMed ? "AM dose taken" : "AM dose missed"
-                    }
-                  >
-                    {d.morningMed ? "\u2713" : "\u2717"}
-                  </span>
-                  {/* Evening dose */}
-                  {d.eveningMed !== null ? (
-                    <span
-                      className={`text-[10px] leading-none ${d.eveningMed ? "text-green-500" : "text-red-500 font-bold"}`}
-                      title={
-                        d.eveningMed ? "PM dose taken" : "PM dose missed"
-                      }
-                    >
-                      {d.eveningMed ? "\u2713" : "\u2717"}
-                    </span>
-                  ) : (
-                    <span
-                      className="text-[10px] leading-none text-slate-300"
-                      title="PM dose pending"
-                    >
-                      --
-                    </span>
-                  )}
-                </div>
-              ))}
-            </div>
-          </div>
-          <div className="flex items-center gap-3 pl-7 mt-1">
-            <span className="flex items-center gap-0.5 text-[9px] text-slate-400">
-              <span className="text-green-500">{"\u2713"}</span> Taken
-            </span>
-            <span className="flex items-center gap-0.5 text-[9px] text-slate-400">
-              <span className="text-red-500">{"\u2717"}</span> Missed
-            </span>
-          </div>
-        </div>
-      </div>
-    </div>
-  );
-}
-
-// ---------------------------------------------------------------------------
-// AI Clinical Summary Card
-// ---------------------------------------------------------------------------
-
-function AIClinicalSummary({ isActive }: { isActive: boolean }) {
-  return (
-    <div className="px-3 py-1">
-      <div
-        className={`rounded-lg border-2 p-2.5 transition-all duration-500 ${
-          isActive
-            ? "border-amber-400 bg-amber-50/40 dd-highlight-pulse"
-            : "border-amber-300 bg-amber-50/30"
-        }`}
-      >
-        <div className="flex items-center justify-between mb-1.5">
-          <div className="flex items-center gap-1.5">
-            <svg
-              width="12"
-              height="12"
-              viewBox="0 0 24 24"
-              fill="none"
-              className="text-amber-600"
-              stroke="currentColor"
-              strokeWidth={2}
-            >
-              <path
-                strokeLinecap="round"
-                strokeLinejoin="round"
-                d="M12 9v3.75m-9.303 3.376c-.866 1.5.217 3.374 1.948 3.374h14.71c1.73 0 2.813-1.874 1.948-3.374L13.949 3.378c-.866-1.5-3.032-1.5-3.898 0L2.697 16.126zM12 15.75h.007v.008H12v-.008z"
-              />
-            </svg>
-            <h3 className="text-[12px] font-bold text-slate-800">
-              AI Clinical Summary
-            </h3>
-          </div>
-          <div className="flex items-center gap-1.5">
-            <span className="inline-flex items-center text-[9px] font-bold px-1.5 py-0.5 rounded-full bg-amber-100 text-amber-700 border border-amber-200">
-              Severity: Elevated
-            </span>
-            <span className="inline-flex items-center text-[9px] font-bold px-1.5 py-0.5 rounded-full bg-blue-100 text-blue-700 border border-blue-200">
-              87% confidence
-            </span>
-          </div>
-        </div>
-        <p className="text-[12px] leading-relaxed text-slate-700">
-          3-day BP escalation (142{"\u2192"}148{"\u2192"}155 systolic) temporally
-          correlated with 2 missed evening lisinopril doses. Weight +1.2 lbs
-          over same period suggests early fluid retention. Given CHF history,
-          recommend provider review within 48 hours.
-        </p>
-        <div className="flex items-center gap-1 mt-2 pt-1.5 border-t border-amber-200/60">
-          <svg
-            width="10"
-            height="10"
-            viewBox="0 0 24 24"
-            fill="none"
-            stroke="#64748b"
-            strokeWidth={2}
-          >
-            <path
-              strokeLinecap="round"
-              strokeLinejoin="round"
-              d="M9.813 15.904L9 18.75l-.813-2.846a4.5 4.5 0 00-3.09-3.09L2.25 12l2.846-.813a4.5 4.5 0 003.09-3.09L9 5.25l.813 2.846a4.5 4.5 0 003.09 3.09L15.75 12l-2.846.813a4.5 4.5 0 00-3.09 3.09z"
-            />
-          </svg>
-          <span className="text-[10px] text-slate-500 italic">
-            Generated by CareCompanion AI
-          </span>
-        </div>
-      </div>
-    </div>
-  );
-}
-
-// ---------------------------------------------------------------------------
-// Historical Pattern Match Card
-// ---------------------------------------------------------------------------
-
-function HistoricalPatternMatch() {
-  return (
-    <div className="px-3 py-1">
-      <div className="rounded-lg border border-slate-200 bg-slate-50/50 p-2.5">
-        <div className="flex items-center justify-between mb-1">
-          <div className="flex items-center gap-1.5">
-            <svg
-              width="11"
-              height="11"
-              viewBox="0 0 24 24"
-              fill="none"
-              stroke="#6366f1"
-              strokeWidth={2}
-            >
-              <path
-                strokeLinecap="round"
-                strokeLinejoin="round"
-                d="M12 6v6h4.5m4.5 0a9 9 0 11-18 0 9 9 0 0118 0z"
-              />
-            </svg>
-            <h3 className="text-[11px] font-bold text-slate-700">
-              Historical Pattern Match
-            </h3>
-          </div>
-          <span className="inline-flex items-center text-[9px] font-bold px-1.5 py-0.5 rounded-full bg-indigo-100 text-indigo-700 border border-indigo-200">
-            91% similarity
-          </span>
-        </div>
-        <p className="text-[11px] leading-relaxed text-slate-600">
-          This pattern previously occurred Oct 12{"\u2013"}18, 2024. Resolved
-          after medication adherence restored. BP normalized within 5 days.
-        </p>
-      </div>
-    </div>
-  );
-}
-
-// ---------------------------------------------------------------------------
-// Recommended Actions
-// ---------------------------------------------------------------------------
-
-interface ActionItem {
-  id: number;
-  label: string;
-  statusIdle: "complete" | "pending";
-  statusActive: "complete" | "pending";
-  detail: string;
-}
-
-const ACTIONS: ActionItem[] = [
+const FLOWSHEET_DATA: FlowsheetRow[] = [
   {
-    id: 1,
-    label: "Medication reminder set for 6 PM",
-    statusIdle: "complete",
-    statusActive: "complete",
-    detail: "Lisinopril 10mg",
+    label: "BP Systolic",
+    unit: "mmHg",
+    values: [
+      { date: "01/28", value: 128 },
+      { date: "01/31", value: 130 },
+      { date: "02/04", value: 132, flag: "high" },
+      { date: "02/06", value: 142, flag: "high" },
+      { date: "02/08", value: 155, flag: "critical" },
+    ],
   },
   {
-    id: 2,
-    label: "Flag for Dr. Patel review",
-    statusIdle: "pending",
-    statusActive: "complete",
-    detail: "Priority: elevated",
+    label: "BP Diastolic",
+    unit: "mmHg",
+    values: [
+      { date: "01/28", value: 82 },
+      { date: "01/31", value: 84 },
+      { date: "02/04", value: 85 },
+      { date: "02/06", value: 90, flag: "high" },
+      { date: "02/08", value: 95, flag: "critical" },
+    ],
   },
   {
-    id: 3,
-    label: "Schedule follow-up BP check in 48 hrs",
-    statusIdle: "pending",
-    statusActive: "pending",
-    detail: "Auto-schedule",
+    label: "Heart Rate",
+    unit: "bpm",
+    values: [
+      { date: "01/28", value: 72 },
+      { date: "01/31", value: 74 },
+      { date: "02/04", value: 76 },
+      { date: "02/06", value: 78 },
+      { date: "02/08", value: 82 },
+    ],
+  },
+  {
+    label: "Weight",
+    unit: "lbs",
+    values: [
+      { date: "01/28", value: 158 },
+      { date: "01/31", value: 158 },
+      { date: "02/04", value: 159 },
+      { date: "02/06", value: 160 },
+      { date: "02/08", value: 161, flag: "high" },
+    ],
+  },
+  {
+    label: "Glucose",
+    unit: "mg/dL",
+    values: [
+      { date: "01/28", value: 118 },
+      { date: "01/31", value: 122 },
+      { date: "02/04", value: 115 },
+      { date: "02/06", value: 126 },
+      { date: "02/08", value: 130 },
+    ],
+  },
+  {
+    label: "SpO2",
+    unit: "%",
+    values: [
+      { date: "01/28", value: 97 },
+      { date: "01/31", value: 97 },
+      { date: "02/04", value: 96 },
+      { date: "02/06", value: 96 },
+      { date: "02/08", value: 95 },
+    ],
   },
 ];
 
-function RecommendedActions({ isActive }: { isActive: boolean }) {
-  return (
-    <div className="px-3 py-1">
-      <h3 className="text-[11px] font-bold text-slate-500 uppercase tracking-wider mb-1.5">
-        Recommended Actions
-      </h3>
-      <div className="space-y-1">
-        {ACTIONS.map((action) => {
-          const status = isActive ? action.statusActive : action.statusIdle;
-          const isComplete = status === "complete";
-          return (
-            <div
-              key={action.id}
-              className={`flex items-center gap-2 rounded-md border px-2.5 py-1.5 transition-all duration-300 ${
-                isComplete
-                  ? "border-green-200 bg-green-50/50"
-                  : "border-blue-200 bg-blue-50/30"
-              }`}
-            >
-              {/* Status indicator / button */}
-              {isComplete ? (
-                <div className="flex items-center justify-center w-5 h-5 rounded-full bg-green-500 flex-shrink-0">
-                  <svg
-                    width="10"
-                    height="10"
-                    viewBox="0 0 24 24"
-                    fill="none"
-                    stroke="white"
-                    strokeWidth={3}
-                    strokeLinecap="round"
-                    strokeLinejoin="round"
-                  >
-                    <path d="M20 6L9 17l-5-5" />
-                  </svg>
-                </div>
-              ) : (
-                <div className="flex items-center justify-center w-5 h-5 rounded-full border-2 border-blue-400 bg-white flex-shrink-0 cursor-pointer hover:bg-blue-50 transition-colors">
-                  <div className="w-1.5 h-1.5 rounded-full bg-blue-400" />
-                </div>
-              )}
+const MEDICATIONS = [
+  { name: "Lisinopril 10mg", sig: "BID (twice daily)", status: "Active" },
+  { name: "Metformin 500mg", sig: "TID (three times daily)", status: "Active" },
+];
 
-              {/* Label + detail */}
-              <div className="flex-1 min-w-0">
-                <p
-                  className={`text-[12px] font-medium truncate ${isComplete ? "text-slate-600" : "text-slate-800"}`}
-                >
-                  {action.label}
-                </p>
-                <p className="text-[10px] text-slate-400">{action.detail}</p>
-              </div>
+const PROBLEMS = [
+  { name: "Essential Hypertension", code: "I10" },
+  { name: "Type 2 Diabetes Mellitus", code: "E11.9" },
+  { name: "Heart Failure, unspecified", code: "I50.9" },
+];
 
-              {/* Status badge */}
-              <span
-                className={`text-[10px] font-bold px-1.5 py-0.5 rounded-full flex-shrink-0 ${
-                  isComplete
-                    ? "bg-green-100 text-green-700"
-                    : "bg-blue-100 text-blue-700"
-                }`}
-              >
-                {isComplete ? "Complete" : "Pending"}
-              </span>
-            </div>
-          );
-        })}
-      </div>
-    </div>
-  );
+// Sidebar nav items
+type NavItem = {
+  id: string;
+  label: string;
+  icon: string;
+  active?: boolean;
+};
+
+const NAV_ITEMS: NavItem[] = [
+  { id: "chart", label: "Chart Review", icon: "chart" },
+  { id: "notes", label: "Notes", icon: "notes" },
+  { id: "flowsheets", label: "Flowsheets", icon: "flowsheets", active: true },
+  { id: "results", label: "Results", icon: "results" },
+  { id: "inbox", label: "In Basket", icon: "inbox" },
+];
+
+// ---------------------------------------------------------------------------
+// Sidebar Icon SVGs
+// ---------------------------------------------------------------------------
+
+function NavIcon({ type, className }: { type: string; className?: string }) {
+  const cls = className || "w-4 h-4";
+  switch (type) {
+    case "chart":
+      return (
+        <svg className={cls} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={1.8}>
+          <path strokeLinecap="round" strokeLinejoin="round" d="M9 12h3.75M9 15h3.75M9 18h3.75m3 .75H18a2.25 2.25 0 002.25-2.25V6.108c0-1.135-.845-2.098-1.976-2.192a48.424 48.424 0 00-1.123-.08m-5.801 0c-.065.21-.1.433-.1.664 0 .414.336.75.75.75h4.5a.75.75 0 00.75-.75 2.25 2.25 0 00-.1-.664m-5.8 0A2.251 2.251 0 0113.5 2.25H15a2.25 2.25 0 012.15 1.586m-5.8 0c-.376.023-.75.05-1.124.08C9.095 4.01 8.25 4.973 8.25 6.108V8.25m0 0H4.875c-.621 0-1.125.504-1.125 1.125v11.25c0 .621.504 1.125 1.125 1.125h9.75c.621 0 1.125-.504 1.125-1.125V9.375c0-.621-.504-1.125-1.125-1.125H8.25zM6.75 12h.008v.008H6.75V12zm0 3h.008v.008H6.75V15zm0 3h.008v.008H6.75V18z" />
+        </svg>
+      );
+    case "notes":
+      return (
+        <svg className={cls} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={1.8}>
+          <path strokeLinecap="round" strokeLinejoin="round" d="M19.5 14.25v-2.625a3.375 3.375 0 00-3.375-3.375h-1.5A1.125 1.125 0 0113.5 7.125v-1.5a3.375 3.375 0 00-3.375-3.375H8.25m0 12.75h7.5m-7.5 3H12M10.5 2.25H5.625c-.621 0-1.125.504-1.125 1.125v17.25c0 .621.504 1.125 1.125 1.125h12.75c.621 0 1.125-.504 1.125-1.125V11.25a9 9 0 00-9-9z" />
+        </svg>
+      );
+    case "flowsheets":
+      return (
+        <svg className={cls} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={1.8}>
+          <path strokeLinecap="round" strokeLinejoin="round" d="M3.75 3v11.25A2.25 2.25 0 006 16.5h2.25M3.75 3h-1.5m1.5 0h16.5m0 0h1.5m-1.5 0v11.25A2.25 2.25 0 0118 16.5h-2.25m-7.5 0h7.5m-7.5 0l-1 3m8.5-3l1 3m0 0l.5 1.5m-.5-1.5h-9.5m0 0l-.5 1.5M9 11.25v-5.5m3 5.5V8.75m3 2.5V10" />
+        </svg>
+      );
+    case "results":
+      return (
+        <svg className={cls} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={1.8}>
+          <path strokeLinecap="round" strokeLinejoin="round" d="M9.75 3.104v5.714a2.25 2.25 0 01-.659 1.591L5 14.5M9.75 3.104c-.251.023-.501.05-.75.082m.75-.082a24.301 24.301 0 014.5 0m0 0v5.714c0 .597.237 1.17.659 1.591L19 14.5M14.25 3.104c.251.023.501.05.75.082M19 14.5l-1.756 4.388a2.25 2.25 0 01-2.09 1.362H8.846a2.25 2.25 0 01-2.09-1.362L5 14.5m14 0H5" />
+        </svg>
+      );
+    case "inbox":
+      return (
+        <svg className={cls} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={1.8}>
+          <path strokeLinecap="round" strokeLinejoin="round" d="M2.25 13.5h3.86a2.25 2.25 0 012.012 1.244l.256.512a2.25 2.25 0 002.013 1.244h3.218a2.25 2.25 0 002.013-1.244l.256-.512a2.25 2.25 0 012.013-1.244h3.859m-17.5 0V6.75A2.25 2.25 0 014.5 4.5h15A2.25 2.25 0 0121.75 6.75v6.75m-17.5 0v6a2.25 2.25 0 002.25 2.25h10.5a2.25 2.25 0 002.25-2.25v-6" />
+        </svg>
+      );
+    default:
+      return null;
+  }
 }
 
 // ---------------------------------------------------------------------------
-// Billing Documentation Footer
+// Value cell color for flowsheet
 // ---------------------------------------------------------------------------
 
-function BillingFooter({
-  billingMinutes,
-  isActive,
-}: {
-  billingMinutes: number;
-  isActive: boolean;
-}) {
-  const displayMinutes = isActive ? billingMinutes : 14;
-  const minuteStr =
-    displayMinutes === 0
-      ? "0 min"
-      : `${Math.floor(displayMinutes)} min`;
-
-  return (
-    <div className="flex-shrink-0 border-t border-slate-200 bg-slate-50/80 px-3 py-2">
-      <div className="flex items-center justify-between mb-1">
-        <h3 className="text-[11px] font-bold text-slate-500 uppercase tracking-wider">
-          Billing Documentation
-        </h3>
-        <span className="text-[10px] text-slate-400">Auto-generated</span>
-      </div>
-      <div className="grid grid-cols-2 gap-x-3 gap-y-1">
-        {/* Time tracked */}
-        <div className="flex items-center gap-1.5">
-          <svg
-            width="10"
-            height="10"
-            viewBox="0 0 24 24"
-            fill="none"
-            stroke="#64748b"
-            strokeWidth={2}
-          >
-            <path
-              strokeLinecap="round"
-              strokeLinejoin="round"
-              d="M12 6v6h4.5m4.5 0a9 9 0 11-18 0 9 9 0 0118 0z"
-            />
-          </svg>
-          <span className="text-[11px] text-slate-600">
-            Time tracked:{" "}
-            <span className="font-bold text-slate-800 tabular-nums">
-              {minuteStr}
-            </span>
-          </span>
-        </div>
-
-        {/* Codes suggested */}
-        <div className="flex items-center gap-1.5">
-          <svg
-            width="10"
-            height="10"
-            viewBox="0 0 24 24"
-            fill="none"
-            stroke="#64748b"
-            strokeWidth={2}
-          >
-            <path
-              strokeLinecap="round"
-              strokeLinejoin="round"
-              d="M17.25 6.75L22.5 12l-5.25 5.25m-10.5 0L1.5 12l5.25-5.25m7.5-3l-4.5 16.5"
-            />
-          </svg>
-          <span className="text-[11px] text-slate-600">
-            <span className="font-mono font-bold text-amber-600">99457</span>
-            <span className="text-slate-400 mx-0.5">(In Progress)</span>
-            <span className="font-mono font-bold text-green-600">99454</span>
-            <span className="text-slate-400 mx-0.5">(Eligible)</span>
-          </span>
-        </div>
-
-        {/* Clinical note */}
-        <div className="flex items-center gap-1.5">
-          <svg
-            width="10"
-            height="10"
-            viewBox="0 0 24 24"
-            fill="none"
-            stroke="#22c55e"
-            strokeWidth={2.5}
-          >
-            <path
-              strokeLinecap="round"
-              strokeLinejoin="round"
-              d="M9 12.75L11.25 15 15 9.75M21 12a9 9 0 11-18 0 9 9 0 0118 0z"
-            />
-          </svg>
-          <span className="text-[11px] text-slate-600">
-            AI-drafted clinical note ready
-          </span>
-        </div>
-
-        {/* Compliant */}
-        <div className="flex items-center gap-1.5">
-          <svg
-            width="10"
-            height="10"
-            viewBox="0 0 24 24"
-            fill="none"
-            stroke="#22c55e"
-            strokeWidth={2.5}
-          >
-            <path
-              strokeLinecap="round"
-              strokeLinejoin="round"
-              d="M9 12.75L11.25 15 15 9.75m-3-7.036A11.959 11.959 0 013.598 6 11.99 11.99 0 003 9.749c0 5.592 3.824 10.29 9 11.623 5.176-1.332 9-6.03 9-11.622 0-1.31-.21-2.571-.598-3.751h-.152c-3.196 0-6.1-1.248-8.25-3.285z"
-            />
-          </svg>
-          <span className="text-[11px] text-slate-600">
-            Compliant documentation auto-generated
-          </span>
-        </div>
-      </div>
-    </div>
-  );
+function valueCellStyle(flag?: "high" | "low" | "critical"): React.CSSProperties {
+  if (flag === "critical") return { color: "#b91c1c", fontWeight: 700, backgroundColor: "#fef2f2" };
+  if (flag === "high") return { color: "#c2410c", fontWeight: 600, backgroundColor: "#fff7ed" };
+  if (flag === "low") return { color: "#1d4ed8", fontWeight: 600, backgroundColor: "#eff6ff" };
+  return {};
 }
 
 // ---------------------------------------------------------------------------
@@ -590,115 +167,848 @@ function BillingFooter({
 // ---------------------------------------------------------------------------
 
 export function LiveBilling() {
-  const { demoPhase, billingMinutes } = useDemo();
-  const isActive = demoPhase !== "idle";
+  const { demoPhase, resolveCase } = useDemo();
+
+  // BPA alert visibility states
+  const [showBpaBanner, setShowBpaBanner] = useState(false);
+  const [showFullSummary, setShowFullSummary] = useState(false);
+  const [inBasketBadge, setInBasketBadge] = useState(false);
+
+  // Handle phase transitions
+  useEffect(() => {
+    if (demoPhase === "documenting") {
+      // Show In Basket badge immediately
+      setInBasketBadge(true);
+      // Show BPA banner after 2 seconds
+      const timer = setTimeout(() => {
+        setShowBpaBanner(true);
+      }, 2000);
+      return () => clearTimeout(timer);
+    }
+    if (demoPhase === "complete") {
+      setInBasketBadge(true);
+      setShowBpaBanner(true);
+      setShowFullSummary(true);
+    }
+    if (demoPhase === "idle") {
+      setShowBpaBanner(false);
+      setShowFullSummary(false);
+      setInBasketBadge(false);
+    }
+  }, [demoPhase]);
+
+  const handleBpaClick = () => {
+    setShowFullSummary(true);
+  };
+
+  const isDocumentingOrComplete = demoPhase === "documenting" || demoPhase === "complete";
 
   return (
-    <div className="flex flex-col h-full w-full bg-white text-slate-800 font-sans select-none overflow-hidden">
+    <div style={{
+      display: "flex",
+      flexDirection: "column",
+      height: "100%",
+      width: "100%",
+      fontFamily: "-apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif",
+      fontSize: 13,
+      color: "#1e293b",
+      backgroundColor: "#f1f5f9",
+      userSelect: "none",
+      overflow: "hidden",
+    }}>
       {/* Keyframes */}
       <style>{`
-        @keyframes ddHighlightPulse {
-          0%, 100% { box-shadow: 0 0 0 0 rgba(245, 158, 11, 0); }
-          50% { box-shadow: 0 0 12px 2px rgba(245, 158, 11, 0.25); }
+        @keyframes epicBpaSlideIn {
+          0% { transform: translateY(-100%); opacity: 0; }
+          100% { transform: translateY(0); opacity: 1; }
         }
-        @keyframes ddBarPulse {
-          0%, 100% { opacity: 0.85; }
-          50% { opacity: 1; }
+        @keyframes epicBpaPulse {
+          0%, 100% { box-shadow: 0 2px 8px rgba(217, 119, 6, 0.15); }
+          50% { box-shadow: 0 2px 16px rgba(217, 119, 6, 0.35); }
         }
-        .dd-highlight-pulse {
-          animation: ddHighlightPulse 2s ease-in-out infinite;
+        @keyframes epicFadeIn {
+          0% { opacity: 0; transform: translateY(8px); }
+          100% { opacity: 1; transform: translateY(0); }
         }
-        .dd-pulse-bar {
-          animation: ddBarPulse 1.5s ease-in-out infinite;
+        @keyframes epicBadgePulse {
+          0%, 100% { transform: scale(1); }
+          50% { transform: scale(1.2); }
         }
-        .scrollbar-thin::-webkit-scrollbar { width: 3px; }
-        .scrollbar-thin::-webkit-scrollbar-track { background: transparent; }
-        .scrollbar-thin::-webkit-scrollbar-thumb { background: #cbd5e1; border-radius: 3px; }
-        .scrollbar-thin { scrollbar-width: thin; scrollbar-color: #cbd5e1 transparent; }
+        .epic-bpa-slide {
+          animation: epicBpaSlideIn 0.4s ease-out forwards, epicBpaPulse 2.5s ease-in-out 0.4s infinite;
+        }
+        .epic-fade-in {
+          animation: epicFadeIn 0.5s ease-out forwards;
+        }
+        .epic-badge-pulse {
+          animation: epicBadgePulse 1.5s ease-in-out infinite;
+        }
+        .epic-scroll::-webkit-scrollbar { width: 6px; }
+        .epic-scroll::-webkit-scrollbar-track { background: #f1f5f9; }
+        .epic-scroll::-webkit-scrollbar-thumb { background: #94a3b8; border-radius: 3px; }
+        .epic-scroll { scrollbar-width: thin; scrollbar-color: #94a3b8 #f1f5f9; }
       `}</style>
 
-      {/* ------------------------------------------------------------------ */}
-      {/* Header                                                             */}
-      {/* ------------------------------------------------------------------ */}
-      <div className="flex items-center justify-between px-3 py-2 border-b border-slate-200 bg-white flex-shrink-0">
-        <div className="flex items-center gap-2">
-          <div className="flex items-center justify-center w-6 h-6 rounded-md bg-gradient-to-br from-violet-500 to-indigo-600">
-            <svg
-              className="w-3 h-3 text-white"
-              fill="none"
-              viewBox="0 0 24 24"
-              stroke="currentColor"
-              strokeWidth={2.5}
-            >
-              <path
-                strokeLinecap="round"
-                strokeLinejoin="round"
-                d="M15.75 6a3.75 3.75 0 11-7.5 0 3.75 3.75 0 017.5 0zM4.501 20.118a7.5 7.5 0 0114.998 0A17.933 17.933 0 0112 21.75c-2.676 0-5.216-.584-7.499-1.632z"
-              />
-            </svg>
+      {/* ================================================================== */}
+      {/* Epic Header Bar                                                     */}
+      {/* ================================================================== */}
+      <div style={{
+        display: "flex",
+        alignItems: "center",
+        justifyContent: "space-between",
+        padding: "6px 12px",
+        background: "linear-gradient(180deg, #1e3a5f 0%, #162d4a 100%)",
+        flexShrink: 0,
+        borderBottom: "2px solid #0f2440",
+      }}>
+        {/* Left: logo + patient */}
+        <div style={{ display: "flex", alignItems: "center", gap: 12 }}>
+          {/* Epic-style logo */}
+          <div style={{
+            display: "flex",
+            alignItems: "center",
+            gap: 4,
+          }}>
+            <div style={{
+              width: 20,
+              height: 20,
+              borderRadius: 3,
+              background: "linear-gradient(135deg, #60a5fa, #3b82f6)",
+              display: "flex",
+              alignItems: "center",
+              justifyContent: "center",
+            }}>
+              <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="white" strokeWidth={2.5}>
+                <path strokeLinecap="round" strokeLinejoin="round" d="M12 6.042A8.967 8.967 0 006 3.75c-1.052 0-2.062.18-3 .512v14.25A8.987 8.987 0 016 18c2.305 0 4.408.867 6 2.292m0-14.25a8.966 8.966 0 016-2.292c1.052 0 2.062.18 3 .512v14.25A8.987 8.987 0 0018 18a8.967 8.967 0 00-6 2.292m0-14.25v14.25" />
+              </svg>
+            </div>
+            <span style={{
+              color: "white",
+              fontSize: 14,
+              fontWeight: 700,
+              letterSpacing: 1.5,
+            }}>
+              EHR
+            </span>
           </div>
-          <div className="leading-none">
-            <div className="flex items-center gap-1.5">
-              <h1 className="text-[13px] font-bold text-slate-800 tracking-tight">
-                Patient Deep Dive
-              </h1>
-              <span className="text-[11px] text-slate-400 font-medium">
-                {"\u2014"} Margaret Chen, 74F
-              </span>
-            </div>
-            <div className="flex items-center gap-1 mt-1">
-              <ConditionBadge label="HTN" color="blue" />
-              <ConditionBadge label="T2D" color="purple" />
-              <ConditionBadge label="CHF" color="rose" />
-              <span className="text-[10px] text-slate-400 ml-1">
-                Provider: <span className="font-semibold text-slate-600">Dr. Patel</span>
-              </span>
-            </div>
+
+          {/* Separator */}
+          <div style={{ width: 1, height: 20, backgroundColor: "rgba(255,255,255,0.2)" }} />
+
+          {/* Patient context */}
+          <div style={{ display: "flex", flexDirection: "column", gap: 1 }}>
+            <span style={{ color: "white", fontSize: 12, fontWeight: 600 }}>
+              Chen, Margaret &middot; 74F &middot; MRN: 847291
+            </span>
+            <span style={{ color: "rgba(255,255,255,0.55)", fontSize: 10 }}>
+              DOB: 03/15/1951 &middot; PCP: Dr. Patel, MD
+            </span>
           </div>
         </div>
-        <div className="flex items-center gap-1.5 flex-shrink-0">
-          {isActive ? (
-            <>
-              <span className="relative flex h-1.5 w-1.5">
-                <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-amber-400 opacity-75" />
-                <span className="relative inline-flex rounded-full h-1.5 w-1.5 bg-amber-500" />
-              </span>
-              <span className="inline-flex items-center text-[10px] font-bold px-2 py-0.5 rounded-full bg-amber-100 text-amber-700 border border-amber-200">
-                Attention
-              </span>
-            </>
+
+        {/* Right: user info */}
+        <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+          <div style={{
+            width: 24,
+            height: 24,
+            borderRadius: "50%",
+            backgroundColor: "rgba(255,255,255,0.15)",
+            display: "flex",
+            alignItems: "center",
+            justifyContent: "center",
+          }}>
+            <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="rgba(255,255,255,0.8)" strokeWidth={2}>
+              <path strokeLinecap="round" strokeLinejoin="round" d="M15.75 6a3.75 3.75 0 11-7.5 0 3.75 3.75 0 017.5 0zM4.501 20.118a7.5 7.5 0 0114.998 0A17.933 17.933 0 0112 21.75c-2.676 0-5.216-.584-7.499-1.632z" />
+            </svg>
+          </div>
+          <div style={{ display: "flex", flexDirection: "column" }}>
+            <span style={{ color: "white", fontSize: 11, fontWeight: 600 }}>Dr. Patel, MD</span>
+            <span style={{ color: "rgba(255,255,255,0.45)", fontSize: 9 }}>Internal Medicine</span>
+          </div>
+        </div>
+      </div>
+
+      {/* ================================================================== */}
+      {/* Body: Sidebar + Main Content                                        */}
+      {/* ================================================================== */}
+      <div style={{ display: "flex", flex: 1, minHeight: 0, overflow: "hidden" }}>
+
+        {/* -------------------------------------------------------------- */}
+        {/* Left Sidebar                                                     */}
+        {/* -------------------------------------------------------------- */}
+        <div style={{
+          width: 72,
+          flexShrink: 0,
+          backgroundColor: "#e2e8f0",
+          borderRight: "1px solid #cbd5e1",
+          display: "flex",
+          flexDirection: "column",
+          paddingTop: 6,
+        }}>
+          {NAV_ITEMS.map((item) => {
+            const isActive = item.active;
+            const showBadge = item.id === "inbox" && inBasketBadge;
+            return (
+              <div
+                key={item.id}
+                style={{
+                  display: "flex",
+                  flexDirection: "column",
+                  alignItems: "center",
+                  justifyContent: "center",
+                  padding: "8px 4px",
+                  cursor: "pointer",
+                  position: "relative",
+                  backgroundColor: isActive ? "#ffffff" : "transparent",
+                  borderLeft: isActive ? "3px solid #1e3a5f" : "3px solid transparent",
+                  color: isActive ? "#1e3a5f" : "#64748b",
+                  transition: "background-color 0.15s",
+                }}
+              >
+                <div style={{ position: "relative" }}>
+                  <NavIcon type={item.icon} className="w-4 h-4" />
+                  {showBadge && (
+                    <div
+                      className="epic-badge-pulse"
+                      style={{
+                        position: "absolute",
+                        top: -4,
+                        right: -6,
+                        width: 14,
+                        height: 14,
+                        borderRadius: "50%",
+                        backgroundColor: "#dc2626",
+                        color: "white",
+                        fontSize: 8,
+                        fontWeight: 700,
+                        display: "flex",
+                        alignItems: "center",
+                        justifyContent: "center",
+                        border: "1.5px solid white",
+                      }}
+                    >
+                      1
+                    </div>
+                  )}
+                </div>
+                <span style={{
+                  fontSize: 9,
+                  fontWeight: isActive ? 700 : 500,
+                  marginTop: 3,
+                  textAlign: "center",
+                  lineHeight: 1.1,
+                }}>
+                  {item.label}
+                </span>
+              </div>
+            );
+          })}
+        </div>
+
+        {/* -------------------------------------------------------------- */}
+        {/* Main Content Area                                                */}
+        {/* -------------------------------------------------------------- */}
+        <div
+          className="epic-scroll"
+          style={{
+            flex: 1,
+            overflow: "auto",
+            backgroundColor: "#ffffff",
+            position: "relative",
+          }}
+        >
+          {/* ============================================================ */}
+          {/* BPA Banner (slides in during "documenting" phase)             */}
+          {/* ============================================================ */}
+          {showBpaBanner && !showFullSummary && (
+            <div
+              className="epic-bpa-slide"
+              onClick={handleBpaClick}
+              style={{
+                margin: "8px 10px 0 10px",
+                padding: "10px 14px",
+                backgroundColor: "#fef3c7",
+                border: "1px solid #f59e0b",
+                borderLeft: "4px solid #d97706",
+                borderRadius: 4,
+                cursor: "pointer",
+                display: "flex",
+                alignItems: "center",
+                gap: 10,
+              }}
+            >
+              {/* Warning icon */}
+              <div style={{
+                width: 28,
+                height: 28,
+                borderRadius: "50%",
+                backgroundColor: "#fbbf24",
+                display: "flex",
+                alignItems: "center",
+                justifyContent: "center",
+                flexShrink: 0,
+              }}>
+                <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="#92400e" strokeWidth={2.5}>
+                  <path strokeLinecap="round" strokeLinejoin="round" d="M12 9v3.75m-9.303 3.376c-.866 1.5.217 3.374 1.948 3.374h14.71c1.73 0 2.813-1.874 1.948-3.374L13.949 3.378c-.866-1.5-3.032-1.5-3.898 0L2.697 16.126zM12 15.75h.007v.008H12v-.008z" />
+                </svg>
+              </div>
+              <div style={{ flex: 1 }}>
+                <div style={{
+                  fontSize: 12,
+                  fontWeight: 700,
+                  color: "#92400e",
+                  marginBottom: 2,
+                }}>
+                  BPA: CareCompanion AI Alert &mdash; Margaret Chen
+                </div>
+                <div style={{ fontSize: 11, color: "#a16207" }}>
+                  AI-initiated patient outreach completed. Review required.
+                </div>
+              </div>
+              <div style={{
+                fontSize: 10,
+                color: "#92400e",
+                fontWeight: 600,
+                whiteSpace: "nowrap",
+              }}>
+                Click to review &rarr;
+              </div>
+            </div>
+          )}
+
+          {/* ============================================================ */}
+          {/* Full AI Summary (replaces flowsheet in "complete" phase)      */}
+          {/* ============================================================ */}
+          {showFullSummary ? (
+            <div className="epic-fade-in" style={{ padding: "10px 10px 16px 10px" }}>
+              {/* Section header */}
+              <div style={{
+                display: "flex",
+                alignItems: "center",
+                justifyContent: "space-between",
+                marginBottom: 8,
+              }}>
+                <div style={{ display: "flex", alignItems: "center", gap: 6 }}>
+                  <div style={{
+                    width: 6,
+                    height: 6,
+                    borderRadius: "50%",
+                    backgroundColor: "#f59e0b",
+                  }} />
+                  <span style={{ fontSize: 11, fontWeight: 700, color: "#64748b", textTransform: "uppercase", letterSpacing: 0.8 }}>
+                    BPA &mdash; Best Practice Alert
+                  </span>
+                </div>
+                <span style={{ fontSize: 10, color: "#94a3b8" }}>
+                  {new Date().toLocaleString("en-US", {
+                    month: "short",
+                    day: "numeric",
+                    year: "numeric",
+                    hour: "numeric",
+                    minute: "2-digit",
+                    hour12: true,
+                  })}
+                </span>
+              </div>
+
+              {/* -------------------------------------------------------- */}
+              {/* AI Clinical Summary Card                                  */}
+              {/* -------------------------------------------------------- */}
+              <div style={{
+                backgroundColor: "#fffbeb",
+                border: "1px solid #fcd34d",
+                borderLeft: "4px solid #d97706",
+                borderRadius: 4,
+                padding: "12px 14px",
+                marginBottom: 10,
+              }}>
+                {/* Card header */}
+                <div style={{
+                  display: "flex",
+                  alignItems: "center",
+                  justifyContent: "space-between",
+                  marginBottom: 8,
+                }}>
+                  <div style={{ display: "flex", alignItems: "center", gap: 6 }}>
+                    <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="#d97706" strokeWidth={2}>
+                      <path strokeLinecap="round" strokeLinejoin="round" d="M9.813 15.904L9 18.75l-.813-2.846a4.5 4.5 0 00-3.09-3.09L2.25 12l2.846-.813a4.5 4.5 0 003.09-3.09L9 5.25l.813 2.846a4.5 4.5 0 003.09 3.09L15.75 12l-2.846.813a4.5 4.5 0 00-3.09 3.09zM18.259 8.715L18 9.75l-.259-1.035a3.375 3.375 0 00-2.455-2.456L14.25 6l1.036-.259a3.375 3.375 0 002.455-2.456L18 2.25l.259 1.035a3.375 3.375 0 002.455 2.456L21.75 6l-1.036.259a3.375 3.375 0 00-2.455 2.456z" />
+                    </svg>
+                    <span style={{ fontSize: 13, fontWeight: 700, color: "#1e293b" }}>
+                      CareCompanion AI &mdash; Patient Outreach Summary
+                    </span>
+                  </div>
+                  <span style={{
+                    fontSize: 9,
+                    fontWeight: 600,
+                    color: "#92400e",
+                    backgroundColor: "#fde68a",
+                    padding: "2px 8px",
+                    borderRadius: 10,
+                  }}>
+                    Pending Review
+                  </span>
+                </div>
+
+                {/* Summary text */}
+                <p style={{
+                  fontSize: 12,
+                  lineHeight: 1.6,
+                  color: "#334155",
+                  margin: "0 0 10px 0",
+                }}>
+                  Automated voice outreach completed with Margaret Chen regarding 3-day BP
+                  escalation (132&#8594;142&#8594;155 mmHg). Patient confirmed missing 2
+                  evening Lisinopril doses. Medication reminder set for 6:00 PM. Patient
+                  reports feeling well otherwise. No chest pain, SOB, or other concerning
+                  symptoms reported.
+                </p>
+
+                {/* Metadata row */}
+                <div style={{
+                  display: "flex",
+                  flexWrap: "wrap",
+                  gap: 12,
+                  fontSize: 10,
+                  color: "#64748b",
+                  paddingTop: 8,
+                  borderTop: "1px solid #fde68a",
+                }}>
+                  <span>
+                    <span style={{ fontWeight: 600, color: "#475569" }}>Confidence:</span> 87%
+                  </span>
+                  <span>
+                    <span style={{ fontWeight: 600, color: "#475569" }}>Call Duration:</span> 4m 32s
+                  </span>
+                  <span>
+                    <span style={{ fontWeight: 600, color: "#475569" }}>CPT:</span>{" "}
+                    <span style={{ fontFamily: "monospace", fontWeight: 600, color: "#d97706" }}>99457</span>,{" "}
+                    <span style={{ fontFamily: "monospace", fontWeight: 600, color: "#16a34a" }}>99454</span>
+                  </span>
+                  <span>
+                    <span style={{ fontWeight: 600, color: "#475569" }}>Source:</span> AI Voice Agent
+                  </span>
+                </div>
+              </div>
+
+              {/* -------------------------------------------------------- */}
+              {/* Next Steps                                                */}
+              {/* -------------------------------------------------------- */}
+              <div style={{
+                backgroundColor: "#f8fafc",
+                border: "1px solid #e2e8f0",
+                borderRadius: 4,
+                padding: "10px 14px",
+                marginBottom: 10,
+              }}>
+                <div style={{
+                  fontSize: 11,
+                  fontWeight: 700,
+                  color: "#475569",
+                  textTransform: "uppercase",
+                  letterSpacing: 0.6,
+                  marginBottom: 8,
+                }}>
+                  Completed Actions
+                </div>
+                {[
+                  "Evening Lisinopril reminder set (6:00 PM)",
+                  "Follow-up BP check scheduled (48 hours)",
+                  "Clinical note auto-drafted and ready for signature",
+                ].map((step, i) => (
+                  <div key={i} style={{
+                    display: "flex",
+                    alignItems: "center",
+                    gap: 8,
+                    padding: "5px 0",
+                    borderBottom: i < 2 ? "1px solid #f1f5f9" : "none",
+                  }}>
+                    <div style={{
+                      width: 18,
+                      height: 18,
+                      borderRadius: "50%",
+                      backgroundColor: "#dcfce7",
+                      border: "1.5px solid #22c55e",
+                      display: "flex",
+                      alignItems: "center",
+                      justifyContent: "center",
+                      flexShrink: 0,
+                    }}>
+                      <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="#16a34a" strokeWidth={3}>
+                        <path strokeLinecap="round" strokeLinejoin="round" d="M4.5 12.75l6 6 9-13.5" />
+                      </svg>
+                    </div>
+                    <span style={{ fontSize: 12, color: "#334155" }}>{step}</span>
+                  </div>
+                ))}
+              </div>
+
+              {/* -------------------------------------------------------- */}
+              {/* Provider Action Buttons (pills)                          */}
+              {/* -------------------------------------------------------- */}
+              <div style={{
+                backgroundColor: "#ffffff",
+                border: "1px solid #e2e8f0",
+                borderRadius: 4,
+                padding: "10px 14px",
+              }}>
+                <div style={{
+                  fontSize: 11,
+                  fontWeight: 700,
+                  color: "#475569",
+                  textTransform: "uppercase",
+                  letterSpacing: 0.6,
+                  marginBottom: 10,
+                }}>
+                  Provider Actions
+                </div>
+
+                <div style={{
+                  display: "flex",
+                  flexWrap: "wrap",
+                  gap: 8,
+                  marginBottom: 10,
+                }}>
+                  {/* Adjust Medication */}
+                  <button style={{
+                    padding: "7px 16px",
+                    borderRadius: 20,
+                    border: "none",
+                    cursor: "pointer",
+                    fontSize: 12,
+                    fontWeight: 600,
+                    color: "#ffffff",
+                    background: "linear-gradient(135deg, #3b82f6, #2563eb)",
+                    boxShadow: "0 1px 3px rgba(37, 99, 235, 0.3)",
+                    transition: "transform 0.1s, box-shadow 0.1s",
+                  }}>
+                    Adjust Medication
+                  </button>
+
+                  {/* Schedule Visit */}
+                  <button style={{
+                    padding: "7px 16px",
+                    borderRadius: 20,
+                    border: "none",
+                    cursor: "pointer",
+                    fontSize: 12,
+                    fontWeight: 600,
+                    color: "#ffffff",
+                    background: "linear-gradient(135deg, #8b5cf6, #7c3aed)",
+                    boxShadow: "0 1px 3px rgba(124, 58, 237, 0.3)",
+                    transition: "transform 0.1s, box-shadow 0.1s",
+                  }}>
+                    Schedule Visit
+                  </button>
+
+                  {/* Order Labs */}
+                  <button style={{
+                    padding: "7px 16px",
+                    borderRadius: 20,
+                    border: "none",
+                    cursor: "pointer",
+                    fontSize: 12,
+                    fontWeight: 600,
+                    color: "#ffffff",
+                    background: "linear-gradient(135deg, #14b8a6, #0d9488)",
+                    boxShadow: "0 1px 3px rgba(13, 148, 136, 0.3)",
+                    transition: "transform 0.1s, box-shadow 0.1s",
+                  }}>
+                    Order Labs
+                  </button>
+
+                  {/* Resolve */}
+                  <button
+                    onClick={resolveCase}
+                    style={{
+                      padding: "7px 16px",
+                      borderRadius: 20,
+                      border: "none",
+                      cursor: "pointer",
+                      fontSize: 12,
+                      fontWeight: 600,
+                      color: "#ffffff",
+                      background: "linear-gradient(135deg, #22c55e, #16a34a)",
+                      boxShadow: "0 1px 3px rgba(22, 163, 74, 0.3)",
+                      transition: "transform 0.1s, box-shadow 0.1s",
+                    }}
+                  >
+                    Resolve
+                  </button>
+                </div>
+
+                <div style={{
+                  fontSize: 10,
+                  color: "#94a3b8",
+                  fontStyle: "italic",
+                  textAlign: "center",
+                }}>
+                  Select an action or resolve to close this alert
+                </div>
+              </div>
+            </div>
           ) : (
-            <>
-              <span className="relative inline-flex rounded-full h-1.5 w-1.5 bg-green-500" />
-              <span className="inline-flex items-center text-[10px] font-bold px-2 py-0.5 rounded-full bg-green-100 text-green-700 border border-green-200">
-                Stable
-              </span>
-            </>
+            /* ============================================================ */
+            /* Patient Flowsheet View (default — idle through active)       */
+            /* ============================================================ */
+            <div style={{ padding: "8px 10px 16px 10px" }}>
+              {/* Section heading */}
+              <div style={{
+                display: "flex",
+                alignItems: "center",
+                justifyContent: "space-between",
+                marginBottom: 6,
+                marginTop: 2,
+              }}>
+                <div style={{ display: "flex", alignItems: "center", gap: 6 }}>
+                  <div style={{
+                    width: 6,
+                    height: 6,
+                    borderRadius: "50%",
+                    backgroundColor: "#3b82f6",
+                  }} />
+                  <span style={{ fontSize: 11, fontWeight: 700, color: "#64748b", textTransform: "uppercase", letterSpacing: 0.8 }}>
+                    Flowsheet &mdash; Vital Signs
+                  </span>
+                </div>
+                <span style={{ fontSize: 10, color: "#94a3b8" }}>
+                  Last updated: Today
+                </span>
+              </div>
+
+              {/* -------------------------------------------------------- */}
+              {/* Flowsheet Table                                           */}
+              {/* -------------------------------------------------------- */}
+              <div style={{
+                border: "1px solid #e2e8f0",
+                borderRadius: 4,
+                overflow: "hidden",
+                marginBottom: 10,
+              }}>
+                <table style={{
+                  width: "100%",
+                  borderCollapse: "collapse",
+                  fontSize: 11,
+                }}>
+                  <thead>
+                    <tr style={{ backgroundColor: "#f1f5f9" }}>
+                      <th style={{
+                        textAlign: "left",
+                        padding: "6px 8px",
+                        fontSize: 10,
+                        fontWeight: 700,
+                        color: "#475569",
+                        borderBottom: "1px solid #e2e8f0",
+                        borderRight: "1px solid #e2e8f0",
+                        width: "25%",
+                      }}>
+                        Parameter
+                      </th>
+                      {FLOWSHEET_DATA[0].values.map((v, i) => (
+                        <th key={i} style={{
+                          textAlign: "center",
+                          padding: "6px 4px",
+                          fontSize: 10,
+                          fontWeight: 600,
+                          color: i === FLOWSHEET_DATA[0].values.length - 1 ? "#dc2626" : "#64748b",
+                          borderBottom: "1px solid #e2e8f0",
+                          borderRight: i < FLOWSHEET_DATA[0].values.length - 1 ? "1px solid #f1f5f9" : "none",
+                          backgroundColor: i === FLOWSHEET_DATA[0].values.length - 1 ? "#fef2f2" : undefined,
+                        }}>
+                          {v.date}
+                        </th>
+                      ))}
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {FLOWSHEET_DATA.map((row, ri) => (
+                      <tr key={ri} style={{ backgroundColor: ri % 2 === 0 ? "#ffffff" : "#fafbfc" }}>
+                        <td style={{
+                          padding: "5px 8px",
+                          fontWeight: 600,
+                          color: "#334155",
+                          fontSize: 11,
+                          borderRight: "1px solid #e2e8f0",
+                          borderBottom: ri < FLOWSHEET_DATA.length - 1 ? "1px solid #f1f5f9" : "none",
+                          whiteSpace: "nowrap",
+                        }}>
+                          {row.label}
+                          <span style={{ fontSize: 9, color: "#94a3b8", fontWeight: 400, marginLeft: 4 }}>
+                            {row.unit}
+                          </span>
+                        </td>
+                        {row.values.map((v, vi) => (
+                          <td key={vi} style={{
+                            textAlign: "center",
+                            padding: "5px 4px",
+                            fontSize: 11,
+                            fontFamily: "monospace",
+                            borderBottom: ri < FLOWSHEET_DATA.length - 1 ? "1px solid #f1f5f9" : "none",
+                            borderRight: vi < row.values.length - 1 ? "1px solid #f8fafc" : "none",
+                            ...valueCellStyle(v.flag),
+                          }}>
+                            {v.value}
+                            {v.flag === "critical" && (
+                              <span style={{ fontSize: 8, marginLeft: 2, color: "#dc2626" }}>&#9650;</span>
+                            )}
+                            {v.flag === "high" && (
+                              <span style={{ fontSize: 8, marginLeft: 2, color: "#ea580c" }}>&#9650;</span>
+                            )}
+                          </td>
+                        ))}
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+
+              {/* -------------------------------------------------------- */}
+              {/* Active Medications                                        */}
+              {/* -------------------------------------------------------- */}
+              <div style={{
+                border: "1px solid #e2e8f0",
+                borderRadius: 4,
+                padding: "8px 10px",
+                marginBottom: 10,
+              }}>
+                <div style={{
+                  fontSize: 10,
+                  fontWeight: 700,
+                  color: "#64748b",
+                  textTransform: "uppercase",
+                  letterSpacing: 0.6,
+                  marginBottom: 6,
+                }}>
+                  Active Medications
+                </div>
+                {MEDICATIONS.map((med, i) => (
+                  <div key={i} style={{
+                    display: "flex",
+                    alignItems: "center",
+                    justifyContent: "space-between",
+                    padding: "4px 0",
+                    borderBottom: i < MEDICATIONS.length - 1 ? "1px solid #f1f5f9" : "none",
+                  }}>
+                    <div style={{ display: "flex", alignItems: "center", gap: 6 }}>
+                      <div style={{
+                        width: 5,
+                        height: 5,
+                        borderRadius: "50%",
+                        backgroundColor: "#3b82f6",
+                        flexShrink: 0,
+                      }} />
+                      <span style={{ fontSize: 12, fontWeight: 600, color: "#1e293b" }}>{med.name}</span>
+                      <span style={{ fontSize: 10, color: "#94a3b8" }}>{med.sig}</span>
+                    </div>
+                    <span style={{
+                      fontSize: 9,
+                      fontWeight: 600,
+                      color: "#16a34a",
+                      backgroundColor: "#f0fdf4",
+                      padding: "1px 6px",
+                      borderRadius: 8,
+                      border: "1px solid #bbf7d0",
+                    }}>
+                      {med.status}
+                    </span>
+                  </div>
+                ))}
+              </div>
+
+              {/* -------------------------------------------------------- */}
+              {/* Active Problems                                          */}
+              {/* -------------------------------------------------------- */}
+              <div style={{
+                border: "1px solid #e2e8f0",
+                borderRadius: 4,
+                padding: "8px 10px",
+              }}>
+                <div style={{
+                  fontSize: 10,
+                  fontWeight: 700,
+                  color: "#64748b",
+                  textTransform: "uppercase",
+                  letterSpacing: 0.6,
+                  marginBottom: 6,
+                }}>
+                  Active Problem List
+                </div>
+                {PROBLEMS.map((prob, i) => (
+                  <div key={i} style={{
+                    display: "flex",
+                    alignItems: "center",
+                    justifyContent: "space-between",
+                    padding: "4px 0",
+                    borderBottom: i < PROBLEMS.length - 1 ? "1px solid #f1f5f9" : "none",
+                  }}>
+                    <div style={{ display: "flex", alignItems: "center", gap: 6 }}>
+                      <div style={{
+                        width: 5,
+                        height: 5,
+                        borderRadius: 1,
+                        backgroundColor: i === 0 ? "#ef4444" : i === 1 ? "#a855f6" : "#f59e0b",
+                        flexShrink: 0,
+                      }} />
+                      <span style={{ fontSize: 12, color: "#1e293b" }}>{prob.name}</span>
+                    </div>
+                    <span style={{
+                      fontSize: 10,
+                      fontFamily: "monospace",
+                      fontWeight: 600,
+                      color: "#64748b",
+                      backgroundColor: "#f1f5f9",
+                      padding: "1px 6px",
+                      borderRadius: 4,
+                    }}>
+                      {prob.code}
+                    </span>
+                  </div>
+                ))}
+              </div>
+            </div>
           )}
         </div>
       </div>
 
-      {/* ------------------------------------------------------------------ */}
-      {/* Scrollable content                                                 */}
-      {/* ------------------------------------------------------------------ */}
-      <div className="flex-1 min-h-0 overflow-y-auto scrollbar-thin">
-        {/* Multi-Vital Timeline */}
-        <BPTimeline isActive={isActive} />
-
-        {/* AI Clinical Summary */}
-        <AIClinicalSummary isActive={isActive} />
-
-        {/* Historical Pattern Match */}
-        <HistoricalPatternMatch />
-
-        {/* Recommended Actions */}
-        <RecommendedActions isActive={isActive} />
+      {/* ================================================================== */}
+      {/* Bottom status bar                                                   */}
+      {/* ================================================================== */}
+      <div style={{
+        display: "flex",
+        alignItems: "center",
+        justifyContent: "space-between",
+        padding: "4px 12px",
+        backgroundColor: "#1e3a5f",
+        borderTop: "1px solid #0f2440",
+        flexShrink: 0,
+      }}>
+        <span style={{ fontSize: 9, color: "rgba(255,255,255,0.45)" }}>
+          Encounter: Office Visit &middot; Feb 08, 2026
+        </span>
+        <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+          {isDocumentingOrComplete && (
+            <span style={{
+              fontSize: 9,
+              color: "#fbbf24",
+              fontWeight: 600,
+              display: "flex",
+              alignItems: "center",
+              gap: 3,
+            }}>
+              <span style={{
+                width: 5,
+                height: 5,
+                borderRadius: "50%",
+                backgroundColor: "#fbbf24",
+                display: "inline-block",
+              }} />
+              1 BPA pending
+            </span>
+          )}
+          <span style={{ fontSize: 9, color: "rgba(255,255,255,0.35)" }}>
+            Powered by CareCompanion AI
+          </span>
+        </div>
       </div>
-
-      {/* ------------------------------------------------------------------ */}
-      {/* Billing Documentation Footer                                       */}
-      {/* ------------------------------------------------------------------ */}
-      <BillingFooter billingMinutes={billingMinutes} isActive={isActive} />
     </div>
   );
 }

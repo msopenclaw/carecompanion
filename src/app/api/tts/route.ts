@@ -10,7 +10,7 @@ export async function POST(request: Request) {
     }
 
     const body = await request.json();
-    const { text } = body as { text: string };
+    const { text, voice } = body as { text: string; voice?: string };
 
     if (!text || text.trim().length === 0) {
       return Response.json(
@@ -19,9 +19,14 @@ export async function POST(request: Request) {
       );
     }
 
-    // Use a warm, friendly voice for elderly patients
-    // "Rachel" voice ID — a calm, clear female voice
-    const voiceId = process.env.ELEVENLABS_VOICE_ID ?? "21m00Tcm4TlvDq8ikWAM";
+    // Voice IDs:
+    // "ai"     → Rachel (calm, professional AI agent voice)
+    // "patient" → Dorothy (warm, older female — Margaret Chen, 72F)
+    const VOICES: Record<string, string> = {
+      ai: "21m00Tcm4TlvDq8ikWAM",      // Rachel
+      patient: "ThT5KcBeYPX3keUQqHPh",  // Dorothy
+    };
+    const voiceId = VOICES[voice ?? "ai"] ?? VOICES.ai;
 
     const response = await fetch(
       `https://api.elevenlabs.io/v1/text-to-speech/${voiceId}/stream`,

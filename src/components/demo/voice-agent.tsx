@@ -1,7 +1,7 @@
 "use client";
 
 import { useState, useEffect, useCallback, useRef } from "react";
-import { useDemo, DAY_DATA, type DayData } from "./demo-context";
+import { useDemo, DAY_DATA, type DayData, type TextMessage } from "./demo-context";
 
 // ---------------------------------------------------------------------------
 // Types
@@ -11,7 +11,7 @@ interface VoiceAgentProps {
   patientName: string;
 }
 
-type PhonePhase = "app" | "alert" | "ringing" | "call" | "ended";
+type PhonePhase = "app" | "texting" | "alert" | "ringing" | "call" | "ended";
 
 interface ScriptLine {
   speaker: "ai" | "patient";
@@ -67,7 +67,7 @@ function delay(ms: number): Promise<void> {
 }
 
 // ---------------------------------------------------------------------------
-// Conversation scripts
+// Conversation scripts (voice calls)
 // ---------------------------------------------------------------------------
 
 /** Day 2 proactive check-in — friendly, trust-building */
@@ -173,9 +173,11 @@ function VoiceWaveform({ active }: { active: boolean }) {
 function TextNotification({
   message,
   onDismiss,
+  onTap,
 }: {
   message: string;
   onDismiss: () => void;
+  onTap: () => void;
 }) {
   const [dismissing, setDismissing] = useState(false);
 
@@ -183,7 +185,7 @@ function TextNotification({
     const t = setTimeout(() => {
       setDismissing(true);
       setTimeout(onDismiss, 400);
-    }, 4000);
+    }, 3500);
     return () => clearTimeout(t);
   }, [onDismiss]);
 
@@ -197,7 +199,7 @@ function TextNotification({
       }}
       onClick={() => {
         setDismissing(true);
-        setTimeout(onDismiss, 350);
+        setTimeout(onTap, 350);
       }}
     >
       <div className="flex items-start gap-2">
@@ -219,6 +221,161 @@ function TextNotification({
 }
 
 // ---------------------------------------------------------------------------
+// TextingView — iMessage-style animated text conversation
+// ---------------------------------------------------------------------------
+
+function TextingView({
+  thread,
+  onComplete,
+}: {
+  thread: TextMessage[];
+  onComplete: () => void;
+}) {
+  const [visibleCount, setVisibleCount] = useState(0);
+  const [showTyping, setShowTyping] = useState(true);
+  const scrollRef = useRef<HTMLDivElement>(null);
+  const completedRef = useRef(false);
+
+  useEffect(() => {
+    if (thread.length === 0) {
+      onComplete();
+      return;
+    }
+
+    let cancelled = false;
+
+    const animate = async () => {
+      // Show first message after brief typing indicator
+      await delay(1200);
+      if (cancelled) return;
+      setShowTyping(false);
+      setVisibleCount(1);
+
+      for (let i = 1; i < thread.length; i++) {
+        // Show typing indicator
+        await delay(800);
+        if (cancelled) return;
+        setShowTyping(true);
+
+        // Typing duration based on message length
+        const typingTime = Math.min(600 + thread[i].text.length * 12, 2200);
+        await delay(typingTime);
+        if (cancelled) return;
+
+        setShowTyping(false);
+        setVisibleCount(i + 1);
+      }
+
+      // All messages shown
+      await delay(1500);
+      if (cancelled) return;
+      if (!completedRef.current) {
+        completedRef.current = true;
+        onComplete();
+      }
+    };
+
+    animate();
+    return () => { cancelled = true; };
+  }, [thread, onComplete]);
+
+  // Auto-scroll as messages appear
+  useEffect(() => {
+    scrollRef.current?.scrollTo({
+      top: scrollRef.current.scrollHeight,
+      behavior: "smooth",
+    });
+  }, [visibleCount, showTyping]);
+
+  const visibleMessages = thread.slice(0, visibleCount);
+
+  // Determine who is "typing" next
+  const nextMessage = visibleCount < thread.length ? thread[visibleCount] : null;
+
+  return (
+    <div className="flex flex-col h-full">
+      {/* Header */}
+      <div className="flex-shrink-0 px-3 pt-2 pb-1.5 border-b border-slate-800/50">
+        <div className="flex items-center gap-2">
+          <div className="w-7 h-7 rounded-full bg-gradient-to-br from-blue-500 to-indigo-600 flex items-center justify-center">
+            <span className="text-white font-bold text-[8px]">CC</span>
+          </div>
+          <div>
+            <div className="text-[10px] font-bold text-white">CareCompanion AI</div>
+            <div className="text-[8px] text-slate-400">Messages</div>
+          </div>
+        </div>
+      </div>
+
+      {/* Message area */}
+      <div ref={scrollRef} className="flex-1 overflow-y-auto px-3 py-2 space-y-2 scrollbar-hide">
+        {visibleMessages.map((msg, idx) => {
+          const isAi = msg.sender === "ai";
+          return (
+            <div
+              key={idx}
+              className={`flex ${isAi ? "justify-start" : "justify-end"}`}
+              style={{ animation: "bubbleFadeIn 0.3s ease-out both" }}
+            >
+              <div
+                className={`max-w-[85%] rounded-2xl px-3 py-2 text-[10px] leading-[1.5] ${
+                  isAi
+                    ? "bg-slate-700/80 text-slate-100 rounded-tl-sm"
+                    : "bg-blue-600 text-white rounded-tr-sm"
+                }`}
+              >
+                {msg.text}
+              </div>
+            </div>
+          );
+        })}
+
+        {/* Typing indicator */}
+        {showTyping && nextMessage && (
+          <div className={`flex ${nextMessage.sender === "ai" ? "justify-start" : "justify-end"}`}>
+            <div
+              className={`rounded-2xl px-3 py-2.5 ${
+                nextMessage.sender === "ai"
+                  ? "bg-slate-700/80 rounded-tl-sm"
+                  : "bg-blue-600/80 rounded-tr-sm"
+              }`}
+              style={{ animation: "bubbleFadeIn 0.2s ease-out both" }}
+            >
+              <div className="flex items-center gap-1">
+                {[0, 1, 2].map((d) => (
+                  <span
+                    key={d}
+                    className={`inline-block w-1.5 h-1.5 rounded-full ${
+                      nextMessage.sender === "ai" ? "bg-slate-400" : "bg-blue-200"
+                    }`}
+                    style={{
+                      animation: `typingDot 1s ease-in-out ${d * 0.2}s infinite`,
+                    }}
+                  />
+                ))}
+              </div>
+            </div>
+          </div>
+        )}
+      </div>
+
+      {/* Input bar (decorative) */}
+      <div className="flex-shrink-0 px-3 pb-2 pt-1">
+        <div className="flex items-center gap-2 bg-slate-800/60 rounded-full px-3 py-1.5 border border-slate-700/40">
+          <span className="text-[9px] text-slate-500 flex-1">iMessage</span>
+          <div className="w-5 h-5 rounded-full bg-blue-600 flex items-center justify-center opacity-40">
+            <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="white" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
+              <line x1="22" y1="2" x2="11" y2="13" />
+              <polygon points="22 2 15 22 11 13 2 9 22 2" />
+            </svg>
+          </div>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+// ---------------------------------------------------------------------------
 // DailyVitalsCard — shown for Days 1-7 (non-call states)
 // ---------------------------------------------------------------------------
 
@@ -226,10 +383,12 @@ function DailyVitalsCard({
   dayData,
   showMissedAlert,
   showAnalyzingHint,
+  onViewMessages,
 }: {
   dayData: DayData;
   showMissedAlert: boolean;
   showAnalyzingHint: boolean;
+  onViewMessages?: () => void;
 }) {
   const statusGood = dayData.engagementScore > 70;
 
@@ -293,18 +452,35 @@ function DailyVitalsCard({
           </div>
         )}
 
+        {/* Connected devices indicator */}
+        <div className="flex items-center gap-1.5 px-2 py-1 rounded-md bg-slate-800/30">
+          <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="#64748b" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+            <path d="M5 12.55a11 11 0 0 1 14.08 0" />
+            <path d="M1.42 9a16 16 0 0 1 21.16 0" />
+            <path d="M8.53 16.11a6 6 0 0 1 6.95 0" />
+            <line x1="12" y1="20" x2="12.01" y2="20" />
+          </svg>
+          <span className="text-[7px] text-slate-500 uppercase tracking-wider">Connected: Smart Scale, BP Cuff, Glucometer</span>
+        </div>
+
         {/* 2x2 Vitals grid */}
         <div className="grid grid-cols-2 gap-2">
           {/* Weight */}
           <div className="rounded-lg p-2 bg-slate-800/60 border border-slate-700/50">
-            <div className="text-[8px] text-slate-400 uppercase tracking-wider font-medium mb-1">Weight</div>
+            <div className="flex items-center justify-between mb-1">
+              <span className="text-[8px] text-slate-400 uppercase tracking-wider font-medium">Weight</span>
+              <span className="text-[6px] text-slate-600 uppercase tracking-wide">Smart Scale</span>
+            </div>
             <div className="text-lg font-bold tabular-nums text-white leading-none">{dayData.weight}</div>
             <div className="text-[8px] text-slate-500 mt-0.5">lbs</div>
           </div>
 
           {/* Blood Pressure */}
           <div className="rounded-lg p-2 bg-slate-800/60 border border-slate-700/50">
-            <div className="text-[8px] text-slate-400 uppercase tracking-wider font-medium mb-1">Blood Pressure</div>
+            <div className="flex items-center justify-between mb-1">
+              <span className="text-[8px] text-slate-400 uppercase tracking-wider font-medium">Blood Pressure</span>
+              <span className="text-[6px] text-slate-600 uppercase tracking-wide">BP Cuff</span>
+            </div>
             <div className="text-lg font-bold tabular-nums text-white leading-none">
               {dayData.bpSys}/{dayData.bpDia}
             </div>
@@ -313,7 +489,10 @@ function DailyVitalsCard({
 
           {/* Glucose */}
           <div className="rounded-lg p-2 bg-slate-800/60 border border-slate-700/50">
-            <div className="text-[8px] text-slate-400 uppercase tracking-wider font-medium mb-1">Glucose</div>
+            <div className="flex items-center justify-between mb-1">
+              <span className="text-[8px] text-slate-400 uppercase tracking-wider font-medium">Glucose</span>
+              <span className="text-[6px] text-slate-600 uppercase tracking-wide">Glucometer</span>
+            </div>
             <div className="text-lg font-bold tabular-nums text-white leading-none">{dayData.glucose}</div>
             <div className="text-[8px] text-slate-500 mt-0.5">mg/dL</div>
           </div>
@@ -324,7 +503,10 @@ function DailyVitalsCard({
               ? "bg-orange-500/10 border-orange-500/30"
               : "bg-slate-800/60 border-slate-700/50"
           }`}>
-            <div className="text-[8px] text-slate-400 uppercase tracking-wider font-medium mb-1">Nausea</div>
+            <div className="flex items-center justify-between mb-1">
+              <span className="text-[8px] text-slate-400 uppercase tracking-wider font-medium">Nausea</span>
+              <span className="text-[6px] text-slate-600 uppercase tracking-wide">Self-reported</span>
+            </div>
             <div className={`text-lg font-bold leading-none ${nauseaColor(dayData.nauseaGrade)}`}>
               {nauseaLabel(dayData.nauseaGrade)}
             </div>
@@ -332,36 +514,13 @@ function DailyVitalsCard({
           </div>
         </div>
 
-        {/* Symptom tracker */}
-        {dayData.symptomNote && (
-          <div className="px-2.5 py-1.5 rounded-lg bg-slate-800/40 border border-slate-700/40">
-            <div className="text-[8px] text-slate-400 uppercase tracking-wider font-bold mb-1">Symptom Notes</div>
-            <div className="text-[9px] text-slate-300 leading-[1.5]">{dayData.symptomNote}</div>
-          </div>
-        )}
-
-        {/* AI message bubble */}
-        {dayData.phoneMessage && (
-          <div
-            className="px-2.5 py-2 rounded-xl bg-emerald-600/20 border border-emerald-500/30"
-            style={{ animation: "slideUp 0.3s ease-out both" }}
-          >
-            <div className="flex items-center gap-1 mb-1">
-              <div className="w-3.5 h-3.5 rounded-full bg-gradient-to-br from-emerald-400 to-teal-600 flex items-center justify-center">
-                <svg width="7" height="7" viewBox="0 0 24 24" fill="none" stroke="white" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
-                  <path d="M22 16.92V19a2 2 0 0 1-2.18 2A19.79 19.79 0 0 1 3 4.18 2 2 0 0 1 5 2h2.09" />
-                </svg>
-              </div>
-              <span className="text-[7px] font-bold text-emerald-400 uppercase tracking-widest">CareCompanion AI</span>
-            </div>
-            <div className="text-[9px] text-emerald-100 leading-[1.5]">{dayData.phoneMessage}</div>
-          </div>
-        )}
-
         {/* Hydration bar */}
         <div className="px-2.5 py-1.5 rounded-lg bg-slate-800/40 border border-slate-700/40">
           <div className="flex items-center justify-between mb-1">
-            <span className="text-[8px] text-slate-400 uppercase tracking-wider font-bold">Hydration</span>
+            <div className="flex items-center gap-1.5">
+              <span className="text-[8px] text-slate-400 uppercase tracking-wider font-bold">Hydration</span>
+              <span className="text-[6px] text-slate-600 uppercase tracking-wide">Self-reported</span>
+            </div>
             <span className={`text-[8px] font-bold tabular-nums ${
               dayData.fluidOz > 56 ? "text-emerald-400" : dayData.fluidOz > 40 ? "text-amber-400" : "text-red-400"
             }`}>
@@ -378,7 +537,10 @@ function DailyVitalsCard({
 
         {/* Medications */}
         <div>
-          <div className="text-[9px] font-bold text-slate-400 uppercase tracking-wider mb-1.5">Medications</div>
+          <div className="flex items-center justify-between mb-1.5">
+            <span className="text-[9px] font-bold text-slate-400 uppercase tracking-wider">Medications</span>
+            <span className="text-[6px] text-slate-600 uppercase tracking-wide">Self-reported</span>
+          </div>
           <div className="space-y-1">
             {/* Wegovy */}
             <div className="flex items-center gap-2 bg-slate-800/40 rounded-md px-2 py-1.5">
@@ -428,6 +590,22 @@ function DailyVitalsCard({
             </div>
           </div>
         </div>
+
+        {/* View messages button (if thread exists and not on Day 4) */}
+        {dayData.textThread.length > 0 && onViewMessages && (
+          <button
+            onClick={onViewMessages}
+            className="w-full flex items-center justify-between px-2.5 py-2 rounded-lg bg-blue-600/10 border border-blue-500/20 hover:bg-blue-600/20 transition-colors"
+          >
+            <div className="flex items-center gap-2">
+              <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="#60a5fa" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                <path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z" />
+              </svg>
+              <span className="text-[9px] text-blue-400 font-medium">View Messages</span>
+            </div>
+            <span className="text-[8px] text-blue-500/60">{dayData.textThread.length} messages</span>
+          </button>
+        )}
       </div>
 
       {/* Engagement score at bottom */}
@@ -482,6 +660,7 @@ export default function VoiceAgent({ patientName }: VoiceAgentProps) {
     transcript,
     addTranscript,
     addLog,
+    triggerCall,
     setPhaseActive,
     completeCall,
     completeProactiveCall,
@@ -531,12 +710,31 @@ export default function VoiceAgent({ patientName }: VoiceAgentProps) {
   // ------ Text notification trigger (fires on mount since VoiceAgent remounts per day) ------
   useEffect(() => {
     const dd = currentDay >= 1 && currentDay <= 7 ? DAY_DATA[currentDay - 1] : null;
-    if (dd && dd.phoneMessage) {
+    if (dd && dd.textThread.length > 0) {
       const t = setTimeout(() => setShowNotification(true), 800);
       return () => clearTimeout(t);
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
+
+  // ------ Texting complete handler ------
+  const handleTextingComplete = useCallback(() => {
+    const dd = currentDay >= 1 && currentDay <= 7 ? DAY_DATA[currentDay - 1] : null;
+
+    if (dd?.isCallDay) {
+      // On call days (Day 2), trigger the voice call after texting completes
+      const t = setTimeout(() => {
+        triggerCall();
+      }, 2000);
+      timeoutsRef.current.push(t);
+    } else {
+      // Non-call days: return to vitals view after a pause
+      const t = setTimeout(() => {
+        setPhonePhase("app");
+      }, 2000);
+      timeoutsRef.current.push(t);
+    }
+  }, [currentDay, triggerCall]);
 
   // ------ Audio playback for a single line ------
   const playLineAudio = useCallback(async (
@@ -565,35 +763,33 @@ export default function VoiceAgent({ patientName }: VoiceAgentProps) {
       }
     }
 
-    // Try ElevenLabs TTS for AI lines
-    if (speaker === "ai") {
-      try {
-        const res = await fetch("/api/tts", {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ text }),
-          signal,
+    // Try ElevenLabs TTS for all lines (AI = Rachel voice, Patient = Dorothy voice)
+    try {
+      const res = await fetch("/api/tts", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ text, voice: speaker }),
+        signal,
+      });
+      if (res.ok) {
+        const blob = await res.blob();
+        const url = URL.createObjectURL(blob);
+        const audio = new Audio(url);
+        await new Promise<void>((resolve, reject) => {
+          audio.onended = () => { URL.revokeObjectURL(url); resolve(); };
+          audio.onerror = () => { URL.revokeObjectURL(url); reject(); };
+          const onAbort = () => { audio.pause(); URL.revokeObjectURL(url); resolve(); };
+          signal.addEventListener("abort", onAbort, { once: true });
+          audio.play().catch(reject);
         });
-        if (res.ok) {
-          const blob = await res.blob();
-          const url = URL.createObjectURL(blob);
-          const audio = new Audio(url);
-          await new Promise<void>((resolve, reject) => {
-            audio.onended = () => { URL.revokeObjectURL(url); resolve(); };
-            audio.onerror = () => { URL.revokeObjectURL(url); reject(); };
-            const onAbort = () => { audio.pause(); URL.revokeObjectURL(url); resolve(); };
-            signal.addEventListener("abort", onAbort, { once: true });
-            audio.play().catch(reject);
-          });
-          return;
-        }
-      } catch {
-        if (signal.aborted) return;
-        // Fall through to SpeechSynthesis
+        return;
       }
+    } catch {
+      if (signal.aborted) return;
+      // Fall through to SpeechSynthesis
     }
 
-    // Try browser SpeechSynthesis
+    // Fallback: browser SpeechSynthesis
     if (typeof window !== "undefined" && "speechSynthesis" in window) {
       try {
         const utterance = new SpeechSynthesisUtterance(text);
@@ -758,7 +954,7 @@ export default function VoiceAgent({ patientName }: VoiceAgentProps) {
       fetch("/api/tts", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ text: firstAILine.text }),
+        body: JSON.stringify({ text: firstAILine.text, voice: "ai" }),
       })
         .then((r) => r.ok ? r.blob() : null)
         .then((blob) => {
@@ -866,16 +1062,28 @@ export default function VoiceAgent({ patientName }: VoiceAgentProps) {
           0% { transform: translateY(0); opacity: 1; }
           100% { transform: translateY(-100%); opacity: 0; }
         }
+        @keyframes typingDot {
+          0%, 60%, 100% { opacity: 0.3; transform: translateY(0); }
+          30% { opacity: 1; transform: translateY(-2px); }
+        }
         .scrollbar-hide::-webkit-scrollbar { display: none; }
         .scrollbar-hide { -ms-overflow-style: none; scrollbar-width: none; }
       `}</style>
 
       {/* iOS-style text notification overlay */}
-      {showNotification && dayData?.phoneMessage && (
+      {showNotification && dayData && dayData.textThread.length > 0 && (
         <div style={{ position: "absolute", top: 0, left: 0, right: 0, zIndex: 50 }}>
           <TextNotification
-            message={dayData.phoneMessage}
-            onDismiss={() => setShowNotification(false)}
+            message={dayData.textThread[0].text}
+            onDismiss={() => {
+              setShowNotification(false);
+              // Auto-transition to texting view
+              setPhonePhase("texting");
+            }}
+            onTap={() => {
+              setShowNotification(false);
+              setPhonePhase("texting");
+            }}
           />
         </div>
       )}
@@ -898,6 +1106,16 @@ export default function VoiceAgent({ patientName }: VoiceAgentProps) {
       )}
 
       {/* ================================================================ */}
+      {/* TEXTING VIEW — animated text conversation                        */}
+      {/* ================================================================ */}
+      {phonePhase === "texting" && dayData && dayData.textThread.length > 0 && (
+        <TextingView
+          thread={dayData.textThread}
+          onComplete={handleTextingComplete}
+        />
+      )}
+
+      {/* ================================================================ */}
       {/* DAILY VITALS CARD — Days 1-7 (non-call states)                   */}
       {/* ================================================================ */}
       {dayData && (phonePhase === "app" || phonePhase === "alert") && currentDay >= 1 && (
@@ -907,6 +1125,7 @@ export default function VoiceAgent({ patientName }: VoiceAgentProps) {
             dayData.isIncidentDay && (showAlertBanner || demoPhase === "detecting" || demoPhase === "analyzing")
           }
           showAnalyzingHint={showAnalyzingHint}
+          onViewMessages={dayData.textThread.length > 0 ? () => setPhonePhase("texting") : undefined}
         />
       )}
 

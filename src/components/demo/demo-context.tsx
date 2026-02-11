@@ -62,6 +62,11 @@ export interface BillingEvent {
 // 7-Day Clinical Data (GLP-1 / Wegovy Week 1)
 // ---------------------------------------------------------------------------
 
+export interface TextMessage {
+  sender: "ai" | "patient";
+  text: string;
+}
+
 export interface DayData {
   day: number;
   date: string;
@@ -73,8 +78,7 @@ export interface DayData {
   fluidOz: number;
   checkInDone: boolean;
   engagementScore: number;
-  phoneMessage: string;
-  symptomNote: string;
+  textThread: TextMessage[];  // multi-turn text conversation (AI + Margaret)
   isIncidentDay: boolean;
   isCallDay: boolean;     // true for days that trigger a voice call
 }
@@ -90,8 +94,11 @@ export const DAY_DATA: DayData[] = [
     fluidOz: 64,
     checkInDone: true,
     engagementScore: 92,
-    phoneMessage: "Welcome to your Wegovy journey, Margaret! First injection confirmed. I\u2019ll check in daily to track how you\u2019re feeling. Remember to drink plenty of water today.",
-    symptomNote: "No symptoms reported. Injection site: left abdomen. No redness or swelling.",
+    textThread: [
+      { sender: "ai", text: "Welcome to your Wegovy journey, Margaret! Your first injection is confirmed. How are you feeling?" },
+      { sender: "patient", text: "Feeling good! No side effects yet. Took all my meds this morning." },
+      { sender: "ai", text: "Great start! Remember to drink at least 64oz of water today. I'll check in tomorrow!" },
+    ],
     isIncidentDay: false,
     isCallDay: false,
   },
@@ -105,8 +112,11 @@ export const DAY_DATA: DayData[] = [
     fluidOz: 56,
     checkInDone: true,
     engagementScore: 85,
-    phoneMessage: "How are you feeling today? Some patients notice mild nausea in the first few days \u2014 that\u2019s your body adjusting to Wegovy. Try eating smaller meals and stay hydrated!",
-    symptomNote: "Mild nausea after meals. Appetite slightly decreased. Eating smaller portions.",
+    textThread: [
+      { sender: "ai", text: "Good morning Margaret! How are you feeling on Day 2? Any nausea or discomfort?" },
+      { sender: "patient", text: "A little queasy after breakfast, but manageable. Had about 7 glasses of water so far." },
+      { sender: "ai", text: "Mild nausea is very common and should pass. Keep up the hydration \u2014 you're doing great!" },
+    ],
     isIncidentDay: false,
     isCallDay: true,
   },
@@ -120,8 +130,11 @@ export const DAY_DATA: DayData[] = [
     fluidOz: 38,
     checkInDone: true,
     engagementScore: 60,
-    phoneMessage: "I see your nausea has increased and your fluid intake is low. Try bland foods \u2014 crackers, rice, toast \u2014 and sip water throughout the day. Your glucose is improving nicely.",
-    symptomNote: "Moderate nausea. Food intake reduced ~50%. Skipped dinner. Only 38oz water today.",
+    textThread: [
+      { sender: "ai", text: "Hi Margaret, Day 3 check-in. How's the nausea? Are you staying hydrated?" },
+      { sender: "patient", text: "Nausea is worse today. Skipped dinner last night. Only had maybe 5 glasses of water." },
+      { sender: "ai", text: "I'm sorry to hear that. Try bland foods \u2014 crackers, rice, toast \u2014 and sip water throughout the day. Your glucose is improving nicely though!" },
+    ],
     isIncidentDay: false,
     isCallDay: false,
   },
@@ -135,8 +148,7 @@ export const DAY_DATA: DayData[] = [
     fluidOz: 32,
     checkInDone: false,
     engagementScore: 41,
-    phoneMessage: "",
-    symptomNote: "Check-in missed. Last known: nausea Grade 2, reduced fluid intake, considering discontinuation.",
+    textThread: [],
     isIncidentDay: true,
     isCallDay: true,
   },
@@ -150,8 +162,11 @@ export const DAY_DATA: DayData[] = [
     fluidOz: 52,
     checkInDone: true,
     engagementScore: 78,
-    phoneMessage: "Great to see you back, Margaret! Your nausea is improving and you\u2019re eating more. Keep up the hydration \u2014 you\u2019re doing wonderfully.",
-    symptomNote: "Nausea improving after coaching. Ate breakfast and lunch. Following small-meals protocol.",
+    textThread: [
+      { sender: "ai", text: "Welcome back, Margaret! So glad we talked yesterday. How are you feeling today?" },
+      { sender: "patient", text: "Much better! Ginger tea really helped. Had breakfast and lunch. About 6\u20137 glasses of water." },
+      { sender: "ai", text: "Wonderful progress! Keep following those small-meals tips. You're doing great!" },
+    ],
     isIncidentDay: false,
     isCallDay: false,
   },
@@ -165,8 +180,11 @@ export const DAY_DATA: DayData[] = [
     fluidOz: 60,
     checkInDone: true,
     engagementScore: 88,
-    phoneMessage: "Wonderful progress! Nausea has resolved and your glucose is the best it\u2019s been all week. Your body is adjusting beautifully to Wegovy.",
-    symptomNote: "No nausea. Normal appetite returning. Energy level good. Following dietary guidance.",
+    textThread: [
+      { sender: "ai", text: "Good morning! Day 6 \u2014 how's the nausea today?" },
+      { sender: "patient", text: "Feeling normal today! Ate all three meals, took all my meds, and drinking lots of water." },
+      { sender: "ai", text: "That's fantastic! Your body is adjusting beautifully to Wegovy. Keep it up!" },
+    ],
     isIncidentDay: false,
     isCallDay: false,
   },
@@ -180,8 +198,11 @@ export const DAY_DATA: DayData[] = [
     fluidOz: 64,
     checkInDone: true,
     engagementScore: 94,
-    phoneMessage: "Week 1 complete! You\u2019ve lost 1.6 lbs, glucose improved 24%, and BP is well-controlled. Next injection is tomorrow \u2014 same dose for 3 more weeks. Provider summary sent to Dr. Patel.",
-    symptomNote: "Excellent week 1 completion. All vitals trending favorably. Ready for next injection.",
+    textThread: [
+      { sender: "ai", text: "Week 1 complete! You've lost 1.6 lbs and your glucose improved 24%. How are you feeling about continuing?" },
+      { sender: "patient", text: "Really good! Glad I didn't quit on Day 4. Thank you for calling me that day." },
+      { sender: "ai", text: "You did amazingly well, Margaret. Next injection is tomorrow \u2014 same dose for 3 more weeks. I've sent a summary to Dr. Patel." },
+    ],
     isIncidentDay: false,
     isCallDay: false,
   },
@@ -398,12 +419,8 @@ export function DemoProvider({ children }: { children: ReactNode }) {
       if (next === 4) {
         // Day 4: trigger the AI incident flow
         setDemoPhase("detecting");
-      } else if (next === 2) {
-        // Day 2: proactive check-in call — schedule after text notification plays
-        setDemoPhase("idle");
-        const t = setTimeout(() => setDemoPhase("calling"), 5500);
-        stagedTimeouts.current.push(t);
       } else {
+        // All other days (including Day 2): start idle, voice-agent handles text + call
         setDemoPhase("idle");
       }
       return next;

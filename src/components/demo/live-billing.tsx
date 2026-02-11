@@ -1,96 +1,23 @@
 "use client";
 
-import { useDemo } from "./demo-context";
-import { useState, useEffect } from "react";
+import { useDemo, DAY_DATA } from "./demo-context";
+import { useState, useEffect, useMemo } from "react";
 
 // ---------------------------------------------------------------------------
-// Static flowsheet data — last 5 readings for Margaret Chen
+// Static clinical data
 // ---------------------------------------------------------------------------
-
-interface FlowsheetRow {
-  label: string;
-  unit: string;
-  values: { date: string; value: number; flag?: "high" | "low" | "critical" }[];
-}
-
-const FLOWSHEET_DATA: FlowsheetRow[] = [
-  {
-    label: "BP Systolic",
-    unit: "mmHg",
-    values: [
-      { date: "01/28", value: 128 },
-      { date: "01/31", value: 130 },
-      { date: "02/04", value: 132, flag: "high" },
-      { date: "02/06", value: 142, flag: "high" },
-      { date: "02/08", value: 155, flag: "critical" },
-    ],
-  },
-  {
-    label: "BP Diastolic",
-    unit: "mmHg",
-    values: [
-      { date: "01/28", value: 82 },
-      { date: "01/31", value: 84 },
-      { date: "02/04", value: 85 },
-      { date: "02/06", value: 90, flag: "high" },
-      { date: "02/08", value: 95, flag: "critical" },
-    ],
-  },
-  {
-    label: "Heart Rate",
-    unit: "bpm",
-    values: [
-      { date: "01/28", value: 72 },
-      { date: "01/31", value: 74 },
-      { date: "02/04", value: 76 },
-      { date: "02/06", value: 78 },
-      { date: "02/08", value: 82 },
-    ],
-  },
-  {
-    label: "Weight",
-    unit: "lbs",
-    values: [
-      { date: "01/28", value: 158 },
-      { date: "01/31", value: 158 },
-      { date: "02/04", value: 159 },
-      { date: "02/06", value: 160 },
-      { date: "02/08", value: 161, flag: "high" },
-    ],
-  },
-  {
-    label: "Glucose",
-    unit: "mg/dL",
-    values: [
-      { date: "01/28", value: 118 },
-      { date: "01/31", value: 122 },
-      { date: "02/04", value: 115 },
-      { date: "02/06", value: 126 },
-      { date: "02/08", value: 130 },
-    ],
-  },
-  {
-    label: "SpO2",
-    unit: "%",
-    values: [
-      { date: "01/28", value: 97 },
-      { date: "01/31", value: 97 },
-      { date: "02/04", value: 96 },
-      { date: "02/06", value: 96 },
-      { date: "02/08", value: 95 },
-    ],
-  },
-];
 
 const MEDICATIONS = [
-  { name: "Lisinopril 10mg", sig: "BID (twice daily)", status: "Active" },
-  { name: "Metformin 500mg", sig: "TID (three times daily)", status: "Active" },
+  { name: "Wegovy (semaglutide) 0.25mg", sig: "SubQ weekly (Mondays)", status: "Active (Week 1)" },
+  { name: "Metformin 1000mg", sig: "BID (twice daily)", status: "Active" },
+  { name: "Lisinopril 20mg", sig: "Daily", status: "Active" },
 ];
 
 const PROBLEMS = [
-  { name: "Essential Hypertension", code: "I10" },
-  { name: "Type 2 Diabetes Mellitus", code: "E11.9" },
-  { name: "Heart Failure, unspecified", code: "I50.9" },
+  { name: "Obesity, BMI 34.0", code: "E66.01", color: "#ef4444" },
+  { name: "Type 2 Diabetes Mellitus", code: "E11.9", color: "#a855f6" },
+  { name: "Essential Hypertension", code: "I10", color: "#f59e0b" },
+  { name: "GLP-1 Initiation Monitoring", code: "Z79.899", color: "#3b82f6" },
 ];
 
 // Sidebar nav items
@@ -107,6 +34,42 @@ const NAV_ITEMS: NavItem[] = [
   { id: "flowsheets", label: "Flowsheets", icon: "flowsheets", active: true },
   { id: "results", label: "Results", icon: "results" },
   { id: "inbox", label: "In Basket", icon: "inbox" },
+];
+
+// ---------------------------------------------------------------------------
+// Flowsheet row definitions (label + unit + accessor + flag logic)
+// ---------------------------------------------------------------------------
+
+interface FlowsheetRowDef {
+  label: string;
+  unit: string;
+  accessor: (d: typeof DAY_DATA[number]) => number;
+  flagFn?: (val: number) => "amber" | "red" | undefined;
+}
+
+const FLOWSHEET_ROWS: FlowsheetRowDef[] = [
+  { label: "Weight", unit: "lbs", accessor: (d) => d.weight },
+  { label: "BP Systolic", unit: "mmHg", accessor: (d) => d.bpSys },
+  { label: "BP Diastolic", unit: "mmHg", accessor: (d) => d.bpDia },
+  { label: "Glucose", unit: "mg/dL", accessor: (d) => d.glucose },
+  {
+    label: "Nausea Grade",
+    unit: "0-3",
+    accessor: (d) => d.nauseaGrade,
+    flagFn: (v) => (v >= 3 ? "red" : v >= 2 ? "amber" : undefined),
+  },
+  {
+    label: "Fluid Intake",
+    unit: "oz",
+    accessor: (d) => d.fluidOz,
+    flagFn: (v) => (v < 40 ? "red" : undefined),
+  },
+  {
+    label: "Engagement",
+    unit: "%",
+    accessor: (d) => d.engagementScore,
+    flagFn: (v) => (v < 50 ? "red" : undefined),
+  },
 ];
 
 // ---------------------------------------------------------------------------
@@ -152,13 +115,12 @@ function NavIcon({ type, className }: { type: string; className?: string }) {
 }
 
 // ---------------------------------------------------------------------------
-// Value cell color for flowsheet
+// Cell styling helpers
 // ---------------------------------------------------------------------------
 
-function valueCellStyle(flag?: "high" | "low" | "critical"): React.CSSProperties {
-  if (flag === "critical") return { color: "#b91c1c", fontWeight: 700, backgroundColor: "#fef2f2" };
-  if (flag === "high") return { color: "#c2410c", fontWeight: 600, backgroundColor: "#fff7ed" };
-  if (flag === "low") return { color: "#1d4ed8", fontWeight: 600, backgroundColor: "#eff6ff" };
+function flagCellStyle(flag?: "amber" | "red"): React.CSSProperties {
+  if (flag === "red") return { color: "#b91c1c", fontWeight: 700, backgroundColor: "#fef2f2" };
+  if (flag === "amber") return { color: "#c2410c", fontWeight: 600, backgroundColor: "#fff7ed" };
   return {};
 }
 
@@ -167,7 +129,7 @@ function valueCellStyle(flag?: "high" | "low" | "critical"): React.CSSProperties
 // ---------------------------------------------------------------------------
 
 export function LiveBilling() {
-  const { demoPhase, resolveCase } = useDemo();
+  const { demoPhase, currentDay, resolveCase } = useDemo();
 
   // BPA alert visibility states
   const [showBpaBanner, setShowBpaBanner] = useState(false);
@@ -177,9 +139,7 @@ export function LiveBilling() {
   // Handle phase transitions
   useEffect(() => {
     if (demoPhase === "documenting") {
-      // Show In Basket badge immediately
       setInBasketBadge(true);
-      // Show BPA banner after 2 seconds
       const timer = setTimeout(() => {
         setShowBpaBanner(true);
       }, 2000);
@@ -202,6 +162,15 @@ export function LiveBilling() {
   };
 
   const isDocumentingOrComplete = demoPhase === "documenting" || demoPhase === "complete";
+
+  // Compute visible day data (days 1..currentDay)
+  const visibleDays = useMemo(() => {
+    if (currentDay === 0) return [];
+    return DAY_DATA.filter((d) => d.day <= currentDay);
+  }, [currentDay]);
+
+  // Day 7 weekly summary flag
+  const showWeeklySummary = currentDay === 7 && demoPhase === "idle";
 
   return (
     <div style={{
@@ -298,10 +267,10 @@ export function LiveBilling() {
           {/* Patient context */}
           <div style={{ display: "flex", flexDirection: "column", gap: 1 }}>
             <span style={{ color: "white", fontSize: 12, fontWeight: 600 }}>
-              Chen, Margaret &middot; 74F &middot; MRN: 847291
+              Chen, Margaret &middot; 72F &middot; MRN: 847291
             </span>
             <span style={{ color: "rgba(255,255,255,0.55)", fontSize: 10 }}>
-              DOB: 03/15/1951 &middot; PCP: Dr. Patel, MD
+              DOB: 05/12/1953 &middot; PCP: Dr. Patel, MD &middot; Program: Wegovy 0.25mg
             </span>
           </div>
         </div>
@@ -459,10 +428,10 @@ export function LiveBilling() {
                   color: "#92400e",
                   marginBottom: 2,
                 }}>
-                  BPA: CareCompanion AI Alert &mdash; Margaret Chen
+                  BPA: CareCompanion AI Alert &mdash; Margaret Chen (GLP-1 Engagement)
                 </div>
                 <div style={{ fontSize: 11, color: "#a16207" }}>
-                  AI-initiated patient outreach completed. Review required.
+                  AI-initiated GLP-1 engagement outreach completed. Nausea management + re-engagement. Review required.
                 </div>
               </div>
               <div style={{
@@ -534,7 +503,7 @@ export function LiveBilling() {
                       <path strokeLinecap="round" strokeLinejoin="round" d="M9.813 15.904L9 18.75l-.813-2.846a4.5 4.5 0 00-3.09-3.09L2.25 12l2.846-.813a4.5 4.5 0 003.09-3.09L9 5.25l.813 2.846a4.5 4.5 0 003.09 3.09L15.75 12l-2.846.813a4.5 4.5 0 00-3.09 3.09zM18.259 8.715L18 9.75l-.259-1.035a3.375 3.375 0 00-2.455-2.456L14.25 6l1.036-.259a3.375 3.375 0 002.455-2.456L18 2.25l.259 1.035a3.375 3.375 0 002.455 2.456L21.75 6l-1.036.259a3.375 3.375 0 00-2.455 2.456z" />
                     </svg>
                     <span style={{ fontSize: 13, fontWeight: 700, color: "#1e293b" }}>
-                      CareCompanion AI &mdash; Patient Outreach Summary
+                      CareCompanion AI &mdash; GLP-1 Engagement Summary
                     </span>
                   </div>
                   <span style={{
@@ -556,11 +525,13 @@ export function LiveBilling() {
                   color: "#334155",
                   margin: "0 0 10px 0",
                 }}>
-                  Automated voice outreach completed with Margaret Chen regarding 3-day BP
-                  escalation (132&#8594;142&#8594;155 mmHg). Patient confirmed missing 2
-                  evening Lisinopril doses. Medication reminder set for 6:00 PM. Patient
-                  reports feeling well otherwise. No chest pain, SOB, or other concerning
-                  symptoms reported.
+                  Automated voice outreach completed with Margaret Chen regarding GLP-1
+                  initiation side effects and missed check-in (Day 4). Patient reported
+                  Grade 2 nausea since Day 2, reduced oral intake ~50%, fluid intake below
+                  40oz/day. Patient was considering discontinuation. AI provided dietary
+                  counseling (small meals, ginger, hydration). Patient re-engaged and
+                  committed to continuing Wegovy. Recommend: consider ondansetron PRN if
+                  nausea persists beyond Day 7.
                 </p>
 
                 {/* Metadata row */}
@@ -574,15 +545,17 @@ export function LiveBilling() {
                   borderTop: "1px solid #fde68a",
                 }}>
                   <span>
-                    <span style={{ fontWeight: 600, color: "#475569" }}>Confidence:</span> 87%
+                    <span style={{ fontWeight: 600, color: "#475569" }}>Confidence:</span> 91%
                   </span>
                   <span>
-                    <span style={{ fontWeight: 600, color: "#475569" }}>Call Duration:</span> 4m 32s
+                    <span style={{ fontWeight: 600, color: "#475569" }}>Call Duration:</span> 3m 45s
                   </span>
                   <span>
                     <span style={{ fontWeight: 600, color: "#475569" }}>CPT:</span>{" "}
                     <span style={{ fontFamily: "monospace", fontWeight: 600, color: "#d97706" }}>99457</span>,{" "}
-                    <span style={{ fontFamily: "monospace", fontWeight: 600, color: "#16a34a" }}>99454</span>
+                    <span style={{ fontFamily: "monospace", fontWeight: 600, color: "#16a34a" }}>99490</span>,{" "}
+                    <span style={{ fontFamily: "monospace", fontWeight: 600, color: "#2563eb" }}>99453</span>,{" "}
+                    <span style={{ fontFamily: "monospace", fontWeight: 600, color: "#7c3aed" }}>99454</span>
                   </span>
                   <span>
                     <span style={{ fontWeight: 600, color: "#475569" }}>Source:</span> AI Voice Agent
@@ -591,7 +564,7 @@ export function LiveBilling() {
               </div>
 
               {/* -------------------------------------------------------- */}
-              {/* Next Steps                                                */}
+              {/* Completed Actions                                         */}
               {/* -------------------------------------------------------- */}
               <div style={{
                 backgroundColor: "#f8fafc",
@@ -611,8 +584,9 @@ export function LiveBilling() {
                   Completed Actions
                 </div>
                 {[
-                  "Evening Lisinopril reminder set (6:00 PM)",
-                  "Follow-up BP check scheduled (48 hours)",
+                  "Anti-nausea coaching provided (small meals, ginger, hydration)",
+                  "Follow-up check-in scheduled (Day 5)",
+                  "Flagged for Dr. Patel \u2014 consider ondansetron PRN",
                   "Clinical note auto-drafted and ready for signature",
                 ].map((step, i) => (
                   <div key={i} style={{
@@ -620,7 +594,7 @@ export function LiveBilling() {
                     alignItems: "center",
                     gap: 8,
                     padding: "5px 0",
-                    borderBottom: i < 2 ? "1px solid #f1f5f9" : "none",
+                    borderBottom: i < 3 ? "1px solid #f1f5f9" : "none",
                   }}>
                     <div style={{
                       width: 18,
@@ -668,7 +642,7 @@ export function LiveBilling() {
                   gap: 8,
                   marginBottom: 10,
                 }}>
-                  {/* Adjust Medication */}
+                  {/* Adjust GLP-1 Dose */}
                   <button style={{
                     padding: "7px 16px",
                     borderRadius: 20,
@@ -681,10 +655,10 @@ export function LiveBilling() {
                     boxShadow: "0 1px 3px rgba(37, 99, 235, 0.3)",
                     transition: "transform 0.1s, box-shadow 0.1s",
                   }}>
-                    Adjust Medication
+                    Adjust GLP-1 Dose
                   </button>
 
-                  {/* Schedule Visit */}
+                  {/* Schedule Telehealth */}
                   <button style={{
                     padding: "7px 16px",
                     borderRadius: 20,
@@ -697,10 +671,10 @@ export function LiveBilling() {
                     boxShadow: "0 1px 3px rgba(124, 58, 237, 0.3)",
                     transition: "transform 0.1s, box-shadow 0.1s",
                   }}>
-                    Schedule Visit
+                    Schedule Telehealth
                   </button>
 
-                  {/* Order Labs */}
+                  {/* Order Labs (A1c) */}
                   <button style={{
                     padding: "7px 16px",
                     borderRadius: 20,
@@ -713,7 +687,7 @@ export function LiveBilling() {
                     boxShadow: "0 1px 3px rgba(13, 148, 136, 0.3)",
                     transition: "transform 0.1s, box-shadow 0.1s",
                   }}>
-                    Order Labs
+                    Order Labs (A1c)
                   </button>
 
                   {/* Resolve */}
@@ -748,7 +722,7 @@ export function LiveBilling() {
             </div>
           ) : (
             /* ============================================================ */
-            /* Patient Flowsheet View (default — idle through active)       */
+            /* Patient Flowsheet View (default -- idle through active)       */
             /* ============================================================ */
             <div style={{ padding: "8px 10px 16px 10px" }}>
               {/* Section heading */}
@@ -767,16 +741,16 @@ export function LiveBilling() {
                     backgroundColor: "#3b82f6",
                   }} />
                   <span style={{ fontSize: 11, fontWeight: 700, color: "#64748b", textTransform: "uppercase", letterSpacing: 0.8 }}>
-                    Flowsheet &mdash; Vital Signs
+                    Flowsheet &mdash; GLP-1 Monitoring
                   </span>
                 </div>
                 <span style={{ fontSize: 10, color: "#94a3b8" }}>
-                  Last updated: Today
+                  {currentDay > 0 ? `Week 1 \u2014 Day ${currentDay}` : "Pre-enrollment"}
                 </span>
               </div>
 
               {/* -------------------------------------------------------- */}
-              {/* Flowsheet Table                                           */}
+              {/* Flowsheet Table (dynamic from DAY_DATA)                   */}
               {/* -------------------------------------------------------- */}
               <div style={{
                 border: "1px solid #e2e8f0",
@@ -784,82 +758,220 @@ export function LiveBilling() {
                 overflow: "hidden",
                 marginBottom: 10,
               }}>
-                <table style={{
-                  width: "100%",
-                  borderCollapse: "collapse",
-                  fontSize: 11,
-                }}>
-                  <thead>
-                    <tr style={{ backgroundColor: "#f1f5f9" }}>
-                      <th style={{
-                        textAlign: "left",
-                        padding: "6px 8px",
-                        fontSize: 10,
-                        fontWeight: 700,
-                        color: "#475569",
-                        borderBottom: "1px solid #e2e8f0",
-                        borderRight: "1px solid #e2e8f0",
-                        width: "25%",
-                      }}>
-                        Parameter
-                      </th>
-                      {FLOWSHEET_DATA[0].values.map((v, i) => (
-                        <th key={i} style={{
-                          textAlign: "center",
-                          padding: "6px 4px",
-                          fontSize: 10,
-                          fontWeight: 600,
-                          color: i === FLOWSHEET_DATA[0].values.length - 1 ? "#dc2626" : "#64748b",
-                          borderBottom: "1px solid #e2e8f0",
-                          borderRight: i < FLOWSHEET_DATA[0].values.length - 1 ? "1px solid #f1f5f9" : "none",
-                          backgroundColor: i === FLOWSHEET_DATA[0].values.length - 1 ? "#fef2f2" : undefined,
-                        }}>
-                          {v.date}
-                        </th>
-                      ))}
-                    </tr>
-                  </thead>
-                  <tbody>
-                    {FLOWSHEET_DATA.map((row, ri) => (
-                      <tr key={ri} style={{ backgroundColor: ri % 2 === 0 ? "#ffffff" : "#fafbfc" }}>
-                        <td style={{
-                          padding: "5px 8px",
-                          fontWeight: 600,
-                          color: "#334155",
-                          fontSize: 11,
-                          borderRight: "1px solid #e2e8f0",
-                          borderBottom: ri < FLOWSHEET_DATA.length - 1 ? "1px solid #f1f5f9" : "none",
-                          whiteSpace: "nowrap",
-                        }}>
-                          {row.label}
-                          <span style={{ fontSize: 9, color: "#94a3b8", fontWeight: 400, marginLeft: 4 }}>
-                            {row.unit}
-                          </span>
-                        </td>
-                        {row.values.map((v, vi) => (
-                          <td key={vi} style={{
-                            textAlign: "center",
-                            padding: "5px 4px",
-                            fontSize: 11,
-                            fontFamily: "monospace",
-                            borderBottom: ri < FLOWSHEET_DATA.length - 1 ? "1px solid #f1f5f9" : "none",
-                            borderRight: vi < row.values.length - 1 ? "1px solid #f8fafc" : "none",
-                            ...valueCellStyle(v.flag),
+                {currentDay === 0 ? (
+                  /* Placeholder when no days enrolled */
+                  <div style={{
+                    padding: "32px 16px",
+                    textAlign: "center",
+                    color: "#94a3b8",
+                    fontSize: 12,
+                    backgroundColor: "#fafbfc",
+                  }}>
+                    <div style={{ marginBottom: 6, fontSize: 16 }}>&#x1f4cb;</div>
+                    Awaiting patient enrollment
+                  </div>
+                ) : (
+                  <div style={{ overflowX: "auto" }}>
+                    <table style={{
+                      width: "100%",
+                      borderCollapse: "collapse",
+                      fontSize: 11,
+                      minWidth: visibleDays.length > 4 ? 520 : undefined,
+                    }}>
+                      <thead>
+                        <tr style={{ backgroundColor: "#f1f5f9" }}>
+                          <th style={{
+                            textAlign: "left",
+                            padding: "6px 8px",
+                            fontSize: 10,
+                            fontWeight: 700,
+                            color: "#475569",
+                            borderBottom: "1px solid #e2e8f0",
+                            borderRight: "1px solid #e2e8f0",
+                            width: "22%",
+                            position: "sticky",
+                            left: 0,
+                            backgroundColor: "#f1f5f9",
+                            zIndex: 1,
                           }}>
-                            {v.value}
-                            {v.flag === "critical" && (
-                              <span style={{ fontSize: 8, marginLeft: 2, color: "#dc2626" }}>&#9650;</span>
-                            )}
-                            {v.flag === "high" && (
-                              <span style={{ fontSize: 8, marginLeft: 2, color: "#ea580c" }}>&#9650;</span>
-                            )}
-                          </td>
+                            Parameter
+                          </th>
+                          {visibleDays.map((d, i) => {
+                            const isIncident = d.isIncidentDay;
+                            const isLast = i === visibleDays.length - 1;
+                            return (
+                              <th key={d.day} style={{
+                                textAlign: "center",
+                                padding: "6px 4px",
+                                fontSize: 10,
+                                fontWeight: 600,
+                                color: isIncident ? "#dc2626" : "#64748b",
+                                borderBottom: "1px solid #e2e8f0",
+                                borderRight: isLast ? "none" : "1px solid #f1f5f9",
+                                backgroundColor: isIncident ? "#fef2f2" : undefined,
+                                whiteSpace: "nowrap",
+                              }}>
+                                {d.date}
+                                {isIncident && (
+                                  <span style={{ fontSize: 8, marginLeft: 3, color: "#dc2626" }}>&#9888;</span>
+                                )}
+                              </th>
+                            );
+                          })}
+                        </tr>
+                      </thead>
+                      <tbody>
+                        {FLOWSHEET_ROWS.map((row, ri) => (
+                          <tr key={ri} style={{ backgroundColor: ri % 2 === 0 ? "#ffffff" : "#fafbfc" }}>
+                            <td style={{
+                              padding: "5px 8px",
+                              fontWeight: 600,
+                              color: "#334155",
+                              fontSize: 11,
+                              borderRight: "1px solid #e2e8f0",
+                              borderBottom: ri < FLOWSHEET_ROWS.length - 1 ? "1px solid #f1f5f9" : "none",
+                              whiteSpace: "nowrap",
+                              position: "sticky",
+                              left: 0,
+                              backgroundColor: ri % 2 === 0 ? "#ffffff" : "#fafbfc",
+                              zIndex: 1,
+                            }}>
+                              {row.label}
+                              <span style={{ fontSize: 9, color: "#94a3b8", fontWeight: 400, marginLeft: 4 }}>
+                                {row.unit}
+                              </span>
+                            </td>
+                            {visibleDays.map((d, vi) => {
+                              const val = row.accessor(d);
+                              const flag = row.flagFn?.(val);
+                              const isLast = vi === visibleDays.length - 1;
+                              return (
+                                <td key={d.day} style={{
+                                  textAlign: "center",
+                                  padding: "5px 4px",
+                                  fontSize: 11,
+                                  fontFamily: "monospace",
+                                  borderBottom: ri < FLOWSHEET_ROWS.length - 1 ? "1px solid #f1f5f9" : "none",
+                                  borderRight: isLast ? "none" : "1px solid #f8fafc",
+                                  ...flagCellStyle(flag),
+                                }}>
+                                  {val}
+                                  {flag === "red" && (
+                                    <span style={{ fontSize: 8, marginLeft: 2, color: "#dc2626" }}>&#9650;</span>
+                                  )}
+                                  {flag === "amber" && (
+                                    <span style={{ fontSize: 8, marginLeft: 2, color: "#ea580c" }}>&#9650;</span>
+                                  )}
+                                </td>
+                              );
+                            })}
+                          </tr>
                         ))}
-                      </tr>
-                    ))}
-                  </tbody>
-                </table>
+                      </tbody>
+                    </table>
+                  </div>
+                )}
               </div>
+
+              {/* -------------------------------------------------------- */}
+              {/* Week 1 Summary (Day 7, idle phase only)                   */}
+              {/* -------------------------------------------------------- */}
+              {showWeeklySummary && (
+                <div style={{
+                  border: "1px solid #bbf7d0",
+                  borderLeft: "4px solid #22c55e",
+                  borderRadius: 4,
+                  padding: "12px 14px",
+                  marginBottom: 10,
+                  backgroundColor: "#f0fdf4",
+                }}>
+                  <div style={{
+                    fontSize: 13,
+                    fontWeight: 700,
+                    color: "#166534",
+                    marginBottom: 10,
+                    display: "flex",
+                    alignItems: "center",
+                    gap: 6,
+                  }}>
+                    <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="#16a34a" strokeWidth={2}>
+                      <path strokeLinecap="round" strokeLinejoin="round" d="M9 12.75L11.25 15 15 9.75M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
+                    </svg>
+                    Week 1 Summary &mdash; Margaret Chen
+                  </div>
+                  <div style={{
+                    display: "grid",
+                    gridTemplateColumns: "1fr 1fr",
+                    gap: "6px 16px",
+                    fontSize: 11,
+                    color: "#334155",
+                    marginBottom: 10,
+                  }}>
+                    <div><span style={{ fontWeight: 600 }}>Net weight:</span> -1.6 lbs (247.2 &#8594; 245.6)</div>
+                    <div><span style={{ fontWeight: 600 }}>Glucose improvement:</span> -24% (168 &#8594; 128 mg/dL)</div>
+                    <div><span style={{ fontWeight: 600 }}>BP improvement:</span> 142/88 &#8594; 130/80</div>
+                    <div><span style={{ fontWeight: 600 }}>GI tolerance:</span> Resolved by Day 6</div>
+                    <div style={{ gridColumn: "1 / -1" }}>
+                      <span style={{ fontWeight: 600 }}>Engagement:</span> Recovered to 94% after Day 4 intervention
+                    </div>
+                  </div>
+
+                  {/* Revenue projection */}
+                  <div style={{
+                    borderTop: "1px solid #bbf7d0",
+                    paddingTop: 8,
+                    marginTop: 4,
+                  }}>
+                    <div style={{
+                      fontSize: 10,
+                      fontWeight: 700,
+                      color: "#166534",
+                      textTransform: "uppercase",
+                      letterSpacing: 0.6,
+                      marginBottom: 6,
+                    }}>
+                      Monthly Revenue Projection per Patient
+                    </div>
+                    <div style={{
+                      display: "flex",
+                      flexWrap: "wrap",
+                      gap: 8,
+                      fontSize: 11,
+                      color: "#334155",
+                      marginBottom: 6,
+                    }}>
+                      <span style={{ fontFamily: "monospace", fontWeight: 600 }}>
+                        <span style={{ color: "#d97706" }}>99453</span>: $19
+                      </span>
+                      <span style={{ color: "#94a3b8" }}>+</span>
+                      <span style={{ fontFamily: "monospace", fontWeight: 600 }}>
+                        <span style={{ color: "#16a34a" }}>99454</span>: $55
+                      </span>
+                      <span style={{ color: "#94a3b8" }}>+</span>
+                      <span style={{ fontFamily: "monospace", fontWeight: 600 }}>
+                        <span style={{ color: "#2563eb" }}>99457</span>: $52
+                      </span>
+                      <span style={{ color: "#94a3b8" }}>+</span>
+                      <span style={{ fontFamily: "monospace", fontWeight: 600 }}>
+                        <span style={{ color: "#7c3aed" }}>99490</span>: $64
+                      </span>
+                      <span style={{ color: "#94a3b8" }}>=</span>
+                      <span style={{ fontWeight: 700, color: "#166534" }}>$190/patient/month</span>
+                    </div>
+                    <div style={{
+                      fontSize: 11,
+                      fontWeight: 600,
+                      color: "#166534",
+                      backgroundColor: "#dcfce7",
+                      padding: "4px 8px",
+                      borderRadius: 4,
+                      textAlign: "center",
+                    }}>
+                      Projected annual: $2,280/patient &#215; 250 patients = $570,000
+                    </div>
+                  </div>
+                </div>
+              )}
 
               {/* -------------------------------------------------------- */}
               {/* Active Medications                                        */}
@@ -893,7 +1005,7 @@ export function LiveBilling() {
                         width: 5,
                         height: 5,
                         borderRadius: "50%",
-                        backgroundColor: "#3b82f6",
+                        backgroundColor: i === 0 ? "#f59e0b" : "#3b82f6",
                         flexShrink: 0,
                       }} />
                       <span style={{ fontSize: 12, fontWeight: 600, color: "#1e293b" }}>{med.name}</span>
@@ -907,6 +1019,7 @@ export function LiveBilling() {
                       padding: "1px 6px",
                       borderRadius: 8,
                       border: "1px solid #bbf7d0",
+                      whiteSpace: "nowrap",
                     }}>
                       {med.status}
                     </span>
@@ -945,7 +1058,7 @@ export function LiveBilling() {
                         width: 5,
                         height: 5,
                         borderRadius: 1,
-                        backgroundColor: i === 0 ? "#ef4444" : i === 1 ? "#a855f6" : "#f59e0b",
+                        backgroundColor: prob.color,
                         flexShrink: 0,
                       }} />
                       <span style={{ fontSize: 12, color: "#1e293b" }}>{prob.name}</span>
@@ -982,7 +1095,7 @@ export function LiveBilling() {
         flexShrink: 0,
       }}>
         <span style={{ fontSize: 9, color: "rgba(255,255,255,0.45)" }}>
-          Encounter: Office Visit &middot; Feb 08, 2026
+          Encounter: GLP-1 Engagement &middot; Week 1
         </span>
         <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
           {isDocumentingOrComplete && (
@@ -1004,6 +1117,9 @@ export function LiveBilling() {
               1 BPA pending
             </span>
           )}
+          <span style={{ fontSize: 9, color: "rgba(255,255,255,0.45)" }}>
+            Program: GLP-1 Monitoring &middot; Week 1 &middot; {currentDay > 0 ? `Day ${currentDay}` : "Pre-enrollment"}
+          </span>
           <span style={{ fontSize: 9, color: "rgba(255,255,255,0.35)" }}>
             Powered by CareCompanion AI
           </span>

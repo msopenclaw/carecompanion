@@ -1,7 +1,9 @@
 # CareCompanion AI — Project Context
 
 ## What This Is
-Voice-first AI chronic care co-pilot demo for Medicare seniors with RPM (Remote Patient Monitoring) devices. Single-page demo with 3 synchronized panels showing the full product experience.
+Voice-first AI GLP-1 patient engagement platform demo for Medicare seniors. Single-page demo with 3 synchronized panels showing a **7-day Wegovy initiation simulation** — click through each day to see how AI maintains patient engagement during the critical first week of GLP-1 therapy.
+
+**Thesis**: Medicare is about to onboard 30M+ seniors onto GLP-1s via the BALANCE model (July 2026). GLP-1s only work with sustained engagement — nobody is building the engagement layer. This demo shows how AI catches nausea-driven disengagement and re-engages patients before they discontinue.
 
 ## Tech Stack
 - **Next.js 14** (App Router) + Tailwind CSS + shadcn/ui
@@ -13,31 +15,42 @@ Voice-first AI chronic care co-pilot demo for Medicare seniors with RPM (Remote 
 ## Auth
 - HTTP Basic Auth via `src/middleware.ts` — Login: `ms` / Password: `openclaw`
 
-## Demo Flow (7 phases)
-State machine in `src/components/demo/demo-context.tsx`:
-```
-idle → detecting → analyzing → calling → active → documenting → complete
-```
-1. **idle**: All panels show baseline populated data (Margaret Chen's vitals, Epic flowsheet, patient grid)
-2. **detecting**: "Run Demo" clicked → 3-day BP trend animates on phone (132→142→155), flag appears on patient grid
-3. **analyzing**: User clicks flag → AI Thinking Feed shows 7-step reasoning (hero moment)
-4. **calling**: AI decides to call patient → incoming call screen on phone
-5. **active**: Voice conversation via ElevenLabs (or simulated fallback)
-6. **documenting**: Call ends → BPA alert appears in Epic EHR
-7. **complete**: Provider sees AI summary, can resolve with action pills
+## 7-Day Simulation + State Machine
+Two state dimensions in `src/components/demo/demo-context.tsx`:
+
+1. **`currentDay`** (0-7): Which day of the Wegovy journey we're viewing
+2. **`demoPhase`**: `idle → detecting → analyzing → calling → active → documenting → complete`
+
+How they interact:
+- **Day 0**: Idle, "Start Day 1" button
+- **Days 1-3, 5-7**: `demoPhase = "idle"`, panels show that day's vitals/messages
+- **Day 4 (INCIDENT)**: `advanceDay()` triggers `demoPhase = "detecting"` → full AI incident flow kicks in
+- **After Day 4 complete**: advances to Day 5, `demoPhase` resets to idle
+- **Day 7**: Weekly summary visible, "Reset" button
+
+### 7-Day Clinical Timeline (Margaret Chen, 72F, BMI 34, Wegovy 0.25mg)
+| Day | Weight | Nausea | Engagement | Key Event |
+|-----|--------|--------|------------|-----------|
+| 1 | 247.2 | None | 92% | First injection, AI welcome |
+| 2 | 247.0 | Mild | 85% | AI checks on GI symptoms |
+| 3 | 246.4 | Moderate | 60% | Reduced intake, hydration coaching |
+| **4** | **246.0** | **Moderate** | **41%** | **Missed check-in → AI thinking → voice call → Epic BPA** |
+| 5 | 246.1 | Mild | 78% | Post-call recovery |
+| 6 | 245.9 | None | 88% | Symptoms resolving |
+| 7 | 245.6 | None | 94% | Weekly summary, -1.6 lbs |
 
 ## Three Panels
-1. **Patient View** (iPhone frame) — `src/components/demo/voice-agent.tsx` — Vitals, meds, incoming call, live conversation
-2. **Clinical Intelligence** — `src/components/demo/live-triage.tsx` — Patient risk grid → AI thinking feed → transcript → completion
-3. **Provider EHR (Epic)** — `src/components/demo/live-billing.tsx` — Epic-style flowsheet, BPA alerts, AI summary, provider actions
+1. **Patient View** (iPhone frame) — `src/components/demo/voice-agent.tsx` — Daily vitals card (weight, BP, glucose, nausea, hydration, engagement), AI messages, Day 4 voice call
+2. **Clinical Intelligence** — `src/components/demo/live-triage.tsx` — GLP-1 patient cohort grid → AI thinking feed (7 GLP-1 reasoning steps) → transcript → completion
+3. **Provider EHR (Epic)** — `src/components/demo/live-billing.tsx` — Dynamic flowsheet (grows per day), medications (Wegovy/Metformin/Lisinopril), BPA alerts, AI summary, provider actions
 
 ## Key Files
-- `src/app/page.tsx` — Main layout, 3-panel split, header with Run Demo/Reset/Dev Logs buttons
-- `src/components/demo/demo-context.tsx` — Central state: phases, transcript, logs, alerts, billing, `AI_THINKING_STEPS`
-- `src/components/demo/voice-agent.tsx` — ElevenLabs voice + fallback simulated conversation
-- `src/components/demo/live-triage.tsx` — Clinical Intelligence panel (patient grid + AI reasoning)
-- `src/components/demo/live-billing.tsx` — Epic EHR panel (flowsheet + BPA + AI summary)
-- `src/components/demo/script-guide.tsx` — Overlay telling user what to say as patient
+- `src/app/page.tsx` — Main layout, 3-panel split, header with 7-day stepper + day indicator pills
+- `src/components/demo/demo-context.tsx` — Central state: `currentDay`, `demoPhase`, `DAY_DATA`, `AI_THINKING_STEPS`, transcript, billing
+- `src/components/demo/voice-agent.tsx` — Daily vitals card + ElevenLabs voice call (Day 4) + fallback simulated GLP-1 conversation
+- `src/components/demo/live-triage.tsx` — GLP-1 patient cohort grid + AI reasoning feed + documenting/complete views
+- `src/components/demo/live-billing.tsx` — Epic EHR: dynamic flowsheet, medications, problems, BPA, AI summary, Day 7 weekly summary
+- `src/components/demo/script-guide.tsx` — Overlay: patient script for Day 4 voice call (nausea conversation)
 - `src/components/demo/developer-logs.tsx` — Slide-out dev logs panel
 - `src/lib/db/schema.ts` — Drizzle schema (patients, vitals, medications, alerts, billing)
 - `src/middleware.ts` — Basic auth
@@ -52,8 +65,16 @@ idle → detecting → analyzing → calling → active → documenting → comp
 - `POST /api/tts` — ElevenLabs TTS
 - `GET /api/elevenlabs-signed-url` — Signed URL for ElevenLabs Conversational AI
 
+## Clinical Content
+- **Patient**: Margaret Chen, 72F, BMI 34, T2D + Obesity + HTN
+- **Medications**: Wegovy 0.25mg SubQ weekly, Metformin 1000mg BID, Lisinopril 20mg daily
+- **Problems**: Obesity E66.01, T2D E11.9, HTN I10, GLP-1 Monitoring Z79.899
+- **Billing**: CPT 99457 (RPM $54), 99490 (CCM $64), 99453 (device setup $21), 99454 (device supply $55)
+- **AI Thinking Steps** (Day 4): engagement pattern → GI symptoms → drug interactions → cohort analysis → dehydration risk → provider protocol → decision to call
+- **Day 4 Call Script**: AI calls about missed check-in + nausea → patient says "almost quit" → AI normalizes + tips (ginger, small meals, hydration) → patient re-engages
+
 ## Seed Data
-5 patients, 90 days of data. Primary demo patient: **Margaret Chen** (74, HTN + T2D + CHF). Her story: stable baseline → misses evening Lisinopril → BP escalates → AI catches it → calls her → provider resolves.
+5 patients, 90 days of data. Primary demo patient: **Margaret Chen**. Her GLP-1 story: starts Wegovy → nausea builds → engagement drops → AI catches missed check-in on Day 4 → voice call re-engages her → provider gets summary with action recommendations.
 
 ## Environment Variables
 - `DATABASE_URL` — Neon PostgreSQL connection string
@@ -68,7 +89,11 @@ idle → detecting → analyzing → calling → active → documenting → comp
 
 ## Common Patterns
 - All demo state flows through `useDemo()` hook from DemoProvider context
-- Panel components are phase-driven: `switch(demoPhase)` renders different views
+- `currentDay` drives which day's data is shown; `demoPhase` drives the Day 4 AI incident flow
+- Panel components read `currentDay` from context to render day-appropriate content
+- `DAY_DATA` is a static 7-element array — no API/DB needed for the 7-day simulation
+- VoiceAgent remounts per day via React `key={currentDay}` for clean state reset
+- Dynamic flowsheet in Epic panel grows columns as days advance
 - ElevenLabs voice: tries signed URL first → falls back to public agentId → falls back to simulated conversation
 - Mic permission pre-requested during "detecting" phase for later auto-accept
 - CSS animations via `<style>` blocks with `@keyframes` (no animation library)

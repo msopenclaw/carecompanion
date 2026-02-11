@@ -1,7 +1,7 @@
 "use client";
 
 import { useState, useEffect, useCallback, useRef } from "react";
-import { useDemo } from "./demo-context";
+import { useDemo, DAY_DATA, type DayData } from "./demo-context";
 
 // ---------------------------------------------------------------------------
 // Types
@@ -21,56 +21,82 @@ interface ScriptLine {
 }
 
 // ---------------------------------------------------------------------------
-// 3-day BP trend data
+// Helpers
 // ---------------------------------------------------------------------------
 
-interface BPReading {
-  label: string;
-  sys: number;
-  dia: number;
-  color: "green" | "yellow" | "red";
+function nauseaLabel(grade: number): string {
+  switch (grade) {
+    case 0: return "None";
+    case 1: return "Mild";
+    case 2: return "Moderate";
+    case 3: return "Severe";
+    default: return "None";
+  }
 }
 
-const BP_TREND: BPReading[] = [
-  { label: "2 days ago", sys: 132, dia: 86, color: "green" },
-  { label: "Yesterday", sys: 142, dia: 90, color: "yellow" },
-  { label: "Today", sys: 155, dia: 95, color: "red" },
-];
+function nauseaColor(grade: number): string {
+  switch (grade) {
+    case 0: return "text-emerald-400";
+    case 1: return "text-amber-400";
+    case 2: return "text-orange-400";
+    case 3: return "text-red-400";
+    default: return "text-emerald-400";
+  }
+}
+
+function fluidBarColor(oz: number): string {
+  if (oz > 56) return "bg-emerald-500";
+  if (oz > 40) return "bg-amber-500";
+  return "bg-red-500";
+}
+
+function fluidBarBg(oz: number): string {
+  if (oz > 56) return "bg-emerald-500/20";
+  if (oz > 40) return "bg-amber-500/20";
+  return "bg-red-500/20";
+}
+
+function wegovyStatus(day: number): string {
+  if (day === 1) return "Taken";
+  // Next dose is Monday (Day 1), so remaining days until next Monday
+  const daysUntil = 8 - day; // day 2 → 6 days, day 7 → 1 day
+  return `Next in ${daysUntil}d`;
+}
 
 // ---------------------------------------------------------------------------
-// Fallback conversation script (if ElevenLabs SDK fails)
+// Fallback conversation script (GLP-1 / Nausea)
 // ---------------------------------------------------------------------------
 
-function buildScript(name: string): ScriptLine[] {
+function buildScript(): ScriptLine[] {
   return [
     {
       speaker: "ai",
-      text: `Good morning, ${name}. I noticed your blood pressure reading was 155 over 95 this morning — that's higher than your usual range. Did you remember to take your Lisinopril?`,
-      speakDuration: 5000,
+      text: "Hi Margaret, I noticed you missed your check-in today, and your nausea has been increasing. How are you feeling?",
+      speakDuration: 4500,
       preDelay: 1200,
     },
     {
       speaker: "patient",
-      text: "Oh, I think I forgot this morning. I was rushing out to see my grandson.",
-      speakDuration: 2800,
+      text: "Honestly, the nausea has been terrible. I almost stopped taking the Wegovy altogether.",
+      speakDuration: 3200,
       preDelay: 1800,
     },
     {
       speaker: "ai",
-      text: "That's understandable! I'd recommend taking it now with a glass of water. I'll check back in two hours to see if it's come down. Should I flag this for Dr. Patel?",
-      speakDuration: 4600,
+      text: "I'm sorry to hear that. Nausea is actually very common in the first week — about a third of patients experience it. The good news is it almost always gets better. Can I share some tips?",
+      speakDuration: 5200,
       preDelay: 1400,
     },
     {
       speaker: "patient",
-      text: "Yes, please add a note. I've been forgetting more often lately.",
-      speakDuration: 2400,
+      text: "Yes please. I really want this to work but the nausea made me feel like I should quit.",
+      speakDuration: 3000,
       preDelay: 1600,
     },
     {
       speaker: "ai",
-      text: `Done! I've notified Dr. Patel and set a reminder for your evening dose at 6 PM. Your heart rate is 72 and glucose was 118 — both in range. You're doing great, ${name}.`,
-      speakDuration: 5400,
+      text: "Try eating smaller meals throughout the day, keep ginger tea handy, and sip water often — your fluid intake has been low. I'll note this for Dr. Patel in case they want to consider an anti-nausea medication. You're doing really well — you've already lost 1.2 pounds and your glucose is improving!",
+      speakDuration: 7000,
       preDelay: 1200,
     },
   ];
@@ -101,79 +127,253 @@ function VoiceWaveform({ active }: { active: boolean }) {
 }
 
 // ---------------------------------------------------------------------------
-// 3-day BP Trend mini-timeline component
+// DailyVitalsCard — shown for Days 1-7 (non-call states)
 // ---------------------------------------------------------------------------
 
-function BPTrendTimeline({ visibleCount }: { visibleCount: number }) {
-  const colorMap = {
-    green: {
-      dot: "bg-emerald-400",
-      line: "bg-emerald-400/40",
-      text: "text-emerald-400",
-      bg: "bg-emerald-500/10",
-      border: "border-emerald-500/30",
-    },
-    yellow: {
-      dot: "bg-amber-400",
-      line: "bg-amber-400/40",
-      text: "text-amber-400",
-      bg: "bg-amber-500/10",
-      border: "border-amber-500/30",
-    },
-    red: {
-      dot: "bg-red-400",
-      line: "bg-red-400/40",
-      text: "text-red-400",
-      bg: "bg-red-500/10",
-      border: "border-red-500/30",
-    },
-  };
+function DailyVitalsCard({
+  dayData,
+  showMissedAlert,
+  showAnalyzingHint,
+}: {
+  dayData: DayData;
+  showMissedAlert: boolean;
+  showAnalyzingHint: boolean;
+}) {
+  const statusGood = dayData.engagementScore > 70;
 
   return (
-    <div
-      className="mx-3 mb-1.5 px-2.5 py-2 rounded-lg bg-slate-800/80 border border-slate-700/50"
-      style={{ animation: "slideUp 0.3s ease-out both" }}
-    >
-      <div className="text-[8px] text-slate-400 uppercase tracking-wider font-bold mb-2">
-        3-Day BP Trend
+    <div className="flex flex-col h-full">
+      {/* App header */}
+      <div className="flex items-center justify-between px-3 pt-2 pb-1.5">
+        <div className="flex items-center gap-2">
+          <div className="w-6 h-6 rounded-lg bg-gradient-to-br from-blue-500 to-indigo-600 flex items-center justify-center">
+            <span className="text-white font-bold text-[8px]">CC</span>
+          </div>
+          <div>
+            <div className="text-[10px] font-bold text-white">My Health</div>
+            <div className="text-[8px] text-slate-400">CareCompanion</div>
+          </div>
+        </div>
+        <div
+          className={`flex items-center gap-1 px-2 py-0.5 rounded-full text-[8px] font-bold uppercase tracking-wide transition-all duration-500 ${
+            statusGood
+              ? "bg-emerald-500/20 text-emerald-400 border border-emerald-500/30"
+              : "bg-amber-500/20 text-amber-400 border border-amber-500/30"
+          }`}
+        >
+          <span
+            className={`w-1.5 h-1.5 rounded-full transition-colors duration-500 ${
+              statusGood
+                ? "bg-emerald-400"
+                : "bg-amber-400 animate-pulse"
+            }`}
+          />
+          {statusGood ? "On Track" : "Attention"}
+        </div>
       </div>
-      <div className="flex items-end justify-between gap-1">
-        {BP_TREND.map((reading, idx) => {
-          const visible = idx < visibleCount;
-          const colors = colorMap[reading.color];
-          // Bar height proportional to systolic (scale: 120=min, 160=max)
-          const minSys = 120;
-          const maxSys = 165;
-          const barHeight = ((reading.sys - minSys) / (maxSys - minSys)) * 40 + 12;
 
-          return (
-            <div
-              key={idx}
-              className="flex-1 flex flex-col items-center gap-1"
-              style={{
-                opacity: visible ? 1 : 0,
-                transform: visible ? "translateY(0)" : "translateY(8px)",
-                transition: "opacity 0.4s ease-out, transform 0.4s ease-out",
-              }}
-            >
-              <div
-                className={`text-[10px] font-bold tabular-nums ${colors.text}`}
-              >
-                {reading.sys}/{reading.dia}
-              </div>
-              <div
-                className={`w-full rounded-t-sm ${colors.dot}`}
-                style={{
-                  height: `${barHeight}px`,
-                  transition: "height 0.4s ease-out",
-                }}
-              />
-              <div className="text-[7px] text-slate-500 leading-tight text-center">
-                {reading.label}
-              </div>
+      {/* Day banner */}
+      <div className="mx-3 mb-1.5 px-2.5 py-1.5 rounded-lg bg-gradient-to-r from-indigo-600/30 to-violet-600/20 border border-indigo-500/30">
+        <div className="text-[10px] font-bold text-white">
+          Day {dayData.day} of Wegovy Journey
+        </div>
+        <div className="text-[8px] text-indigo-300">{dayData.date}</div>
+      </div>
+
+      {/* Scrollable content */}
+      <div className="flex-1 overflow-y-auto scrollbar-hide px-3 pb-2 space-y-1.5">
+        {/* Missed check-in alert (Day 4) */}
+        {showMissedAlert && (
+          <div
+            className="px-2.5 py-1.5 rounded-lg bg-red-500/15 border border-red-500/30"
+            style={{ animation: "slideUp 0.3s ease-out both" }}
+          >
+            <div className="flex items-center gap-1.5">
+              <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="#ef4444" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
+                <path d="M10.29 3.86L1.82 18a2 2 0 0 0 1.71 3h16.94a2 2 0 0 0 1.71-3L13.71 3.86a2 2 0 0 0-3.42 0z" />
+                <line x1="12" y1="9" x2="12" y2="13" />
+                <line x1="12" y1="17" x2="12.01" y2="17" />
+              </svg>
+              <span className="text-[9px] font-semibold text-red-400">
+                Missed Check-in {showAnalyzingHint ? "— AI analyzing..." : "— engagement drop detected"}
+              </span>
             </div>
-          );
-        })}
+          </div>
+        )}
+
+        {/* 2x2 Vitals grid */}
+        <div className="grid grid-cols-2 gap-2">
+          {/* Weight */}
+          <div className="rounded-lg p-2 bg-slate-800/60 border border-slate-700/50">
+            <div className="text-[8px] text-slate-400 uppercase tracking-wider font-medium mb-1">Weight</div>
+            <div className="text-lg font-bold tabular-nums text-white leading-none">{dayData.weight}</div>
+            <div className="text-[8px] text-slate-500 mt-0.5">lbs</div>
+          </div>
+
+          {/* Blood Pressure */}
+          <div className="rounded-lg p-2 bg-slate-800/60 border border-slate-700/50">
+            <div className="text-[8px] text-slate-400 uppercase tracking-wider font-medium mb-1">Blood Pressure</div>
+            <div className="text-lg font-bold tabular-nums text-white leading-none">
+              {dayData.bpSys}/{dayData.bpDia}
+            </div>
+            <div className="text-[8px] text-slate-500 mt-0.5">mmHg</div>
+          </div>
+
+          {/* Glucose */}
+          <div className="rounded-lg p-2 bg-slate-800/60 border border-slate-700/50">
+            <div className="text-[8px] text-slate-400 uppercase tracking-wider font-medium mb-1">Glucose</div>
+            <div className="text-lg font-bold tabular-nums text-white leading-none">{dayData.glucose}</div>
+            <div className="text-[8px] text-slate-500 mt-0.5">mg/dL</div>
+          </div>
+
+          {/* Nausea Grade */}
+          <div className={`rounded-lg p-2 border ${
+            dayData.nauseaGrade >= 2
+              ? "bg-orange-500/10 border-orange-500/30"
+              : "bg-slate-800/60 border-slate-700/50"
+          }`}>
+            <div className="text-[8px] text-slate-400 uppercase tracking-wider font-medium mb-1">Nausea</div>
+            <div className={`text-lg font-bold leading-none ${nauseaColor(dayData.nauseaGrade)}`}>
+              {nauseaLabel(dayData.nauseaGrade)}
+            </div>
+            <div className="text-[8px] text-slate-500 mt-0.5">Grade {dayData.nauseaGrade}</div>
+          </div>
+        </div>
+
+        {/* Symptom tracker */}
+        {dayData.symptomNote && (
+          <div className="px-2.5 py-1.5 rounded-lg bg-slate-800/40 border border-slate-700/40">
+            <div className="text-[8px] text-slate-400 uppercase tracking-wider font-bold mb-1">Symptom Notes</div>
+            <div className="text-[9px] text-slate-300 leading-[1.5]">{dayData.symptomNote}</div>
+          </div>
+        )}
+
+        {/* AI message bubble */}
+        {dayData.phoneMessage && (
+          <div
+            className="px-2.5 py-2 rounded-xl bg-emerald-600/20 border border-emerald-500/30"
+            style={{ animation: "slideUp 0.3s ease-out both" }}
+          >
+            <div className="flex items-center gap-1 mb-1">
+              <div className="w-3.5 h-3.5 rounded-full bg-gradient-to-br from-emerald-400 to-teal-600 flex items-center justify-center">
+                <svg width="7" height="7" viewBox="0 0 24 24" fill="none" stroke="white" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
+                  <path d="M22 16.92V19a2 2 0 0 1-2.18 2A19.79 19.79 0 0 1 3 4.18 2 2 0 0 1 5 2h2.09" />
+                </svg>
+              </div>
+              <span className="text-[7px] font-bold text-emerald-400 uppercase tracking-widest">CareCompanion AI</span>
+            </div>
+            <div className="text-[9px] text-emerald-100 leading-[1.5]">{dayData.phoneMessage}</div>
+          </div>
+        )}
+
+        {/* Hydration bar */}
+        <div className="px-2.5 py-1.5 rounded-lg bg-slate-800/40 border border-slate-700/40">
+          <div className="flex items-center justify-between mb-1">
+            <span className="text-[8px] text-slate-400 uppercase tracking-wider font-bold">Hydration</span>
+            <span className={`text-[8px] font-bold tabular-nums ${
+              dayData.fluidOz > 56 ? "text-emerald-400" : dayData.fluidOz > 40 ? "text-amber-400" : "text-red-400"
+            }`}>
+              {dayData.fluidOz} / 64 oz
+            </span>
+          </div>
+          <div className={`w-full h-2 rounded-full ${fluidBarBg(dayData.fluidOz)}`}>
+            <div
+              className={`h-full rounded-full transition-all duration-500 ${fluidBarColor(dayData.fluidOz)}`}
+              style={{ width: `${Math.min((dayData.fluidOz / 64) * 100, 100)}%` }}
+            />
+          </div>
+        </div>
+
+        {/* Medications */}
+        <div>
+          <div className="text-[9px] font-bold text-slate-400 uppercase tracking-wider mb-1.5">Medications</div>
+          <div className="space-y-1">
+            {/* Wegovy */}
+            <div className="flex items-center gap-2 bg-slate-800/40 rounded-md px-2 py-1.5">
+              <div className={`w-4 h-4 rounded flex items-center justify-center ${
+                dayData.day === 1 ? "bg-emerald-500/20" : "bg-slate-700"
+              }`}>
+                {dayData.day === 1 ? (
+                  <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="#10b981" strokeWidth="3" strokeLinecap="round" strokeLinejoin="round"><path d="M20 6L9 17l-5-5" /></svg>
+                ) : (
+                  <svg width="8" height="8" viewBox="0 0 24 24" fill="none" stroke="#64748b" strokeWidth="3" strokeLinecap="round" strokeLinejoin="round">
+                    <circle cx="12" cy="12" r="10" />
+                    <polyline points="12 6 12 12 16 14" />
+                  </svg>
+                )}
+              </div>
+              <div className="flex-1">
+                <span className="text-[9px] text-white font-medium">Wegovy 0.25mg</span>
+                <span className="text-[8px] text-slate-500 ml-1">Weekly - Monday</span>
+              </div>
+              <span className={`text-[8px] font-medium ${dayData.day === 1 ? "text-emerald-400" : "text-slate-500"}`}>
+                {wegovyStatus(dayData.day)}
+              </span>
+            </div>
+
+            {/* Metformin */}
+            <div className="flex items-center gap-2 bg-slate-800/40 rounded-md px-2 py-1.5">
+              <div className="w-4 h-4 rounded bg-emerald-500/20 flex items-center justify-center">
+                <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="#10b981" strokeWidth="3" strokeLinecap="round" strokeLinejoin="round"><path d="M20 6L9 17l-5-5" /></svg>
+              </div>
+              <div className="flex-1">
+                <span className="text-[9px] text-white font-medium">Metformin 1000mg</span>
+                <span className="text-[8px] text-slate-500 ml-1">Twice daily</span>
+              </div>
+              <span className="text-[8px] text-emerald-400 font-medium">Taken</span>
+            </div>
+
+            {/* Lisinopril */}
+            <div className="flex items-center gap-2 bg-slate-800/40 rounded-md px-2 py-1.5">
+              <div className="w-4 h-4 rounded bg-emerald-500/20 flex items-center justify-center">
+                <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="#10b981" strokeWidth="3" strokeLinecap="round" strokeLinejoin="round"><path d="M20 6L9 17l-5-5" /></svg>
+              </div>
+              <div className="flex-1">
+                <span className="text-[9px] text-white font-medium">Lisinopril 20mg</span>
+                <span className="text-[8px] text-slate-500 ml-1">Daily</span>
+              </div>
+              <span className="text-[8px] text-emerald-400 font-medium">Taken</span>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      {/* Engagement score at bottom */}
+      <div className="flex-shrink-0 px-3 pb-3 pt-1">
+        <div className="flex items-center justify-between px-2.5 py-1.5 rounded-lg bg-slate-800/60 border border-slate-700/50">
+          <span className="text-[8px] text-slate-400 uppercase tracking-wider font-bold">Engagement Score</span>
+          <div className="flex items-center gap-1.5">
+            <div className="w-16 h-1.5 rounded-full bg-slate-700">
+              <div
+                className={`h-full rounded-full transition-all duration-700 ${
+                  dayData.engagementScore > 70
+                    ? "bg-emerald-500"
+                    : dayData.engagementScore > 50
+                      ? "bg-amber-500"
+                      : "bg-red-500"
+                }`}
+                style={{ width: `${dayData.engagementScore}%` }}
+              />
+            </div>
+            <span className={`text-[10px] font-bold tabular-nums ${
+              dayData.engagementScore > 70
+                ? "text-emerald-400"
+                : dayData.engagementScore > 50
+                  ? "text-amber-400"
+                  : "text-red-400"
+            }`}>
+              {dayData.engagementScore}%
+            </span>
+          </div>
+        </div>
+        {(showMissedAlert || showAnalyzingHint) && (
+          <div className="flex items-center justify-center gap-1 mt-1.5">
+            {[0, 1, 2].map((i) => (
+              <span key={i} className="inline-block w-1 h-1 rounded-full bg-amber-400"
+                style={{ animation: `fadeIn 0.6s ease-in-out ${i * 0.15}s infinite alternate` }} />
+            ))}
+          </div>
+        )}
       </div>
     </div>
   );
@@ -186,6 +386,7 @@ function BPTrendTimeline({ visibleCount }: { visibleCount: number }) {
 export default function VoiceAgent({ patientName }: VoiceAgentProps) {
   const {
     demoPhase,
+    currentDay,
     transcript,
     addTranscript,
     addLog,
@@ -199,13 +400,8 @@ export default function VoiceAgent({ patientName }: VoiceAgentProps) {
   const [aiSpeaking, setAiSpeaking] = useState(false);
   const [isListening, setIsListening] = useState(false);
   const [elapsed, setElapsed] = useState(0);
-  const [bpSys, setBpSys] = useState(130);
-  const [bpDia, setBpDia] = useState(85);
-  const [statusColor, setStatusColor] = useState<"green" | "yellow">("green");
   const [showAlertBanner, setShowAlertBanner] = useState(false);
   const [isLive, setIsLive] = useState(false);
-  const [trendVisible, setTrendVisible] = useState(0); // 0-3 how many trend bars shown
-  const [showTrend, setShowTrend] = useState(false);
   const [showAnalyzingHint, setShowAnalyzingHint] = useState(false);
 
   // Refs
@@ -241,7 +437,7 @@ export default function VoiceAgent({ patientName }: VoiceAgentProps) {
 
   // ------ Simulated conversation (fallback) ------
   const runSimulatedConversation = useCallback(() => {
-    const script = buildScript(patientName);
+    const script = buildScript();
     let cumDelay = 600;
 
     script.forEach((line, idx) => {
@@ -337,7 +533,7 @@ export default function VoiceAgent({ patientName }: VoiceAgentProps) {
         addLog("voice", "Using public agent ID");
       }
 
-      const firstMsg = `Good morning, ${patientName}! This is CareCompanion AI calling. I noticed your blood pressure reading this morning was 155 over 95, which is a bit higher than your usual range. I wanted to check in with you — did you remember to take your Lisinopril last evening?`;
+      const firstMsg = `Hi Margaret, this is CareCompanion AI. I noticed you missed your check-in today and I see your nausea has been increasing. I wanted to check in — how are you feeling?`;
 
       const conversation = await Conversation.startSession({
         ...(signedUrl
@@ -347,29 +543,32 @@ export default function VoiceAgent({ patientName }: VoiceAgentProps) {
         overrides: {
           agent: {
             prompt: {
-              prompt: `You are CareCompanion AI, a friendly and empathetic voice-based health companion for Medicare seniors with chronic conditions. You are making an OUTBOUND proactive call to a patient named ${patientName}.
+              prompt: `You are CareCompanion AI, a friendly and empathetic voice-based health companion for Medicare patients on GLP-1 medications. You are making an OUTBOUND proactive engagement call to a patient named Margaret Chen.
 
 CONTEXT — why you are calling:
-- The patient's latest blood pressure reading is 155/95 mmHg, which is elevated above their usual baseline of ~130/85.
-- Your system detected that they likely missed their evening dose of Lisinopril 10mg.
-- Their other vitals are normal: heart rate 72 bpm, glucose 118 mg/dL, SpO2 98%.
-- The patient is 74 years old with hypertension, Type 2 diabetes, and mild CHF.
-- Their primary care provider is Dr. Patel.
+- It is Wegovy Day 4 (Thursday, Jul 10). Margaret started Wegovy (semaglutide) 0.25mg on Monday.
+- She missed her daily check-in today — this is the first missed check-in since starting.
+- Her nausea has been escalating: Grade 0 (Day 1) → Grade 1 (Day 2) → Grade 2 (Day 3) → Grade 2 estimated today.
+- Her fluid intake has been declining: 64oz → 56oz → 38oz → estimated <32oz today. Dehydration risk.
+- Margaret is 72 years old with Type 2 Diabetes, Obesity (BMI 38), and Hypertension.
+- Her other vitals are actually improving: weight 247.2 → 246.0 (down 1.2 lbs), glucose 168 → 132 (improving), BP stable.
+- Her engagement score dropped from 92 → 41 over 4 days.
+- Her primary care provider is Dr. Patel.
 
 YOUR ROLE:
-1. Greet the patient warmly and explain you're calling because you noticed their BP reading was elevated.
-2. Gently ask if they remembered to take their Lisinopril.
-3. If they missed it, recommend taking it now and offer to set a reminder for their evening dose.
-4. Offer to flag the reading for Dr. Patel.
-5. Reassure them that their other vitals look good.
-6. Keep the conversation brief (2-3 minutes), warm, and supportive.
+1. Check on her nausea symptoms — ask how she's feeling.
+2. Normalize the experience — nausea is very common in week 1 (affects ~1/3 of patients) and almost always resolves.
+3. Provide practical tips: eat smaller meals throughout the day, try ginger tea, sip water frequently, avoid fatty or spicy foods.
+4. Celebrate her early results — she's already lost 1.2 pounds and her glucose is coming down nicely.
+5. Offer to note her symptoms for Dr. Patel in case they want to consider an anti-nausea medication (ondansetron).
+6. Encourage her to keep going — the first week is the hardest and it gets better.
 
 SAFETY RULES — you MUST follow these:
 - NEVER diagnose conditions or change medication dosages.
-- NEVER provide medical advice beyond "take your prescribed medication" and "contact your doctor."
-- If the patient reports chest pain, severe headache, or any emergency symptom, tell them to call 911 immediately.
+- NEVER provide medical advice beyond general wellness tips and "take your prescribed medication."
+- If the patient reports severe vomiting, inability to keep fluids down, or any emergency symptom, tell them to call 911 or contact Dr. Patel immediately.
 - Always offer to connect them with Dr. Patel for clinical decisions.
-- Speak in simple, clear language appropriate for a senior patient.`,
+- Speak in simple, clear, warm language appropriate for a senior patient.`,
             },
             firstMessage: firstMsg,
             language: "en",
@@ -425,7 +624,7 @@ SAFETY RULES — you MUST follow these:
       addLog("voice", `ElevenLabs unavailable: ${errorMsg}`);
       return false;
     }
-  }, [addLog, addTranscript, completeCall, requestMicPermission, patientName]);
+  }, [addLog, addTranscript, completeCall, requestMicPermission]);
 
   // ------ Accept incoming call ------
   const acceptCall = useCallback(async () => {
@@ -473,48 +672,24 @@ SAFETY RULES — you MUST follow these:
     addLog("voice", "Call ended by user");
   }, [completeCall, addLog, stopMicStream]);
 
-  // ------ Demo phase: "detecting" — animate 3-day BP trend ------
+  // ------ Demo phase: "detecting" — show engagement drop + missed check-in ------
   useEffect(() => {
     if (demoPhase !== "detecting") return;
     if (phonePhase !== "app") return;
 
-    addLog("voice", "AI monitoring detected vitals anomaly...");
+    addLog("voice", "AI monitoring detected engagement decline...");
 
     // Pre-request mic permission now (close to user gesture from "Run Demo" click)
     requestMicPermission();
 
-    // Show the trend container
-    const t0 = setTimeout(() => {
-      setShowTrend(true);
-    }, 300);
-
-    // Animate each day appearing 500ms apart
+    // After ~2.5s, show alert state
     const t1 = setTimeout(() => {
-      setTrendVisible(1); // Day 1: 132/86 green
-    }, 800);
-
-    const t2 = setTimeout(() => {
-      setTrendVisible(2); // Day 2: 142/90 yellow
-    }, 1300);
-
-    const t3 = setTimeout(() => {
-      setTrendVisible(3); // Day 3: 155/95 red
-    }, 1800);
-
-    // After all 3 shown, update the main BP card to 155/95 + alert state
-    const t4 = setTimeout(() => {
       setPhonePhase("alert");
-      setBpSys(155);
-      setBpDia(95);
-      setStatusColor("yellow");
       setShowAlertBanner(true);
-      addLog("rules", "Threshold rule: BP 155/95 exceeds 140/90 limit");
-      addLog("nlp", "Composite: missed dose + elevated BP detected");
+      addLog("rules", "Threshold: missed check-in + nausea Grade 2 + low fluid intake");
     }, 2500);
 
-    // Do NOT auto-advance to ringing — that's controlled by Panel 2 via triggerCall
-
-    timeoutsRef.current.push(t0, t1, t2, t3, t4);
+    timeoutsRef.current.push(t1);
 
     return () => {
       timeoutsRef.current.forEach(clearTimeout);
@@ -538,7 +713,7 @@ SAFETY RULES — you MUST follow these:
 
     // Show incoming call screen
     setPhonePhase("ringing");
-    addLog("voice", "Initiating ElevenLabs voice call to patient...");
+    addLog("voice", "Initiating engagement outreach call to patient...");
 
     // Auto-accept after 3s (user can tap Accept sooner)
     const tAutoAccept = setTimeout(async () => {
@@ -577,16 +752,11 @@ SAFETY RULES — you MUST follow these:
       timeoutsRef.current.forEach(clearTimeout);
       timeoutsRef.current = [];
       setPhonePhase("app");
-      setBpSys(130);
-      setBpDia(85);
-      setStatusColor("green");
       setShowAlertBanner(false);
       setAiSpeaking(false);
       setIsListening(false);
       setElapsed(0);
       setIsLive(false);
-      setTrendVisible(0);
-      setShowTrend(false);
       setShowAnalyzingHint(false);
     }
   }, [demoPhase, stopMicStream]);
@@ -608,6 +778,10 @@ SAFETY RULES — you MUST follow these:
       }
     };
   }, []);
+
+  // ------ Resolve current day data ------
+  const dayData: DayData | null =
+    currentDay >= 1 && currentDay <= 7 ? DAY_DATA[currentDay - 1] : null;
 
   // ======================================================================
   // RENDER
@@ -653,171 +827,33 @@ SAFETY RULES — you MUST follow these:
       `}</style>
 
       {/* ================================================================ */}
-      {/* PATIENT APP SCREEN (idle / detecting / analyzing / alert)        */}
+      {/* IDLE STATE — Day 0, no data yet                                  */}
       {/* ================================================================ */}
-      {(phonePhase === "app" || phonePhase === "alert") && (
-        <div className="flex flex-col h-full">
-          {/* App header */}
-          <div className="flex items-center justify-between px-3 pt-2 pb-1.5">
-            <div className="flex items-center gap-2">
-              <div className="w-6 h-6 rounded-lg bg-gradient-to-br from-blue-500 to-indigo-600 flex items-center justify-center">
-                <span className="text-white font-bold text-[8px]">CC</span>
-              </div>
-              <div>
-                <div className="text-[10px] font-bold text-white">My Health</div>
-                <div className="text-[8px] text-slate-400">CareCompanion</div>
-              </div>
-            </div>
-            <div
-              className={`flex items-center gap-1 px-2 py-0.5 rounded-full text-[8px] font-bold uppercase tracking-wide transition-all duration-500 ${
-                statusColor === "green"
-                  ? "bg-emerald-500/20 text-emerald-400 border border-emerald-500/30"
-                  : "bg-amber-500/20 text-amber-400 border border-amber-500/30"
-              }`}
-            >
-              <span
-                className={`w-1.5 h-1.5 rounded-full transition-colors duration-500 ${
-                  statusColor === "green"
-                    ? "bg-emerald-400"
-                    : "bg-amber-400 animate-pulse"
-                }`}
-              />
-              {statusColor === "green" ? "All Good" : "Attention"}
-            </div>
+      {currentDay === 0 && phonePhase !== "ringing" && phonePhase !== "call" && phonePhase !== "ended" && (
+        <div className="flex flex-col h-full items-center justify-center">
+          <div className="w-12 h-12 rounded-2xl bg-gradient-to-br from-blue-500 to-indigo-600 flex items-center justify-center mb-3">
+            <span className="text-white font-bold text-sm">CC</span>
           </div>
-
-          {/* 3-Day BP Trend Timeline (shown during detecting phase) */}
-          {showTrend && (
-            <BPTrendTimeline visibleCount={trendVisible} />
-          )}
-
-          {/* Alert banner */}
-          {showAlertBanner && (
-            <div
-              className="mx-3 mb-1.5 px-2.5 py-1.5 rounded-lg bg-amber-500/15 border border-amber-500/30"
-              style={{ animation: "slideUp 0.3s ease-out both" }}
-            >
-              <div className="flex items-center gap-1.5">
-                <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="#f59e0b" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
-                  <path d="M10.29 3.86L1.82 18a2 2 0 0 0 1.71 3h16.94a2 2 0 0 0 1.71-3L13.71 3.86a2 2 0 0 0-3.42 0z" />
-                  <line x1="12" y1="9" x2="12" y2="13" />
-                  <line x1="12" y1="17" x2="12.01" y2="17" />
-                </svg>
-                <span className="text-[9px] font-semibold text-amber-400">
-                  BP elevated — missed medication detected
-                </span>
-              </div>
-            </div>
-          )}
-
-          {/* Vitals 2x2 grid */}
-          <div className="grid grid-cols-2 gap-2 px-3 py-1.5">
-            <div
-              className={`rounded-lg p-2 transition-all duration-500 ${
-                phonePhase === "alert"
-                  ? "bg-amber-500/10 border border-amber-500/30"
-                  : "bg-slate-800/60 border border-slate-700/50"
-              }`}
-              style={phonePhase === "alert" ? { animation: "shake 0.5s ease-in-out" } : undefined}
-            >
-              <div className="flex items-center justify-between mb-1">
-                <span className="text-[8px] text-slate-400 uppercase tracking-wider font-medium">Blood Pressure</span>
-                {phonePhase === "alert" && (
-                  <span className="text-[7px] font-bold text-amber-400 bg-amber-500/20 px-1 rounded">HIGH</span>
-                )}
-              </div>
-              <div className={`text-lg font-bold tabular-nums leading-none transition-colors duration-500 ${
-                phonePhase === "alert" ? "text-amber-400" : "text-white"
-              }`}>
-                {bpSys}/{bpDia}
-              </div>
-              <div className="text-[8px] text-slate-500 mt-0.5">mmHg</div>
-            </div>
-            <div className="rounded-lg p-2 bg-slate-800/60 border border-slate-700/50">
-              <div className="text-[8px] text-slate-400 uppercase tracking-wider font-medium mb-1">Heart Rate</div>
-              <div className="text-lg font-bold tabular-nums text-white leading-none">72</div>
-              <div className="text-[8px] text-emerald-400 mt-0.5">Normal</div>
-            </div>
-            <div className="rounded-lg p-2 bg-slate-800/60 border border-slate-700/50">
-              <div className="text-[8px] text-slate-400 uppercase tracking-wider font-medium mb-1">Glucose</div>
-              <div className="text-lg font-bold tabular-nums text-white leading-none">118</div>
-              <div className="text-[8px] text-emerald-400 mt-0.5">In Range</div>
-            </div>
-            <div className="rounded-lg p-2 bg-slate-800/60 border border-slate-700/50">
-              <div className="text-[8px] text-slate-400 uppercase tracking-wider font-medium mb-1">SpO2</div>
-              <div className="text-lg font-bold tabular-nums text-white leading-none">98%</div>
-              <div className="text-[8px] text-emerald-400 mt-0.5">Normal</div>
-            </div>
-          </div>
-
-          {/* Medications */}
-          <div className="px-3 py-1.5">
-            <div className="text-[9px] font-bold text-slate-400 uppercase tracking-wider mb-1.5">Today&apos;s Medications</div>
-            <div className="space-y-1">
-              <div className="flex items-center gap-2 bg-slate-800/40 rounded-md px-2 py-1.5">
-                <div className="w-4 h-4 rounded bg-emerald-500/20 flex items-center justify-center">
-                  <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="#10b981" strokeWidth="3" strokeLinecap="round" strokeLinejoin="round"><path d="M20 6L9 17l-5-5" /></svg>
-                </div>
-                <div className="flex-1">
-                  <span className="text-[9px] text-white font-medium">Lisinopril 10mg</span>
-                  <span className="text-[8px] text-slate-500 ml-1">Morning</span>
-                </div>
-                <span className="text-[8px] text-emerald-400 font-medium">Taken</span>
-              </div>
-              <div className={`flex items-center gap-2 rounded-md px-2 py-1.5 transition-all duration-500 ${
-                phonePhase === "alert" ? "bg-red-500/10 border border-red-500/20" : "bg-slate-800/40"
-              }`}>
-                <div className={`w-4 h-4 rounded flex items-center justify-center ${phonePhase === "alert" ? "bg-red-500/20" : "bg-slate-700"}`}>
-                  {phonePhase === "alert" ? (
-                    <svg width="8" height="8" viewBox="0 0 24 24" fill="none" stroke="#ef4444" strokeWidth="3" strokeLinecap="round" strokeLinejoin="round">
-                      <line x1="18" y1="6" x2="6" y2="18" /><line x1="6" y1="6" x2="18" y2="18" />
-                    </svg>
-                  ) : (
-                    <div className="w-2 h-2 rounded-sm border border-slate-500" />
-                  )}
-                </div>
-                <div className="flex-1">
-                  <span className="text-[9px] text-white font-medium">Lisinopril 10mg</span>
-                  <span className="text-[8px] text-slate-500 ml-1">Evening</span>
-                </div>
-                <span className={`text-[8px] font-medium ${phonePhase === "alert" ? "text-red-400" : "text-slate-500"}`}>
-                  {phonePhase === "alert" ? "Missed" : "Pending"}
-                </span>
-              </div>
-              <div className="flex items-center gap-2 bg-slate-800/40 rounded-md px-2 py-1.5">
-                <div className="w-4 h-4 rounded bg-emerald-500/20 flex items-center justify-center">
-                  <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="#10b981" strokeWidth="3" strokeLinecap="round" strokeLinejoin="round"><path d="M20 6L9 17l-5-5" /></svg>
-                </div>
-                <div className="flex-1">
-                  <span className="text-[9px] text-white font-medium">Metformin 500mg</span>
-                  <span className="text-[8px] text-slate-500 ml-1">With meals</span>
-                </div>
-                <span className="text-[8px] text-emerald-400 font-medium">Taken</span>
-              </div>
-            </div>
-          </div>
-
-          {/* Bottom status */}
-          <div className="mt-auto px-3 pb-3">
-            <div className="text-center">
-              <div className="text-[8px] text-slate-500">
-                {showAnalyzingHint
-                  ? "AI reviewing your readings..."
-                  : phonePhase === "alert"
-                    ? "CareCompanion AI is reviewing your readings..."
-                    : "Last check-in: Today, 8:00 AM"}
-              </div>
-              {(phonePhase === "alert" || showAnalyzingHint) && (
-                <div className="flex items-center justify-center gap-1 mt-1">
-                  {[0, 1, 2].map((i) => (
-                    <span key={i} className="inline-block w-1 h-1 rounded-full bg-amber-400"
-                      style={{ animation: `fadeIn 0.6s ease-in-out ${i * 0.15}s infinite alternate` }} />
-                  ))}
-                </div>
-              )}
-            </div>
+          <h2 className="text-sm font-bold text-white mb-1">CareCompanion</h2>
+          <p className="text-[10px] text-slate-400 mb-4">Patient Health Monitor</p>
+          <div className="flex items-center gap-1 px-3 py-1.5 rounded-full bg-slate-800/60 border border-slate-700/40">
+            <span className="w-2 h-2 rounded-full bg-emerald-400 animate-pulse" />
+            <span className="text-[9px] text-slate-300">Ready to begin</span>
           </div>
         </div>
+      )}
+
+      {/* ================================================================ */}
+      {/* DAILY VITALS CARD — Days 1-7 (non-call states)                   */}
+      {/* ================================================================ */}
+      {dayData && (phonePhase === "app" || phonePhase === "alert") && currentDay >= 1 && (
+        <DailyVitalsCard
+          dayData={dayData}
+          showMissedAlert={
+            dayData.isIncidentDay && (showAlertBanner || demoPhase === "detecting" || demoPhase === "analyzing")
+          }
+          showAnalyzingHint={showAnalyzingHint}
+        />
       )}
 
       {/* ================================================================ */}
@@ -835,7 +871,7 @@ SAFETY RULES — you MUST follow these:
           </div>
 
           <h2 className="text-sm font-bold text-white mb-0.5">CareCompanion AI</h2>
-          <p className="text-[10px] text-slate-400 mb-1">Health check-in call</p>
+          <p className="text-[10px] text-slate-400 mb-1">GLP-1 engagement check-in</p>
           <p className="text-[10px] text-emerald-400 animate-pulse mb-8">Incoming call...</p>
 
           <div className="flex items-center gap-1.5 px-2.5 py-1 rounded-full bg-slate-800/60 border border-slate-700/40 mb-6">

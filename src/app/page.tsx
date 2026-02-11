@@ -57,6 +57,123 @@ function DemoPage() {
 
   const currentPatientId: string = selectedPatientId;
 
+  // ---- Stepper button logic ----
+  const renderStepperButton = () => {
+    const { currentDay, demoPhase } = demo;
+
+    // Day 0: Start the demo
+    if (currentDay === 0) {
+      return (
+        <button
+          onClick={() => demo.advanceDay()}
+          className="px-4 py-1.5 bg-gradient-to-r from-emerald-500 to-emerald-600 text-white text-xs font-semibold rounded-lg shadow-lg shadow-emerald-500/30 hover:shadow-emerald-500/50 transition-all flex items-center gap-2"
+        >
+          <svg width="14" height="14" viewBox="0 0 24 24" fill="currentColor">
+            <path d="M8 5v14l11-7z" />
+          </svg>
+          Start Day 1
+        </button>
+      );
+    }
+
+    // Day 4: AI incident day
+    if (currentDay === 4 && demoPhase !== "idle" && demoPhase !== "complete") {
+      return (
+        <div className="flex items-center gap-2 px-3 py-1.5 bg-red-500/10 border border-red-500/30 rounded-lg">
+          <div className="w-2 h-2 bg-red-400 rounded-full animate-pulse" />
+          <span className="text-red-400 text-xs font-medium">AI Intervening...</span>
+        </div>
+      );
+    }
+
+    if (currentDay === 4 && demoPhase === "complete") {
+      return (
+        <button
+          onClick={() => demo.advanceDay()}
+          className="px-4 py-1.5 bg-gradient-to-r from-blue-500 to-blue-600 text-white text-xs font-semibold rounded-lg shadow-lg shadow-blue-500/30 hover:shadow-blue-500/50 transition-all flex items-center gap-2"
+        >
+          Day 5
+          <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5">
+            <path d="M9 18l6-6-6-6" strokeLinecap="round" strokeLinejoin="round" />
+          </svg>
+        </button>
+      );
+    }
+
+    // Day 7: Reset
+    if (currentDay === 7) {
+      return (
+        <button
+          onClick={() => {
+            demo.resetDemo();
+            handleRefresh();
+          }}
+          className="px-4 py-1.5 bg-slate-700 text-white text-xs font-semibold rounded-lg hover:bg-slate-600 transition-all flex items-center gap-2"
+        >
+          <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5">
+            <path d="M1 4v6h6M23 20v-6h-6" strokeLinecap="round" strokeLinejoin="round" />
+            <path d="M20.49 9A9 9 0 005.64 5.64L1 10m22 4l-4.64 4.36A9 9 0 013.51 15" strokeLinecap="round" strokeLinejoin="round" />
+          </svg>
+          Reset
+        </button>
+      );
+    }
+
+    // Normal days 1-6 (not day 4): advance to next day
+    if (currentDay >= 1 && currentDay < 7) {
+      return (
+        <button
+          onClick={() => demo.advanceDay()}
+          className="px-4 py-1.5 bg-gradient-to-r from-blue-500 to-blue-600 text-white text-xs font-semibold rounded-lg shadow-lg shadow-blue-500/30 hover:shadow-blue-500/50 transition-all flex items-center gap-2"
+        >
+          Day {currentDay + 1}
+          <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5">
+            <path d="M9 18l6-6-6-6" strokeLinecap="round" strokeLinejoin="round" />
+          </svg>
+        </button>
+      );
+    }
+
+    return null;
+  };
+
+  // ---- Day indicator pills ----
+  const renderDayPills = () => {
+    if (demo.currentDay === 0) return null;
+
+    return (
+      <div className="flex items-center gap-1.5">
+        {[1, 2, 3, 4, 5, 6, 7].map((day) => {
+          let bgClass: string;
+          const label: string = `${day}`;
+
+          if (day < demo.currentDay) {
+            // Past day: emerald
+            bgClass = "bg-emerald-500";
+          } else if (day === demo.currentDay) {
+            // Current day: blue, or red for Day 4
+            bgClass = day === 4 ? "bg-red-500" : "bg-blue-500";
+          } else {
+            // Future day: slate
+            bgClass = "bg-slate-600";
+          }
+
+          return (
+            <div
+              key={day}
+              className={`w-5 h-5 rounded-full ${bgClass} flex items-center justify-center`}
+              title={`Day ${day}`}
+            >
+              <span className="text-[9px] font-bold text-white leading-none">
+                {label}
+              </span>
+            </div>
+          );
+        })}
+      </div>
+    );
+  };
+
   return (
     <div className="flex h-screen flex-col bg-gradient-to-br from-slate-900 via-slate-900 to-slate-800 overflow-hidden">
       {/* Header */}
@@ -70,43 +187,19 @@ function DemoPage() {
               CareCompanion AI
             </h1>
             <p className="text-[10px] text-slate-400 mt-0.5">
-              Voice-First Chronic Care Co-Pilot
+              GLP-1 Patient Engagement Platform
             </p>
+          </div>
+
+          {/* Day indicator pills */}
+          <div className="ml-3">
+            {renderDayPills()}
           </div>
         </div>
 
         <div className="flex items-center gap-3">
-          {/* Run Demo / Reset button */}
-          {demo.demoPhase === "idle" ? (
-            <button
-              onClick={() => demo.startDemo()}
-              className="px-4 py-1.5 bg-gradient-to-r from-emerald-500 to-emerald-600 text-white text-xs font-semibold rounded-lg shadow-lg shadow-emerald-500/30 hover:shadow-emerald-500/50 transition-all flex items-center gap-2"
-            >
-              <svg width="14" height="14" viewBox="0 0 24 24" fill="currentColor">
-                <path d="M8 5v14l11-7z" />
-              </svg>
-              Run Demo
-            </button>
-          ) : demo.demoPhase === "complete" ? (
-            <button
-              onClick={() => {
-                demo.resetDemo();
-                handleRefresh();
-              }}
-              className="px-4 py-1.5 bg-slate-700 text-white text-xs font-semibold rounded-lg hover:bg-slate-600 transition-all flex items-center gap-2"
-            >
-              <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5">
-                <path d="M1 4v6h6M23 20v-6h-6" strokeLinecap="round" strokeLinejoin="round" />
-                <path d="M20.49 9A9 9 0 005.64 5.64L1 10m22 4l-4.64 4.36A9 9 0 013.51 15" strokeLinecap="round" strokeLinejoin="round" />
-              </svg>
-              Reset Demo
-            </button>
-          ) : (
-            <div className="flex items-center gap-2 px-3 py-1.5 bg-emerald-500/10 border border-emerald-500/30 rounded-lg">
-              <div className="w-2 h-2 bg-emerald-400 rounded-full animate-pulse" />
-              <span className="text-emerald-400 text-xs font-medium">Demo Running</span>
-            </div>
-          )}
+          {/* 7-day stepper button */}
+          {renderStepperButton()}
 
           {/* Developer Logs button */}
           <button
@@ -153,11 +246,11 @@ function DemoPage() {
           <IPhoneFrame
             label="1. Patient View"
             labelColor="#10b981"
-            sublabel="The Hook"
+            sublabel={demo.currentDay > 0 ? `Day ${demo.currentDay}` : "Patient App"}
           >
             <VoiceAgent
               patientName={selectedPatient.firstName}
-              key={`voice-${currentPatientId}-${refreshKey}`}
+              key={`voice-${currentPatientId}-${refreshKey}-${demo.currentDay}`}
             />
           </IPhoneFrame>
         </div>

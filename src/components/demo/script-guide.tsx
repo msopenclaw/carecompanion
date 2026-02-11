@@ -16,20 +16,23 @@ const SCRIPT_STEPS: ScriptStep[] = [
   {
     step: 1,
     aiLine:
-      '"Good morning, Margaret. I noticed your blood pressure was 155/95 this morning..."',
+      '"Hi Margaret, I noticed you missed your check-in and your nausea has been increasing. How are you feeling?"',
     patientLine:
-      '"Oh, I think I forgot to take my medication. I was rushing to see my grandson."',
+      '"The nausea has been terrible. I almost stopped taking the Wegovy altogether."',
   },
   {
     step: 2,
-    aiLine: '"No worries! Go ahead and take it now..."',
+    aiLine:
+      '"That\'s very common in the first week. Can I share some tips that help?"',
     patientLine:
-      '"Better add a note for the doctor. I\'ve been forgetting more lately."',
+      '"Yes please. I really want this to work but I feel awful."',
   },
   {
     step: 3,
-    aiLine: '"Done! I\'ve flagged this for Dr. Patel..."',
-    patientLine: '"Thank you, that\'s very helpful."',
+    aiLine:
+      '"Try smaller meals, ginger tea, and sipping water. I\'ll flag this for Dr. Patel too."',
+    patientLine:
+      '"That helps. I\'ll keep going with the medication."',
   },
 ];
 
@@ -111,8 +114,9 @@ export function ScriptGuide() {
                 Scene
               </p>
               <p className="text-[12px] text-amber-900 leading-relaxed">
-                You&rsquo;re Margaret Chen, 74, at home. The AI health companion
-                calls you about your morning blood pressure reading.
+                You&rsquo;re Margaret Chen, 72. You started Wegovy (a weekly
+                injection for weight loss) 4 days ago and the nausea has been
+                rough. The AI health companion calls to check on you.
               </p>
             </div>
           </div>

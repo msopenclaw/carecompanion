@@ -1,7 +1,7 @@
 "use client";
 
 import { useState, useEffect, useRef, useMemo } from "react";
-import { useDemo, AI_THINKING_STEPS } from "./demo-context";
+import { useDemo, AI_THINKING_STEPS, DAY_DATA } from "./demo-context";
 
 // ---------------------------------------------------------------------------
 // Types
@@ -19,18 +19,18 @@ interface PatientRow {
 }
 
 // ---------------------------------------------------------------------------
-// Patient data (sorted by risk descending)
+// Patient data (GLP-1 cohort, sorted by risk descending)
 // ---------------------------------------------------------------------------
 
 const PATIENTS: PatientRow[] = [
-  { name: "Margaret Chen", age: 74, risk: 72, riskDetecting: 84, conditions: "HTN + T2D + CHF", vital: "BP 155/95 \u2191\u2191" },
-  { name: "James Rodriguez", age: 68, risk: 58, riskDetecting: 58, conditions: "CHF + HTN", vital: "Wt +2.1 lbs \u2191" },
-  { name: "Walter Brooks", age: 83, risk: 51, riskDetecting: 51, conditions: "CHF + COPD", vital: "HR 88 \u2191" },
-  { name: "Robert Kim", age: 81, risk: 45, riskDetecting: 45, conditions: "COPD + HTN", vital: "SpO2 93% \u2192" },
-  { name: "Helen Murray", age: 77, risk: 38, riskDetecting: 38, conditions: "HTN", vital: "BP 138/88 \u2192" },
-  { name: "Aisha Patel", age: 45, risk: 28, riskDetecting: 28, conditions: "HTN", vital: "BP 134/86 \u2192" },
-  { name: "Dorothy Harris", age: 70, risk: 22, riskDetecting: 22, conditions: "T2D", vital: "Glucose 112 \u2713" },
-  { name: "Sarah Williams", age: 52, risk: 15, riskDetecting: 15, conditions: "T2D", vital: "Glucose 98 \u2713" },
+  { name: "Margaret Chen", age: 72, risk: 45, riskDetecting: 84, conditions: "T2D + Obesity + HTN", vital: "Eng: 92%" },
+  { name: "James Rodriguez", age: 68, risk: 52, riskDetecting: 52, conditions: "T2D + Obesity", vital: "Wegovy 0.5mg W3" },
+  { name: "Helen Murray", age: 58, risk: 38, riskDetecting: 38, conditions: "Obesity + HTN", vital: "Mounjaro 5mg W6" },
+  { name: "Robert Kim", age: 71, risk: 42, riskDetecting: 42, conditions: "T2D + CKD", vital: "Ozempic 0.5mg W4" },
+  { name: "Dorothy Harris", age: 65, risk: 28, riskDetecting: 28, conditions: "Obesity", vital: "Wegovy 1.0mg W8" },
+  { name: "Aisha Patel", age: 45, risk: 22, riskDetecting: 22, conditions: "T2D + Obesity", vital: "Wegovy 0.25mg W2" },
+  { name: "Sarah Williams", age: 52, risk: 15, riskDetecting: 15, conditions: "Obesity + HTN", vital: "Zepbound 5mg W5" },
+  { name: "Walter Brooks", age: 76, risk: 18, riskDetecting: 18, conditions: "T2D", vital: "Ozempic 1.0mg W12" },
 ];
 
 // ---------------------------------------------------------------------------
@@ -50,6 +50,7 @@ function riskDotColor(score: number): string {
 }
 
 function vitalColor(vital: string): string {
+  if (vital.includes("MISSED")) return "text-red-600";
   if (vital.includes("\u2191\u2191")) return "text-red-600";
   if (vital.includes("\u2191")) return "text-amber-600";
   if (vital.includes("\u2713")) return "text-emerald-600";
@@ -169,21 +170,21 @@ function StatsBar() {
   return (
     <div className="flex gap-1.5 px-3 py-2 flex-shrink-0">
       <div className="flex-1 flex flex-col items-center rounded-md px-2 py-1.5 bg-white border border-slate-200">
-        <span className="text-[11px] uppercase tracking-wider text-slate-400 font-medium leading-none">Readings Today</span>
-        <span className="text-[14px] font-bold tabular-nums leading-tight text-slate-800">847</span>
+        <span className="text-[11px] uppercase tracking-wider text-slate-400 font-medium leading-none">GLP-1 Patients</span>
+        <span className="text-[14px] font-bold tabular-nums leading-tight text-slate-800">250</span>
       </div>
       <div className="flex-1 flex flex-col items-center rounded-md px-2 py-1.5 bg-emerald-50 border border-emerald-200">
-        <span className="text-[11px] uppercase tracking-wider font-medium leading-none text-emerald-600">AI-Processed</span>
-        <span className="text-[14px] font-bold tabular-nums leading-tight text-emerald-700">835</span>
-        <span className="text-[10px] text-emerald-500 font-medium leading-none mt-0.5">98.6%</span>
+        <span className="text-[11px] uppercase tracking-wider font-medium leading-none text-emerald-600">On Track</span>
+        <span className="text-[14px] font-bold tabular-nums leading-tight text-emerald-700">218</span>
+        <span className="text-[10px] text-emerald-500 font-medium leading-none mt-0.5">87.2%</span>
       </div>
       <div className="flex-1 flex flex-col items-center rounded-md px-2 py-1.5 bg-amber-50 border border-amber-200">
-        <span className="text-[11px] uppercase tracking-wider font-medium leading-none text-amber-600">Needs Review</span>
-        <span className="text-[14px] font-bold tabular-nums leading-tight text-amber-700">12</span>
+        <span className="text-[11px] uppercase tracking-wider font-medium leading-none text-amber-600">At Risk</span>
+        <span className="text-[14px] font-bold tabular-nums leading-tight text-amber-700">27</span>
       </div>
       <div className="flex-1 flex flex-col items-center rounded-md px-2 py-1.5 bg-red-50 border border-red-200">
-        <span className="text-[11px] uppercase tracking-wider font-medium leading-none text-red-600">Urgent</span>
-        <span className="text-[14px] font-bold tabular-nums leading-tight text-red-700">3</span>
+        <span className="text-[11px] uppercase tracking-wider font-medium leading-none text-red-600">Disengaged</span>
+        <span className="text-[14px] font-bold tabular-nums leading-tight text-red-700">5</span>
       </div>
     </div>
   );
@@ -198,7 +199,7 @@ function BillingFooter() {
         <path d="M17 5H9.5a3.5 3.5 0 0 0 0 7h5a3.5 3.5 0 0 1 0 7H6" />
       </svg>
       <span className="text-[11px] font-semibold text-emerald-700">$14,200/mo</span>
-      <span className="text-[10px] text-slate-400">RPM revenue &middot; 120 patients</span>
+      <span className="text-[10px] text-slate-400">GLP-1 program &middot; 250 patients</span>
     </div>
   );
 }
@@ -208,16 +209,33 @@ function BillingFooter() {
 // ---------------------------------------------------------------------------
 
 function PatientListView() {
-  const { demoPhase, openAnalysis } = useDemo();
+  const { demoPhase, openAnalysis, currentDay } = useDemo();
   const isDetecting = demoPhase === "detecting";
 
+  // Compute Margaret's dynamic data based on currentDay
+  const patientsWithDynamic = useMemo(() => {
+    return PATIENTS.map((p) => {
+      if (p.name !== "Margaret Chen") return p;
+      if (currentDay >= 1) {
+        const dayIdx = currentDay - 1;
+        const dayData = DAY_DATA[dayIdx];
+        const score = dayData.engagementScore;
+        const missedLabel = dayData.checkInDone ? "" : " MISSED";
+        const vital = `Eng: ${score}%${missedLabel}`;
+        const risk = score < 50 ? 84 : score < 70 ? 62 : 45;
+        return { ...p, vital, risk, riskDetecting: risk < 84 ? 84 : risk };
+      }
+      return p;
+    });
+  }, [currentDay]);
+
   const sorted = useMemo(() => {
-    return [...PATIENTS].sort((a, b) => {
+    return [...patientsWithDynamic].sort((a, b) => {
       const aScore = isDetecting && a.name === "Margaret Chen" ? a.riskDetecting : a.risk;
       const bScore = isDetecting && b.name === "Margaret Chen" ? b.riskDetecting : b.risk;
       return bScore - aScore;
     });
-  }, [isDetecting]);
+  }, [isDetecting, patientsWithDynamic]);
 
   return (
     <div className="flex flex-col h-full">
@@ -241,7 +259,7 @@ function PatientListView() {
           <span className="text-[10px] font-medium text-slate-400 uppercase tracking-wider">Age</span>
           <span className="text-[10px] font-medium text-slate-400 uppercase tracking-wider">Risk</span>
           <span className="text-[10px] font-medium text-slate-400 uppercase tracking-wider">Conditions</span>
-          <span className="text-[10px] font-medium text-slate-400 uppercase tracking-wider">Latest Vital</span>
+          <span className="text-[10px] font-medium text-slate-400 uppercase tracking-wider">GLP-1 Status</span>
         </div>
 
         {/* Patient rows */}
@@ -301,7 +319,7 @@ function PatientListView() {
               {/* Conditions */}
               <span className="text-[11px] text-slate-500 truncate">{patient.conditions}</span>
 
-              {/* Vital */}
+              {/* GLP-1 Status */}
               <span className={`text-[11px] font-medium truncate ${vitalColor(patient.vital)}`}>{patient.vital}</span>
             </div>
           );
@@ -394,7 +412,7 @@ function AIThinkingFeed() {
           <IconBrain className="w-3.5 h-3.5 text-white" />
         </div>
         <div className="leading-none">
-          <h2 className="text-[13px] font-bold text-slate-800 tracking-tight">AI Analysis &mdash; Margaret Chen</h2>
+          <h2 className="text-[13px] font-bold text-slate-800 tracking-tight">Engagement Analysis &mdash; Margaret Chen</h2>
           <p className="text-[10px] text-indigo-500 font-medium mt-0.5">Clinical reasoning in progress</p>
         </div>
         <div className="ml-auto flex items-center gap-1">
@@ -512,10 +530,10 @@ function AIThinkingFeed() {
                   <span className="text-[10px] font-bold uppercase tracking-wider text-emerald-700 bg-emerald-200 rounded px-1.5 py-0.5">Decision</span>
                 </div>
                 <p className="text-[12px] font-semibold text-emerald-800 leading-snug">
-                  Initiating proactive patient outreach call to Margaret Chen
+                  Initiating proactive engagement call to Margaret Chen
                 </p>
                 <p className="text-[10px] text-emerald-600 mt-1">
-                  All clinical criteria met per Dr. Patel&apos;s standing order. Connecting now...
+                  All criteria met per GLP-1 engagement protocol. Connecting now...
                 </p>
               </div>
             </div>
@@ -544,7 +562,7 @@ function CallingView() {
         <div className="absolute inset-0 w-16 h-16 rounded-full border-2 border-blue-200" style={{ animation: "phoneWave 1.5s ease-out 0.3s infinite" }} />
       </div>
       <div className="text-center">
-        <p className="text-[13px] font-semibold text-slate-800">Initiating voice call</p>
+        <p className="text-[13px] font-semibold text-slate-800">Initiating engagement call</p>
         <p className="text-[12px] text-slate-500 mt-0.5">Margaret Chen &middot; (555) 234-5678</p>
         <p className="text-[11px] text-blue-500 mt-2" style={{ animation: "dotPulse 1.5s ease-in-out infinite" }}>Connecting...</p>
       </div>
@@ -601,7 +619,7 @@ function TranscriptView() {
               }`}>
                 <div className="flex items-center gap-1 mb-0.5">
                   <span className={`text-[10px] font-bold uppercase tracking-wider ${isAI ? "text-blue-600" : "text-slate-500"}`}>
-                    {isAI ? "CareCompanion AI" : "Patient"}
+                    {isAI ? "GLP-1 Co-Pilot" : "Patient"}
                   </span>
                 </div>
                 <p className={`text-[12px] leading-snug ${isAI ? "text-blue-900" : "text-slate-700"}`}>
@@ -663,10 +681,10 @@ function DocumentingView() {
         <div className="rounded-lg border border-slate-200 bg-white p-3" style={{ animation: "fadeSlideIn 0.4s ease-out both" }}>
           <h3 className="text-[11px] font-bold uppercase tracking-wider text-slate-500 mb-1.5">AI-Generated Clinical Summary</h3>
           <div className="text-[11px] text-slate-700 leading-relaxed space-y-1.5">
-            <p><strong>Patient:</strong> Margaret Chen, 74F</p>
-            <p><strong>Chief Concern:</strong> Hypertension trend detected — BP 155/95 (3-day rising pattern)</p>
-            <p><strong>Assessment:</strong> Patient confirmed missing evening Lisinopril 10mg for 2 of last 3 days due to schedule changes. No symptoms of headache, vision changes, or chest pain reported. Patient oriented, cooperative.</p>
-            <p><strong>Plan:</strong> Medication reminder set for 6:00 PM daily. Patient verbally committed to adherence. Follow-up BP check in 24 hours. Flagged for Dr. Patel review.</p>
+            <p><strong>Patient:</strong> Margaret Chen, 72F</p>
+            <p><strong>Chief Concern:</strong> GLP-1 initiation nausea &mdash; missed check-in Day 4 of Wegovy 0.25mg</p>
+            <p><strong>Assessment:</strong> Grade 2 nausea since Day 2, peaking Day 3-4. Reduced oral intake ~50%, fluid intake below target. Considered discontinuing. No dehydration signs on assessment. Patient engaged and receptive.</p>
+            <p><strong>Plan:</strong> Dietary counseling (small meals, ginger, hydration). Follow-up check-in Day 5. Flagged for Dr. Patel &mdash; consider ondansetron PRN. Continue Wegovy 0.25mg.</p>
           </div>
         </div>
       )}
@@ -717,7 +735,7 @@ function CompleteView() {
           <IconCheck className="w-3.5 h-3.5 text-white" />
         </div>
         <div>
-          <h2 className="text-[13px] font-bold text-slate-800">Case Resolved</h2>
+          <h2 className="text-[13px] font-bold text-slate-800">Engagement Re-Established</h2>
           <p className="text-[10px] text-slate-400">Margaret Chen &mdash; Proactive outreach complete</p>
         </div>
       </div>
@@ -728,23 +746,23 @@ function CompleteView() {
         <div className="space-y-1.5 text-[11px] text-slate-700 leading-relaxed">
           <div className="flex items-start gap-2">
             <IconCheck className="w-3.5 h-3.5 text-emerald-500 flex-shrink-0 mt-0.5" />
-            <span>BP trend identified: 132 &rarr; 142 &rarr; 155 mmHg (3-day)</span>
+            <span>Engagement drop detected: 92% &rarr; 41% (3-day decline)</span>
           </div>
           <div className="flex items-start gap-2">
             <IconCheck className="w-3.5 h-3.5 text-emerald-500 flex-shrink-0 mt-0.5" />
-            <span>Root cause confirmed: Missed evening Lisinopril (2 of 3 doses)</span>
+            <span>Root cause identified: GI side effects + dehydration risk</span>
           </div>
           <div className="flex items-start gap-2">
             <IconCheck className="w-3.5 h-3.5 text-emerald-500 flex-shrink-0 mt-0.5" />
-            <span>Proactive AI voice call completed &mdash; patient confirmed, no symptoms</span>
+            <span>Proactive AI voice call completed &mdash; patient re-engaged</span>
           </div>
           <div className="flex items-start gap-2">
             <IconCheck className="w-3.5 h-3.5 text-emerald-500 flex-shrink-0 mt-0.5" />
-            <span>Medication reminder set for 6:00 PM daily</span>
+            <span>Self-care coaching: hydration, small meals, ginger</span>
           </div>
           <div className="flex items-start gap-2">
             <IconCheck className="w-3.5 h-3.5 text-emerald-500 flex-shrink-0 mt-0.5" />
-            <span>Clinical note sent to Epic &mdash; flagged for Dr. Patel review</span>
+            <span>Flagged for Dr. Patel &mdash; anti-emetic consideration</span>
           </div>
         </div>
       </div>
@@ -758,12 +776,12 @@ function CompleteView() {
             <p className="text-[10px] text-slate-400">AI Analysis Steps</p>
           </div>
           <div>
-            <p className="text-[14px] font-bold text-emerald-600 tabular-nums">~14s</p>
-            <p className="text-[10px] text-slate-400">Detection to Call</p>
+            <p className="text-[14px] font-bold text-emerald-600 tabular-nums">~4m</p>
+            <p className="text-[10px] text-slate-400">Outreach Time</p>
           </div>
           <div>
             <p className="text-[14px] font-bold text-amber-600 tabular-nums">0</p>
-            <p className="text-[10px] text-slate-400">Staff Time Required</p>
+            <p className="text-[10px] text-slate-400">Staff Time</p>
           </div>
         </div>
       </div>
@@ -846,8 +864,8 @@ export function LiveTriage() {
             </svg>
           </div>
           <div className="leading-none">
-            <h1 className="text-[13px] font-bold text-slate-800 tracking-tight">Clinical Intelligence</h1>
-            <p className="text-[11px] text-slate-400 mt-0.5">CareCompanion AI</p>
+            <h1 className="text-[13px] font-bold text-slate-800 tracking-tight">Engagement Intelligence</h1>
+            <p className="text-[11px] text-slate-400 mt-0.5">GLP-1 Co-Pilot</p>
           </div>
         </div>
         <div className="flex items-center gap-1.5">

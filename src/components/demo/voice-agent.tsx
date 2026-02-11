@@ -70,37 +70,37 @@ function delay(ms: number): Promise<void> {
 // Conversation scripts (voice calls)
 // ---------------------------------------------------------------------------
 
-/** Day 2 proactive check-in — friendly, trust-building */
+/** Day 2 proactive call — triggered by Margaret's concerning text about nausea */
 function buildCheckInScript(): ScriptLine[] {
   return [
     {
       speaker: "ai",
-      text: "Hi Margaret! Just checking in on your second day with Wegovy. How are you feeling?",
-      speakDuration: 3500,
+      text: "Hi Margaret, I saw your message about the nausea and vomiting. I wanted to call and talk you through this. How are you feeling right now?",
+      speakDuration: 4500,
       preDelay: 1200,
     },
     {
       speaker: "patient",
-      text: "I'm feeling a little queasy, but nothing too bad.",
-      speakDuration: 2500,
+      text: "Not great. I threw up this morning and I'm honestly thinking about stopping the Wegovy.",
+      speakDuration: 3000,
       preDelay: 1600,
     },
     {
       speaker: "ai",
-      text: "That mild nausea is very common in the first week. It usually improves within a few days. Try eating smaller meals throughout the day and sipping ginger tea.",
-      speakDuration: 5000,
+      text: "I completely understand. Nausea is actually the most common side effect in the first week — about a third of patients experience it. The good news is it almost always gets better within a few days. Can I share some tips?",
+      speakDuration: 5500,
       preDelay: 1200,
     },
     {
       speaker: "patient",
-      text: "Okay, I'll try that. Thank you for checking on me.",
-      speakDuration: 2200,
+      text: "Yes please. I really want this to work.",
+      speakDuration: 2000,
       preDelay: 1400,
     },
     {
       speaker: "ai",
-      text: "Of course! Remember to log your check-in tomorrow. I'm here anytime you need me. Have a great evening, Margaret!",
-      speakDuration: 4000,
+      text: "Try eating smaller meals throughout the day, keep ginger tea handy, and sip water often. Avoid greasy or heavy foods for now. Most patients feel much better by day five or six. I'll check in with you tomorrow — you're doing great, Margaret!",
+      speakDuration: 6000,
       preDelay: 1000,
     },
   ];

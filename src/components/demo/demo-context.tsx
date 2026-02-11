@@ -114,8 +114,8 @@ export const DAY_DATA: DayData[] = [
     engagementScore: 85,
     textThread: [
       { sender: "ai", text: "Good morning Margaret! How are you feeling on Day 2? Any nausea or discomfort?" },
-      { sender: "patient", text: "A little queasy after breakfast, but manageable. Had about 7 glasses of water so far." },
-      { sender: "ai", text: "Mild nausea is very common and should pass. Keep up the hydration \u2014 you're doing great!" },
+      { sender: "patient", text: "The nausea started this morning. I threw up after breakfast and I\u2019m honestly not sure I want to keep taking this medication..." },
+      { sender: "ai", text: "I\u2019m sorry to hear that, Margaret. I\u2019m going to give you a quick call \u2014 I have some tips that really help. One moment." },
     ],
     isIncidentDay: false,
     isCallDay: true,

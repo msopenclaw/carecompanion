@@ -204,6 +204,34 @@ function BillingFooter() {
   );
 }
 
+/** Program ROI card — shown on Day 7 in the patient grid view */
+function ProgramROI() {
+  const { currentDay } = useDemo();
+  if (currentDay !== 7) return null;
+
+  return (
+    <div className="mx-3 mb-2 rounded-lg border border-emerald-200 bg-emerald-50/60 p-3">
+      <h3 className="text-[10px] font-bold uppercase tracking-wider text-emerald-700 mb-2">
+        Program ROI &mdash; GLP-1 Cohort
+      </h3>
+      <div className="flex flex-wrap items-center gap-1.5 text-[10px] text-slate-700 mb-2">
+        <span className="font-mono font-semibold"><span className="text-amber-600">99453</span>: $19</span>
+        <span className="text-slate-400">+</span>
+        <span className="font-mono font-semibold"><span className="text-emerald-600">99454</span>: $55</span>
+        <span className="text-slate-400">+</span>
+        <span className="font-mono font-semibold"><span className="text-blue-600">99457</span>: $52</span>
+        <span className="text-slate-400">+</span>
+        <span className="font-mono font-semibold"><span className="text-purple-600">99490</span>: $64</span>
+        <span className="text-slate-400">=</span>
+        <span className="font-bold text-emerald-700">$190/patient/mo</span>
+      </div>
+      <div className="text-[10px] font-semibold text-emerald-800 bg-emerald-100 rounded px-2 py-1 text-center">
+        Projected annual: $2,280/patient &times; 250 patients = $570,000
+      </div>
+    </div>
+  );
+}
+
 // ---------------------------------------------------------------------------
 // Patient List View (idle + detecting)
 // ---------------------------------------------------------------------------
@@ -328,6 +356,9 @@ function PatientListView() {
 
       {/* Stats bar */}
       <StatsBar />
+
+      {/* Program ROI (Day 7 only) */}
+      <ProgramROI />
 
       {/* Billing footer */}
       <BillingFooter />
@@ -796,9 +827,11 @@ function CompleteView() {
 // ---------------------------------------------------------------------------
 
 export function LiveTriage() {
-  const { demoPhase } = useDemo();
+  const { demoPhase, currentDay } = useDemo();
 
-  const showPatientList = demoPhase === "idle" || demoPhase === "detecting";
+  // Keep patient grid visible during Day 2 proactive call (no AI thinking feed needed)
+  const showPatientList = demoPhase === "idle" || demoPhase === "detecting" ||
+    (currentDay === 2 && (demoPhase === "calling" || demoPhase === "active"));
 
   return (
     <div className="flex flex-col h-full w-full bg-white text-slate-800 font-sans select-none overflow-hidden">
@@ -911,8 +944,8 @@ export function LiveTriage() {
       <div className="flex-1 min-h-0 overflow-hidden">
         {showPatientList && <PatientListView />}
         {demoPhase === "analyzing" && <AIThinkingFeed />}
-        {demoPhase === "calling" && <CallingView />}
-        {demoPhase === "active" && <TranscriptView />}
+        {demoPhase === "calling" && currentDay !== 2 && <CallingView />}
+        {demoPhase === "active" && currentDay !== 2 && <TranscriptView />}
         {demoPhase === "documenting" && <DocumentingView />}
         {demoPhase === "complete" && <CompleteView />}
       </div>

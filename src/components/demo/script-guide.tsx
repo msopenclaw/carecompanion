@@ -12,7 +12,7 @@ interface ScriptStep {
   patientLine: string;
 }
 
-const SCRIPT_STEPS: ScriptStep[] = [
+const INCIDENT_STEPS: ScriptStep[] = [
   {
     step: 1,
     aiLine:
@@ -36,14 +36,40 @@ const SCRIPT_STEPS: ScriptStep[] = [
   },
 ];
 
+const CHECKIN_STEPS: ScriptStep[] = [
+  {
+    step: 1,
+    aiLine:
+      '"Hi Margaret! Just checking in on your second day with Wegovy. How are you feeling?"',
+    patientLine:
+      '"I\'m feeling a little queasy, but nothing too bad."',
+  },
+  {
+    step: 2,
+    aiLine:
+      '"That mild nausea is very common. Try eating smaller meals and sipping ginger tea."',
+    patientLine:
+      '"Okay, I\'ll try that. Thank you for checking on me."',
+  },
+  {
+    step: 3,
+    aiLine:
+      '"Of course! Remember to log your check-in tomorrow. I\'m here anytime you need me."',
+    patientLine: "",
+  },
+];
+
 // ---------------------------------------------------------------------------
 // ScriptGuide component
 // ---------------------------------------------------------------------------
 
 export function ScriptGuide() {
-  const { showScript, toggleScript } = useDemo();
+  const { showScript, toggleScript, currentDay } = useDemo();
 
   if (!showScript) return null;
+
+  const isCheckIn = currentDay === 2;
+  const steps = isCheckIn ? CHECKIN_STEPS : INCIDENT_STEPS;
 
   return (
     <>
@@ -74,15 +100,19 @@ export function ScriptGuide() {
           {/* Header */}
           <div className="px-5 pt-5 pb-3 flex items-start justify-between">
             <div className="flex items-center gap-3">
-              <span className="text-2xl" role="img" aria-label="Theater mask">
-                🎭
-              </span>
+              <div className="w-8 h-8 rounded-lg bg-blue-50 flex items-center justify-center">
+                <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="#3b82f6" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                  <circle cx="12" cy="12" r="10" />
+                  <line x1="12" y1="16" x2="12" y2="12" />
+                  <line x1="12" y1="8" x2="12.01" y2="8" />
+                </svg>
+              </div>
               <div>
                 <h2 className="text-[15px] font-semibold text-slate-900">
-                  Your Script
+                  Conversation Preview
                 </h2>
                 <p className="text-[11px] text-slate-500 mt-0.5">
-                  You are the patient
+                  {isCheckIn ? "Day 2 — Proactive check-in" : "Day 4 — Incident intervention"}
                 </p>
               </div>
             </div>
@@ -107,16 +137,12 @@ export function ScriptGuide() {
             </button>
           </div>
 
-          {/* Scene description */}
+          {/* Info banner */}
           <div className="px-5 pb-3">
-            <div className="bg-amber-50 border border-amber-200 rounded-lg px-3 py-2.5">
-              <p className="text-[11px] font-semibold text-amber-800 uppercase tracking-wide mb-1">
-                Scene
-              </p>
-              <p className="text-[12px] text-amber-900 leading-relaxed">
-                You&rsquo;re Margaret Chen, 72. You started Wegovy (a weekly
-                injection for weight loss) 4 days ago and the nausea has been
-                rough. The AI health companion calls to check on you.
+            <div className="bg-blue-50 border border-blue-200 rounded-lg px-3 py-2.5">
+              <p className="text-[12px] text-blue-800 leading-relaxed">
+                This conversation plays automatically with audio. No microphone needed &mdash;
+                just watch and listen as the AI engages with Margaret.
               </p>
             </div>
           </div>
@@ -124,17 +150,17 @@ export function ScriptGuide() {
           {/* Scrollable script steps */}
           <div className="flex-1 overflow-y-auto px-5 pb-3">
             <div className="space-y-3">
-              {SCRIPT_STEPS.map(({ step, aiLine, patientLine }) => (
+              {steps.map(({ step, aiLine, patientLine }) => (
                 <div key={step}>
                   {/* Step label */}
                   <p className="text-[10px] font-bold text-slate-400 uppercase tracking-widest mb-1.5">
-                    Step {step}
+                    Exchange {step}
                   </p>
 
                   {/* AI says */}
                   <div className="bg-blue-50 border border-blue-100 rounded-lg px-3 py-2 mb-1.5">
                     <p className="text-[10px] font-semibold text-blue-400 uppercase tracking-wide mb-0.5">
-                      AI Says
+                      CareCompanion AI
                     </p>
                     <p className="text-[12px] text-blue-700 italic leading-relaxed">
                       {aiLine}
@@ -142,30 +168,28 @@ export function ScriptGuide() {
                   </div>
 
                   {/* Patient says */}
-                  <div className="bg-green-50 border-2 border-green-200 rounded-lg px-3 py-2">
-                    <p className="text-[10px] font-semibold text-green-500 uppercase tracking-wide mb-0.5">
-                      You Say
-                    </p>
-                    <p className="text-[13px] text-green-900 font-bold leading-relaxed">
-                      {patientLine}
-                    </p>
-                  </div>
+                  {patientLine && (
+                    <div className="bg-slate-50 border border-slate-200 rounded-lg px-3 py-2">
+                      <p className="text-[10px] font-semibold text-slate-400 uppercase tracking-wide mb-0.5">
+                        Patient (Margaret)
+                      </p>
+                      <p className="text-[12px] text-slate-700 leading-relaxed">
+                        {patientLine}
+                      </p>
+                    </div>
+                  )}
                 </div>
               ))}
             </div>
           </div>
 
-          {/* Tips + action */}
+          {/* Footer */}
           <div className="px-5 pb-5 pt-2 border-t border-slate-100 mt-1">
-            <p className="text-[11px] text-slate-400 italic leading-relaxed mb-3">
-              Speak naturally &mdash; the AI will adapt. These are suggested
-              lines, not exact scripts.
-            </p>
             <button
               onClick={toggleScript}
               className="w-full bg-slate-900 text-white text-[13px] font-medium py-2.5 rounded-xl hover:bg-slate-800 active:bg-slate-700 transition-colors"
             >
-              Got it
+              Close
             </button>
           </div>
         </div>

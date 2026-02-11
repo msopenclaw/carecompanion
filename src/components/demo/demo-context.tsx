@@ -76,6 +76,7 @@ export interface DayData {
   phoneMessage: string;
   symptomNote: string;
   isIncidentDay: boolean;
+  isCallDay: boolean;     // true for days that trigger a voice call
 }
 
 export const DAY_DATA: DayData[] = [
@@ -92,6 +93,7 @@ export const DAY_DATA: DayData[] = [
     phoneMessage: "Welcome to your Wegovy journey, Margaret! First injection confirmed. I\u2019ll check in daily to track how you\u2019re feeling. Remember to drink plenty of water today.",
     symptomNote: "No symptoms reported. Injection site: left abdomen. No redness or swelling.",
     isIncidentDay: false,
+    isCallDay: false,
   },
   {
     day: 2,
@@ -106,6 +108,7 @@ export const DAY_DATA: DayData[] = [
     phoneMessage: "How are you feeling today? Some patients notice mild nausea in the first few days \u2014 that\u2019s your body adjusting to Wegovy. Try eating smaller meals and stay hydrated!",
     symptomNote: "Mild nausea after meals. Appetite slightly decreased. Eating smaller portions.",
     isIncidentDay: false,
+    isCallDay: true,
   },
   {
     day: 3,
@@ -120,6 +123,7 @@ export const DAY_DATA: DayData[] = [
     phoneMessage: "I see your nausea has increased and your fluid intake is low. Try bland foods \u2014 crackers, rice, toast \u2014 and sip water throughout the day. Your glucose is improving nicely.",
     symptomNote: "Moderate nausea. Food intake reduced ~50%. Skipped dinner. Only 38oz water today.",
     isIncidentDay: false,
+    isCallDay: false,
   },
   {
     day: 4,
@@ -134,6 +138,7 @@ export const DAY_DATA: DayData[] = [
     phoneMessage: "",
     symptomNote: "Check-in missed. Last known: nausea Grade 2, reduced fluid intake, considering discontinuation.",
     isIncidentDay: true,
+    isCallDay: true,
   },
   {
     day: 5,
@@ -148,6 +153,7 @@ export const DAY_DATA: DayData[] = [
     phoneMessage: "Great to see you back, Margaret! Your nausea is improving and you\u2019re eating more. Keep up the hydration \u2014 you\u2019re doing wonderfully.",
     symptomNote: "Nausea improving after coaching. Ate breakfast and lunch. Following small-meals protocol.",
     isIncidentDay: false,
+    isCallDay: false,
   },
   {
     day: 6,
@@ -162,6 +168,7 @@ export const DAY_DATA: DayData[] = [
     phoneMessage: "Wonderful progress! Nausea has resolved and your glucose is the best it\u2019s been all week. Your body is adjusting beautifully to Wegovy.",
     symptomNote: "No nausea. Normal appetite returning. Energy level good. Following dietary guidance.",
     isIncidentDay: false,
+    isCallDay: false,
   },
   {
     day: 7,
@@ -176,6 +183,7 @@ export const DAY_DATA: DayData[] = [
     phoneMessage: "Week 1 complete! You\u2019ve lost 1.6 lbs, glucose improved 24%, and BP is well-controlled. Next injection is tomorrow \u2014 same dose for 3 more weeks. Provider summary sent to Dr. Patel.",
     symptomNote: "Excellent week 1 completion. All vitals trending favorably. Ready for next injection.",
     isIncidentDay: false,
+    isCallDay: false,
   },
 ];
 
@@ -266,6 +274,7 @@ interface DemoActions {
   triggerCall: () => void;       // analyzing → calling
   setPhaseActive: () => void;    // calling → active
   completeCall: () => void;      // active → documenting
+  completeProactiveCall: () => void;  // calling/active → idle (Day 2 check-in)
   resolveCase: () => void;       // documenting → complete
   addTranscript: (speaker: "ai" | "patient", text: string) => void;
   addLog: (type: LogType, message: string, detail?: string) => void;
@@ -379,16 +388,21 @@ export function DemoProvider({ children }: { children: ReactNode }) {
   // ------ Day advancement ------
 
   const advanceDay = useCallback(() => {
+    // Clear any pending staged timeouts from previous day
+    stagedTimeouts.current.forEach(clearTimeout);
+    stagedTimeouts.current = [];
+
     setCurrentDay((prev) => {
       const next = prev + 1;
       if (next > 7) return prev; // already at day 7
       if (next === 4) {
         // Day 4: trigger the AI incident flow
         setDemoPhase("detecting");
-      } else if (prev === 4) {
-        // Moving past Day 4 (from complete back to idle)
+      } else if (next === 2) {
+        // Day 2: proactive check-in call — schedule after text notification plays
         setDemoPhase("idle");
-        // Clear Day 4 transcript/logs for clean post-incident days
+        const t = setTimeout(() => setDemoPhase("calling"), 5500);
+        stagedTimeouts.current.push(t);
       } else {
         setDemoPhase("idle");
       }
@@ -417,6 +431,10 @@ export function DemoProvider({ children }: { children: ReactNode }) {
 
   const completeCall = useCallback(() => {
     setDemoPhase("documenting");
+  }, []);
+
+  const completeProactiveCall = useCallback(() => {
+    setDemoPhase("idle");
   }, []);
 
   const resolveCase = useCallback(() => {
@@ -524,6 +542,7 @@ export function DemoProvider({ children }: { children: ReactNode }) {
     triggerCall: triggerCallAction,
     setPhaseActive,
     completeCall,
+    completeProactiveCall,
     resolveCase,
     addTranscript,
     addLog,

@@ -58,16 +58,56 @@ function fluidBarBg(oz: number): string {
 
 function wegovyStatus(day: number): string {
   if (day === 1) return "Taken";
-  // Next dose is Monday (Day 1), so remaining days until next Monday
-  const daysUntil = 8 - day; // day 2 → 6 days, day 7 → 1 day
+  const daysUntil = 8 - day;
   return `Next in ${daysUntil}d`;
 }
 
+function delay(ms: number): Promise<void> {
+  return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
 // ---------------------------------------------------------------------------
-// Fallback conversation script (GLP-1 / Nausea)
+// Conversation scripts
 // ---------------------------------------------------------------------------
 
-function buildScript(): ScriptLine[] {
+/** Day 2 proactive check-in — friendly, trust-building */
+function buildCheckInScript(): ScriptLine[] {
+  return [
+    {
+      speaker: "ai",
+      text: "Hi Margaret! Just checking in on your second day with Wegovy. How are you feeling?",
+      speakDuration: 3500,
+      preDelay: 1200,
+    },
+    {
+      speaker: "patient",
+      text: "I'm feeling a little queasy, but nothing too bad.",
+      speakDuration: 2500,
+      preDelay: 1600,
+    },
+    {
+      speaker: "ai",
+      text: "That mild nausea is very common in the first week. It usually improves within a few days. Try eating smaller meals throughout the day and sipping ginger tea.",
+      speakDuration: 5000,
+      preDelay: 1200,
+    },
+    {
+      speaker: "patient",
+      text: "Okay, I'll try that. Thank you for checking on me.",
+      speakDuration: 2200,
+      preDelay: 1400,
+    },
+    {
+      speaker: "ai",
+      text: "Of course! Remember to log your check-in tomorrow. I'm here anytime you need me. Have a great evening, Margaret!",
+      speakDuration: 4000,
+      preDelay: 1000,
+    },
+  ];
+}
+
+/** Day 4 incident — nausea intervention, missed check-in */
+function buildIncidentScript(): ScriptLine[] {
   return [
     {
       speaker: "ai",
@@ -122,6 +162,58 @@ function VoiceWaveform({ active }: { active: boolean }) {
           }}
         />
       ))}
+    </div>
+  );
+}
+
+// ---------------------------------------------------------------------------
+// iOS-style text notification
+// ---------------------------------------------------------------------------
+
+function TextNotification({
+  message,
+  onDismiss,
+}: {
+  message: string;
+  onDismiss: () => void;
+}) {
+  const [dismissing, setDismissing] = useState(false);
+
+  useEffect(() => {
+    const t = setTimeout(() => {
+      setDismissing(true);
+      setTimeout(onDismiss, 400);
+    }, 4000);
+    return () => clearTimeout(t);
+  }, [onDismiss]);
+
+  return (
+    <div
+      className="mx-2 mt-2 rounded-2xl bg-white/95 backdrop-blur-md shadow-xl border border-slate-200/60 px-3 py-2.5 cursor-pointer"
+      style={{
+        animation: dismissing
+          ? "notifSlideUp 0.35s ease-in forwards"
+          : "notifSlideDown 0.35s ease-out both",
+      }}
+      onClick={() => {
+        setDismissing(true);
+        setTimeout(onDismiss, 350);
+      }}
+    >
+      <div className="flex items-start gap-2">
+        <div className="w-7 h-7 rounded-lg bg-gradient-to-br from-blue-500 to-indigo-600 flex items-center justify-center flex-shrink-0 mt-0.5">
+          <span className="text-white font-bold text-[7px]">CC</span>
+        </div>
+        <div className="flex-1 min-w-0">
+          <div className="flex items-center justify-between">
+            <span className="text-[9px] font-bold text-slate-900">CareCompanion AI</span>
+            <span className="text-[8px] text-slate-400">now</span>
+          </div>
+          <p className="text-[9px] text-slate-600 leading-[1.4] mt-0.5 line-clamp-2">
+            {message}
+          </p>
+        </div>
+      </div>
     </div>
   );
 }
@@ -392,6 +484,7 @@ export default function VoiceAgent({ patientName }: VoiceAgentProps) {
     addLog,
     setPhaseActive,
     completeCall,
+    completeProactiveCall,
     updateBilling,
   } = useDemo();
 
@@ -401,15 +494,15 @@ export default function VoiceAgent({ patientName }: VoiceAgentProps) {
   const [isListening, setIsListening] = useState(false);
   const [elapsed, setElapsed] = useState(0);
   const [showAlertBanner, setShowAlertBanner] = useState(false);
-  const [isLive, setIsLive] = useState(false);
   const [showAnalyzingHint, setShowAnalyzingHint] = useState(false);
+  const [showNotification, setShowNotification] = useState(false);
 
   // Refs
   const timeoutsRef = useRef<ReturnType<typeof setTimeout>[]>([]);
   const chatEndRef = useRef<HTMLDivElement>(null);
   const timerRef = useRef<ReturnType<typeof setInterval> | null>(null);
-  const conversationRef = useRef<unknown>(null);
-  const micStreamRef = useRef<MediaStream | null>(null);
+  const abortControllerRef = useRef<AbortController | null>(null);
+  const preloadedAudioRef = useRef<Blob | null>(null);
 
   // ------ Auto-scroll transcript ------
   useEffect(() => {
@@ -435,254 +528,195 @@ export default function VoiceAgent({ patientName }: VoiceAgentProps) {
     return `${m}:${sec.toString().padStart(2, "0")}`;
   };
 
-  // ------ Simulated conversation (fallback) ------
-  const runSimulatedConversation = useCallback(() => {
-    const script = buildScript();
-    let cumDelay = 600;
+  // ------ Text notification trigger (fires on mount since VoiceAgent remounts per day) ------
+  useEffect(() => {
+    const dd = currentDay >= 1 && currentDay <= 7 ? DAY_DATA[currentDay - 1] : null;
+    if (dd && dd.phoneMessage) {
+      const t = setTimeout(() => setShowNotification(true), 800);
+      return () => clearTimeout(t);
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
 
-    script.forEach((line, idx) => {
-      const start = cumDelay + line.preDelay;
-
-      const t1 = setTimeout(() => {
-        if (line.speaker === "ai") {
-          setAiSpeaking(true);
-          setIsListening(false);
-        } else {
-          setAiSpeaking(false);
-          setIsListening(true);
-        }
-      }, start);
-
-      const typeDur = Math.min(line.text.length * 16, 1600);
-      const t2 = setTimeout(() => {
-        addTranscript(line.speaker, line.text);
-      }, start + typeDur);
-
-      const t3 = setTimeout(() => {
-        setAiSpeaking(false);
-        setIsListening(false);
-      }, start + typeDur + line.speakDuration);
-
-      timeoutsRef.current.push(t1, t2, t3);
-      cumDelay = start + typeDur + line.speakDuration;
-
-      if (idx === script.length - 1) {
-        const tBill = setTimeout(() => {
-          updateBilling(Math.ceil(cumDelay / 60000) + 1);
-        }, start + typeDur + line.speakDuration + 200);
-        timeoutsRef.current.push(tBill);
+  // ------ Audio playback for a single line ------
+  const playLineAudio = useCallback(async (
+    text: string,
+    speaker: "ai" | "patient",
+    fallbackDurationMs: number,
+    signal: AbortSignal,
+  ): Promise<void> => {
+    // Check for preloaded audio first (AI line preloaded during ringing)
+    if (speaker === "ai" && preloadedAudioRef.current) {
+      const blob = preloadedAudioRef.current;
+      preloadedAudioRef.current = null;
+      try {
+        const url = URL.createObjectURL(blob);
+        const audio = new Audio(url);
+        await new Promise<void>((resolve, reject) => {
+          audio.onended = () => { URL.revokeObjectURL(url); resolve(); };
+          audio.onerror = () => { URL.revokeObjectURL(url); reject(); };
+          const onAbort = () => { audio.pause(); URL.revokeObjectURL(url); resolve(); };
+          signal.addEventListener("abort", onAbort, { once: true });
+          audio.play().catch(reject);
+        });
+        return;
+      } catch {
+        // Fall through
       }
-    });
+    }
 
-    const tEnd = setTimeout(() => {
+    // Try ElevenLabs TTS for AI lines
+    if (speaker === "ai") {
+      try {
+        const res = await fetch("/api/tts", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ text }),
+          signal,
+        });
+        if (res.ok) {
+          const blob = await res.blob();
+          const url = URL.createObjectURL(blob);
+          const audio = new Audio(url);
+          await new Promise<void>((resolve, reject) => {
+            audio.onended = () => { URL.revokeObjectURL(url); resolve(); };
+            audio.onerror = () => { URL.revokeObjectURL(url); reject(); };
+            const onAbort = () => { audio.pause(); URL.revokeObjectURL(url); resolve(); };
+            signal.addEventListener("abort", onAbort, { once: true });
+            audio.play().catch(reject);
+          });
+          return;
+        }
+      } catch {
+        if (signal.aborted) return;
+        // Fall through to SpeechSynthesis
+      }
+    }
+
+    // Try browser SpeechSynthesis
+    if (typeof window !== "undefined" && "speechSynthesis" in window) {
+      try {
+        const utterance = new SpeechSynthesisUtterance(text);
+        utterance.rate = 0.95;
+        if (speaker === "patient") {
+          const voices = speechSynthesis.getVoices();
+          const femaleVoice = voices.find((v) =>
+            v.name.includes("Female") || v.name.includes("Samantha") ||
+            v.name.includes("Victoria") || v.name.includes("Karen") ||
+            v.name.includes("Zira")
+          );
+          if (femaleVoice) utterance.voice = femaleVoice;
+        }
+        await new Promise<void>((resolve) => {
+          utterance.onend = () => resolve();
+          utterance.onerror = () => resolve();
+          const onAbort = () => { speechSynthesis.cancel(); resolve(); };
+          signal.addEventListener("abort", onAbort, { once: true });
+          speechSynthesis.speak(utterance);
+        });
+        return;
+      } catch {
+        if (signal.aborted) return;
+        // Fall through to silent
+      }
+    }
+
+    // Silent fallback: just wait the expected duration
+    await new Promise<void>((resolve) => {
+      const t = setTimeout(resolve, fallbackDurationMs);
+      const onAbort = () => { clearTimeout(t); resolve(); };
+      signal.addEventListener("abort", onAbort, { once: true });
+    });
+  }, []);
+
+  // ------ Simulated conversation with audio ------
+  const runSimulatedConversation = useCallback(async (isProactive: boolean) => {
+    const script = isProactive ? buildCheckInScript() : buildIncidentScript();
+    const controller = new AbortController();
+    abortControllerRef.current = controller;
+    const { signal } = controller;
+
+    for (let idx = 0; idx < script.length; idx++) {
+      if (signal.aborted) break;
+
+      const line = script[idx];
+
+      // Pre-delay
+      await delay(line.preDelay);
+      if (signal.aborted) break;
+
+      // Set speaker state
+      if (line.speaker === "ai") {
+        setAiSpeaking(true);
+        setIsListening(false);
+      } else {
+        setAiSpeaking(false);
+        setIsListening(true);
+      }
+
+      // Add to transcript
+      addTranscript(line.speaker, line.text);
+
+      // Play audio
+      await playLineAudio(line.text, line.speaker, line.speakDuration, signal);
+      if (signal.aborted) break;
+
+      // Reset speaker state between lines
+      setAiSpeaking(false);
+      setIsListening(false);
+
+      // Brief pause between lines
+      await delay(300);
+    }
+
+    if (!signal.aborted) {
+      // Update billing (only for Day 4 incident calls)
+      if (!isProactive) {
+        updateBilling(25);
+      }
+
       setAiSpeaking(false);
       setIsListening(false);
       setPhonePhase("ended");
-      completeCall();
+
+      if (isProactive) {
+        completeProactiveCall();
+      } else {
+        completeCall();
+      }
       addLog("voice", "Call ended — session complete");
-    }, cumDelay + 1200);
-    timeoutsRef.current.push(tEnd);
-  }, [patientName, addTranscript, addLog, completeCall, updateBilling]);
-
-  // ------ Request microphone permission upfront ------
-  const requestMicPermission = useCallback(async (): Promise<boolean> => {
-    // Reuse existing stream if already granted
-    if (micStreamRef.current) return true;
-    try {
-      addLog("voice", "Requesting microphone access...");
-      const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
-      micStreamRef.current = stream;
-      addLog("voice", "Microphone access granted");
-      return true;
-    } catch (err) {
-      const msg = err instanceof Error ? err.message : String(err);
-      addLog("voice", `Microphone denied: ${msg}`);
-      return false;
     }
-  }, [addLog]);
-
-  // ------ Connect to real ElevenLabs agent ------
-  const connectToElevenLabs = useCallback(async () => {
-    try {
-      // Step 1: Request mic permission first (may already be granted)
-      const micGranted = await requestMicPermission();
-      if (!micGranted) {
-        addLog("voice", "Cannot start voice call without microphone");
-        return false;
-      }
-
-      // Step 2: Load SDK
-      const { Conversation } = await import("@elevenlabs/client");
-      addLog("voice", "ElevenLabs SDK loaded, connecting...");
-
-      // Step 3: Try to get a signed URL from our API (production), fall back to agentId
-      let signedUrl: string | null = null;
-      try {
-        const urlRes = await fetch("/api/elevenlabs-signed-url");
-        if (urlRes.ok) {
-          const data = await urlRes.json();
-          if (data.signed_url) {
-            signedUrl = data.signed_url;
-            addLog("voice", "Using signed URL for secure connection");
-          }
-        }
-      } catch {
-        // ignore — fall back to agentId
-      }
-      if (!signedUrl) {
-        addLog("voice", "Using public agent ID");
-      }
-
-      const firstMsg = `Hi Margaret, this is CareCompanion AI. I noticed you missed your check-in today and I see your nausea has been increasing. I wanted to check in — how are you feeling?`;
-
-      const conversation = await Conversation.startSession({
-        ...(signedUrl
-          ? { signedUrl }
-          : { agentId: "agent_8601kh042d5yf7atvdqa6nbfm9yb", connectionType: "webrtc" as const }),
-
-        overrides: {
-          agent: {
-            prompt: {
-              prompt: `You are CareCompanion AI, a friendly and empathetic voice-based health companion for Medicare patients on GLP-1 medications. You are making an OUTBOUND proactive engagement call to a patient named Margaret Chen.
-
-CONTEXT — why you are calling:
-- It is Wegovy Day 4 (Thursday, Jul 10). Margaret started Wegovy (semaglutide) 0.25mg on Monday.
-- She missed her daily check-in today — this is the first missed check-in since starting.
-- Her nausea has been escalating: Grade 0 (Day 1) → Grade 1 (Day 2) → Grade 2 (Day 3) → Grade 2 estimated today.
-- Her fluid intake has been declining: 64oz → 56oz → 38oz → estimated <32oz today. Dehydration risk.
-- Margaret is 72 years old with Type 2 Diabetes, Obesity (BMI 38), and Hypertension.
-- Her other vitals are actually improving: weight 247.2 → 246.0 (down 1.2 lbs), glucose 168 → 132 (improving), BP stable.
-- Her engagement score dropped from 92 → 41 over 4 days.
-- Her primary care provider is Dr. Patel.
-
-YOUR ROLE:
-1. Check on her nausea symptoms — ask how she's feeling.
-2. Normalize the experience — nausea is very common in week 1 (affects ~1/3 of patients) and almost always resolves.
-3. Provide practical tips: eat smaller meals throughout the day, try ginger tea, sip water frequently, avoid fatty or spicy foods.
-4. Celebrate her early results — she's already lost 1.2 pounds and her glucose is coming down nicely.
-5. Offer to note her symptoms for Dr. Patel in case they want to consider an anti-nausea medication (ondansetron).
-6. Encourage her to keep going — the first week is the hardest and it gets better.
-
-SAFETY RULES — you MUST follow these:
-- NEVER diagnose conditions or change medication dosages.
-- NEVER provide medical advice beyond general wellness tips and "take your prescribed medication."
-- If the patient reports severe vomiting, inability to keep fluids down, or any emergency symptom, tell them to call 911 or contact Dr. Patel immediately.
-- Always offer to connect them with Dr. Patel for clinical decisions.
-- Speak in simple, clear, warm language appropriate for a senior patient.`,
-            },
-            firstMessage: firstMsg,
-            language: "en",
-          },
-        },
-
-        onConnect: () => {
-          addLog("voice", "Connected — ElevenLabs Conversational AI active");
-          setIsLive(true);
-          setIsListening(true);
-        },
-
-        onDisconnect: () => {
-          setIsListening(false);
-          setAiSpeaking(false);
-          setPhonePhase("ended");
-          completeCall();
-          addLog("voice", "Call ended — session disconnected");
-          conversationRef.current = null;
-        },
-
-        onMessage: (message: { source?: string; message?: string }) => {
-          const speaker = message.source === "user" ? "patient" : "ai";
-          const text =
-            typeof message.message === "string"
-              ? message.message
-              : String(message.message ?? "");
-          if (text.trim()) {
-            addTranscript(speaker as "ai" | "patient", text);
-          }
-        },
-
-        onModeChange: ({ mode }: { mode: string }) => {
-          if (mode === "speaking") {
-            setAiSpeaking(true);
-            setIsListening(false);
-          } else {
-            setAiSpeaking(false);
-            setIsListening(true);
-          }
-        },
-
-        onError: (error: Error | string) => {
-          const msg = typeof error === "string" ? error : error?.message ?? "Unknown error";
-          addLog("voice", `ElevenLabs error: ${msg}`);
-        },
-      });
-
-      conversationRef.current = conversation;
-      return true;
-    } catch (err) {
-      const errorMsg = err instanceof Error ? err.message : String(err);
-      addLog("voice", `ElevenLabs unavailable: ${errorMsg}`);
-      return false;
-    }
-  }, [addLog, addTranscript, completeCall, requestMicPermission]);
-
-  // ------ Accept incoming call ------
-  const acceptCall = useCallback(async () => {
-    // Clear pending auto-accept timeout
-    timeoutsRef.current.forEach(clearTimeout);
-    timeoutsRef.current = [];
-
-    setPhonePhase("call");
-    setPhaseActive();
-
-    // Try real ElevenLabs first, fall back to simulated
-    const connected = await connectToElevenLabs();
-    if (!connected) {
-      addLog("voice", "Falling back to simulated conversation");
-      setIsListening(true);
-      runSimulatedConversation();
-    }
-  }, [setPhaseActive, connectToElevenLabs, addLog, runSimulatedConversation]);
-
-  // ------ Stop mic stream ------
-  const stopMicStream = useCallback(() => {
-    if (micStreamRef.current) {
-      micStreamRef.current.getTracks().forEach((t) => t.stop());
-      micStreamRef.current = null;
-    }
-  }, []);
+  }, [addTranscript, addLog, completeCall, completeProactiveCall, updateBilling, playLineAudio]);
 
   // ------ End call (hang up) ------
-  const endCall = useCallback(async () => {
-    if (conversationRef.current) {
-      try {
-        await (conversationRef.current as { endSession?: () => Promise<void> }).endSession?.();
-      } catch {
-        // ignore
-      }
-      conversationRef.current = null;
+  const endCall = useCallback(() => {
+    if (abortControllerRef.current) {
+      abortControllerRef.current.abort();
+      abortControllerRef.current = null;
     }
-    stopMicStream();
+    if (typeof window !== "undefined" && "speechSynthesis" in window) {
+      speechSynthesis.cancel();
+    }
     timeoutsRef.current.forEach(clearTimeout);
     timeoutsRef.current = [];
     setAiSpeaking(false);
     setIsListening(false);
     setPhonePhase("ended");
-    completeCall();
+    if (currentDay === 2) {
+      completeProactiveCall();
+    } else {
+      completeCall();
+    }
     addLog("voice", "Call ended by user");
-  }, [completeCall, addLog, stopMicStream]);
+  }, [completeCall, completeProactiveCall, addLog, currentDay]);
 
-  // ------ Demo phase: "detecting" — show engagement drop + missed check-in ------
+  // ------ Demo phase: "detecting" — Day 4 engagement drop ------
   useEffect(() => {
     if (demoPhase !== "detecting") return;
     if (phonePhase !== "app") return;
 
     addLog("voice", "AI monitoring detected engagement decline...");
 
-    // Pre-request mic permission now (close to user gesture from "Run Demo" click)
-    requestMicPermission();
-
-    // After ~2.5s, show alert state
     const t1 = setTimeout(() => {
       setPhonePhase("alert");
       setShowAlertBanner(true);
@@ -711,20 +745,34 @@ SAFETY RULES — you MUST follow these:
   useEffect(() => {
     if (demoPhase !== "calling") return;
 
-    // Show incoming call screen
     setPhonePhase("ringing");
-    addLog("voice", "Initiating engagement outreach call to patient...");
+    const isProactive = currentDay === 2;
+    addLog("voice", isProactive
+      ? "Initiating proactive check-in call..."
+      : "Initiating engagement outreach call to patient...");
 
-    // Auto-accept after 3s (user can tap Accept sooner)
-    const tAutoAccept = setTimeout(async () => {
+    // Preload first AI line TTS during ringing
+    const script = isProactive ? buildCheckInScript() : buildIncidentScript();
+    const firstAILine = script.find((l) => l.speaker === "ai");
+    if (firstAILine) {
+      fetch("/api/tts", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ text: firstAILine.text }),
+      })
+        .then((r) => r.ok ? r.blob() : null)
+        .then((blob) => {
+          if (blob) preloadedAudioRef.current = blob;
+        })
+        .catch(() => {});
+    }
+
+    // Auto-accept after 3s
+    const tAutoAccept = setTimeout(() => {
       setPhonePhase("call");
       setPhaseActive();
-      const connected = await connectToElevenLabs();
-      if (!connected) {
-        addLog("voice", "Falling back to simulated conversation");
-        setIsListening(true);
-        runSimulatedConversation();
-      }
+      addLog("voice", "Call connected — simulated conversation starting");
+      runSimulatedConversation(isProactive);
     }, 3000);
 
     timeoutsRef.current.push(tAutoAccept);
@@ -739,16 +787,13 @@ SAFETY RULES — you MUST follow these:
   // ------ Reset on demo idle ------
   useEffect(() => {
     if (demoPhase === "idle") {
-      // End any live session
-      if (conversationRef.current) {
-        try {
-          (conversationRef.current as { endSession?: () => Promise<void> }).endSession?.();
-        } catch {
-          // ignore
-        }
-        conversationRef.current = null;
+      if (abortControllerRef.current) {
+        abortControllerRef.current.abort();
+        abortControllerRef.current = null;
       }
-      stopMicStream();
+      if (typeof window !== "undefined" && "speechSynthesis" in window) {
+        speechSynthesis.cancel();
+      }
       timeoutsRef.current.forEach(clearTimeout);
       timeoutsRef.current = [];
       setPhonePhase("app");
@@ -756,25 +801,21 @@ SAFETY RULES — you MUST follow these:
       setAiSpeaking(false);
       setIsListening(false);
       setElapsed(0);
-      setIsLive(false);
       setShowAnalyzingHint(false);
+      preloadedAudioRef.current = null;
     }
-  }, [demoPhase, stopMicStream]);
+  }, [demoPhase]);
 
   // ------ Cleanup on unmount ------
   useEffect(() => {
     return () => {
       timeoutsRef.current.forEach(clearTimeout);
       if (timerRef.current) clearInterval(timerRef.current);
-      if (conversationRef.current) {
-        try {
-          (conversationRef.current as { endSession?: () => Promise<void> }).endSession?.();
-        } catch {
-          // ignore
-        }
+      if (abortControllerRef.current) {
+        abortControllerRef.current.abort();
       }
-      if (micStreamRef.current) {
-        micStreamRef.current.getTracks().forEach((t) => t.stop());
+      if (typeof window !== "undefined" && "speechSynthesis" in window) {
+        speechSynthesis.cancel();
       }
     };
   }, []);
@@ -788,7 +829,7 @@ SAFETY RULES — you MUST follow these:
   // ======================================================================
 
   return (
-    <div className="flex flex-col h-full w-full bg-slate-950 text-white overflow-hidden select-none">
+    <div className="relative flex flex-col h-full w-full bg-slate-950 text-white overflow-hidden select-none">
       <style>{`
         @keyframes voiceBar {
           0% { height: 4px; }
@@ -804,11 +845,6 @@ SAFETY RULES — you MUST follow these:
           70% { box-shadow: 0 0 0 16px rgba(16,185,129,0); }
           100% { box-shadow: 0 0 0 0 rgba(16,185,129,0); }
         }
-        @keyframes micPulse {
-          0% { box-shadow: 0 0 0 0 rgba(239,68,68,0.5); }
-          70% { box-shadow: 0 0 0 8px rgba(239,68,68,0); }
-          100% { box-shadow: 0 0 0 0 rgba(239,68,68,0); }
-        }
         @keyframes slideUp {
           0% { opacity: 0; transform: translateY(8px); }
           100% { opacity: 1; transform: translateY(0); }
@@ -822,9 +858,27 @@ SAFETY RULES — you MUST follow these:
           10%, 30%, 50%, 70%, 90% { transform: translateX(-1px); }
           20%, 40%, 60%, 80% { transform: translateX(1px); }
         }
+        @keyframes notifSlideDown {
+          0% { transform: translateY(-100%); opacity: 0; }
+          100% { transform: translateY(0); opacity: 1; }
+        }
+        @keyframes notifSlideUp {
+          0% { transform: translateY(0); opacity: 1; }
+          100% { transform: translateY(-100%); opacity: 0; }
+        }
         .scrollbar-hide::-webkit-scrollbar { display: none; }
         .scrollbar-hide { -ms-overflow-style: none; scrollbar-width: none; }
       `}</style>
+
+      {/* iOS-style text notification overlay */}
+      {showNotification && dayData?.phoneMessage && (
+        <div style={{ position: "absolute", top: 0, left: 0, right: 0, zIndex: 50 }}>
+          <TextNotification
+            message={dayData.phoneMessage}
+            onDismiss={() => setShowNotification(false)}
+          />
+        </div>
+      )}
 
       {/* ================================================================ */}
       {/* IDLE STATE — Day 0, no data yet                                  */}
@@ -871,36 +925,18 @@ SAFETY RULES — you MUST follow these:
           </div>
 
           <h2 className="text-sm font-bold text-white mb-0.5">CareCompanion AI</h2>
-          <p className="text-[10px] text-slate-400 mb-1">GLP-1 engagement check-in</p>
+          <p className="text-[10px] text-slate-400 mb-1">
+            {currentDay === 2 ? "Proactive wellness check-in" : "GLP-1 engagement check-in"}
+          </p>
           <p className="text-[10px] text-emerald-400 animate-pulse mb-8">Incoming call...</p>
 
-          <div className="flex items-center gap-1.5 px-2.5 py-1 rounded-full bg-slate-800/60 border border-slate-700/40 mb-6">
-            <div className="w-3 h-3 rounded-full bg-gradient-to-br from-blue-400 to-violet-500" />
-            <span className="text-[8px] text-slate-400">Powered by ElevenLabs</span>
-          </div>
-
-          <div className="flex items-center gap-8">
-            <button className="flex flex-col items-center gap-1">
-              <div className="w-12 h-12 rounded-full bg-red-500/20 border border-red-500/30 flex items-center justify-center">
-                <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="#ef4444" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-                  <path d="M10.68 13.31a16 16 0 0 0 3.41 2.6l1.1-1.1a2 2 0 0 1 2.11-.45c.75.31 1.55.55 2.36.68A2 2 0 0 1 22 16.92V19a2 2 0 0 1-2.18 2A19.79 19.79 0 0 1 3 4.18 2 2 0 0 1 5 2h2.09a2 2 0 0 1 2 1.72c.13.81.37 1.61.68 2.36a2 2 0 0 1-.45 2.11L8.09 9.41" />
-                  <line x1="1" y1="1" x2="23" y2="23" />
-                </svg>
-              </div>
-              <span className="text-[8px] text-slate-500">Decline</span>
-            </button>
-
-            <button onClick={acceptCall} className="flex flex-col items-center gap-1">
-              <div
-                className="w-14 h-14 rounded-full bg-emerald-500 flex items-center justify-center shadow-lg shadow-emerald-500/30"
-                style={{ animation: "ringPulse 1.5s ease-out infinite" }}
-              >
-                <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="white" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-                  <path d="M22 16.92V19a2 2 0 0 1-2.18 2A19.79 19.79 0 0 1 3 4.18 2 2 0 0 1 5 2h2.09a2 2 0 0 1 2 1.72c.13.81.37 1.61.68 2.36a2 2 0 0 1-.45 2.11L8.09 9.41a16 16 0 0 0 6.5 6.5l1.22-1.22a2 2 0 0 1 2.11-.45c.75.31 1.55.55 2.36.68A2 2 0 0 1 22 16.92z" />
-                </svg>
-              </div>
-              <span className="text-[8px] text-emerald-400 font-medium">Accept</span>
-            </button>
+          <div className="flex items-center gap-1.5 px-2.5 py-1 rounded-full bg-slate-800/60 border border-slate-700/40">
+            <div className="w-3 h-3 rounded-full bg-gradient-to-br from-emerald-400 to-teal-600 flex items-center justify-center">
+              <svg width="6" height="6" viewBox="0 0 24 24" fill="none" stroke="white" strokeWidth="3" strokeLinecap="round" strokeLinejoin="round">
+                <path d="M22 16.92V19a2 2 0 0 1-2.18 2A19.79 19.79 0 0 1 3 4.18 2 2 0 0 1 5 2h2.09" />
+              </svg>
+            </div>
+            <span className="text-[8px] text-slate-400">Auto-connecting in 3s...</span>
           </div>
         </div>
       )}
@@ -935,23 +971,11 @@ SAFETY RULES — you MUST follow these:
                   <div className="text-[10px] font-semibold text-white">CareCompanion AI</div>
                   <div className="flex items-center gap-1">
                     <span className={`text-[8px] font-medium ${phonePhase === "call" ? "text-emerald-400" : "text-slate-500"}`}>
-                      {phonePhase === "call" ? (isLive ? "Live call" : "In call") : "Call ended"}
+                      {phonePhase === "call" ? "Simulated call" : "Call ended"}
                     </span>
                     <span className="text-[8px] text-slate-600">&bull;</span>
                     <span className="text-[8px] text-slate-400 font-mono tabular-nums">{formatTime(elapsed)}</span>
                   </div>
-                </div>
-              </div>
-              <div className="flex items-center gap-2">
-                {isLive && (
-                  <span className="flex items-center gap-1 text-[8px] text-emerald-400 font-bold uppercase bg-emerald-500/10 border border-emerald-500/30 px-1.5 py-0.5 rounded-full">
-                    <span className="w-1.5 h-1.5 rounded-full bg-emerald-400 animate-pulse" />
-                    Live
-                  </span>
-                )}
-                <div className="flex items-center gap-1 px-1.5 py-0.5 rounded-full bg-slate-800/60 border border-slate-700/40">
-                  <div className="w-2.5 h-2.5 rounded-full bg-gradient-to-br from-blue-400 to-violet-500" />
-                  <span className="text-[7px] text-slate-500">ElevenLabs</span>
                 </div>
               </div>
             </div>
@@ -959,7 +983,7 @@ SAFETY RULES — you MUST follow these:
 
           {/* Waveform */}
           <div className="flex-shrink-0 flex items-center justify-center py-1">
-            <VoiceWaveform active={aiSpeaking} />
+            <VoiceWaveform active={aiSpeaking || isListening} />
           </div>
 
           {/* Transcript */}
@@ -975,9 +999,7 @@ SAFETY RULES — you MUST follow these:
                     />
                   ))}
                 </div>
-                <p className="text-[9px] text-slate-500">
-                  {isLive ? "Speak into your microphone..." : "Waiting for conversation..."}
-                </p>
+                <p className="text-[9px] text-slate-500">Starting conversation...</p>
               </div>
             )}
 
@@ -1016,7 +1038,7 @@ SAFETY RULES — you MUST follow these:
             <div ref={chatEndRef} />
           </div>
 
-          {/* Bottom: mic + end call */}
+          {/* Bottom: speaker indicator + end call */}
           <div className="flex-shrink-0 px-3 pb-3 pt-1">
             <div className="flex items-center justify-center gap-6">
               {/* End call button */}
@@ -1032,29 +1054,27 @@ SAFETY RULES — you MUST follow these:
                 </button>
               )}
 
-              {/* Mic indicator */}
+              {/* Speaker indicator */}
               <div className="flex flex-col items-center gap-1">
                 <div
                   className={`w-11 h-11 rounded-full flex items-center justify-center transition-all ${
-                    isListening
-                      ? "bg-red-500 shadow-lg"
-                      : aiSpeaking
-                        ? "bg-slate-700"
+                    aiSpeaking
+                      ? "bg-emerald-500/20 border-2 border-emerald-500/50"
+                      : isListening
+                        ? "bg-blue-500/20 border-2 border-blue-500/50"
                         : phonePhase === "call"
-                          ? "bg-slate-600"
+                          ? "bg-slate-700"
                           : "bg-slate-700/50"
                   }`}
-                  style={isListening ? { animation: "micPulse 1.5s ease-out infinite" } : undefined}
                 >
                   <svg
                     width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor"
                     strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"
-                    className={isListening ? "text-white" : aiSpeaking ? "text-slate-400" : "text-slate-300"}
+                    className={aiSpeaking ? "text-emerald-400" : isListening ? "text-blue-400" : "text-slate-400"}
                   >
-                    <path d="M12 1a3 3 0 0 0-3 3v8a3 3 0 0 0 6 0V4a3 3 0 0 0-3-3z" />
-                    <path d="M19 10v2a7 7 0 0 1-14 0v-2" />
-                    <line x1="12" y1="19" x2="12" y2="23" />
-                    <line x1="8" y1="23" x2="16" y2="23" />
+                    <polygon points="11 5 6 9 2 9 2 15 6 15 11 19 11 5" />
+                    <path d="M19.07 4.93a10 10 0 0 1 0 14.14" />
+                    <path d="M15.54 8.46a5 5 0 0 1 0 7.07" />
                   </svg>
                 </div>
                 <div className="text-[8px] text-slate-500">
@@ -1063,7 +1083,7 @@ SAFETY RULES — you MUST follow these:
                   ) : aiSpeaking ? (
                     <span className="text-emerald-400">AI speaking...</span>
                   ) : isListening ? (
-                    <span className="text-red-400">Listening...</span>
+                    <span className="text-blue-400">Patient speaking...</span>
                   ) : (
                     "Connecting..."
                   )}

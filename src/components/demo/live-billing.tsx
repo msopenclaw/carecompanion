@@ -916,60 +916,6 @@ export function LiveBilling() {
                     </div>
                   </div>
 
-                  {/* Revenue projection */}
-                  <div style={{
-                    borderTop: "1px solid #bbf7d0",
-                    paddingTop: 8,
-                    marginTop: 4,
-                  }}>
-                    <div style={{
-                      fontSize: 10,
-                      fontWeight: 700,
-                      color: "#166534",
-                      textTransform: "uppercase",
-                      letterSpacing: 0.6,
-                      marginBottom: 6,
-                    }}>
-                      Monthly Revenue Projection per Patient
-                    </div>
-                    <div style={{
-                      display: "flex",
-                      flexWrap: "wrap",
-                      gap: 8,
-                      fontSize: 11,
-                      color: "#334155",
-                      marginBottom: 6,
-                    }}>
-                      <span style={{ fontFamily: "monospace", fontWeight: 600 }}>
-                        <span style={{ color: "#d97706" }}>99453</span>: $19
-                      </span>
-                      <span style={{ color: "#94a3b8" }}>+</span>
-                      <span style={{ fontFamily: "monospace", fontWeight: 600 }}>
-                        <span style={{ color: "#16a34a" }}>99454</span>: $55
-                      </span>
-                      <span style={{ color: "#94a3b8" }}>+</span>
-                      <span style={{ fontFamily: "monospace", fontWeight: 600 }}>
-                        <span style={{ color: "#2563eb" }}>99457</span>: $52
-                      </span>
-                      <span style={{ color: "#94a3b8" }}>+</span>
-                      <span style={{ fontFamily: "monospace", fontWeight: 600 }}>
-                        <span style={{ color: "#7c3aed" }}>99490</span>: $64
-                      </span>
-                      <span style={{ color: "#94a3b8" }}>=</span>
-                      <span style={{ fontWeight: 700, color: "#166534" }}>$190/patient/month</span>
-                    </div>
-                    <div style={{
-                      fontSize: 11,
-                      fontWeight: 600,
-                      color: "#166534",
-                      backgroundColor: "#dcfce7",
-                      padding: "4px 8px",
-                      borderRadius: 4,
-                      textAlign: "center",
-                    }}>
-                      Projected annual: $2,280/patient &#215; 250 patients = $570,000
-                    </div>
-                  </div>
                 </div>
               )}
 

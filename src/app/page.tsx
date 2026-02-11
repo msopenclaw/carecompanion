@@ -76,6 +76,16 @@ function DemoPage() {
       );
     }
 
+    // Day 2: proactive call in progress
+    if (currentDay === 2 && demoPhase !== "idle") {
+      return (
+        <div className="flex items-center gap-2 px-3 py-1.5 bg-blue-500/10 border border-blue-500/30 rounded-lg">
+          <div className="w-2 h-2 bg-blue-400 rounded-full animate-pulse" />
+          <span className="text-blue-400 text-xs font-medium">Proactive Check-in...</span>
+        </div>
+      );
+    }
+
     // Day 4: AI incident day
     if (currentDay === 4 && demoPhase !== "idle" && demoPhase !== "complete") {
       return (

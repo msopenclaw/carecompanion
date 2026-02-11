@@ -290,11 +290,11 @@ export default function VoiceAgent({ patientName }: VoiceAgentProps) {
 
   // ------ Request microphone permission upfront ------
   const requestMicPermission = useCallback(async (): Promise<boolean> => {
+    // Reuse existing stream if already granted
+    if (micStreamRef.current) return true;
     try {
       addLog("voice", "Requesting microphone access...");
       const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
-      // Keep the stream active — some browsers release mic if we stop tracks
-      // Store it so we can clean up later
       micStreamRef.current = stream;
       addLog("voice", "Microphone access granted");
       return true;
@@ -308,22 +308,41 @@ export default function VoiceAgent({ patientName }: VoiceAgentProps) {
   // ------ Connect to real ElevenLabs agent ------
   const connectToElevenLabs = useCallback(async () => {
     try {
-      // Step 1: Request mic permission first (user gesture context)
+      // Step 1: Request mic permission first (may already be granted)
       const micGranted = await requestMicPermission();
       if (!micGranted) {
         addLog("voice", "Cannot start voice call without microphone");
         return false;
       }
 
-      // Step 2: Load SDK and start session
+      // Step 2: Load SDK
       const { Conversation } = await import("@elevenlabs/client");
       addLog("voice", "ElevenLabs SDK loaded, connecting...");
+
+      // Step 3: Try to get a signed URL from our API (production), fall back to agentId
+      let signedUrl: string | null = null;
+      try {
+        const urlRes = await fetch("/api/elevenlabs-signed-url");
+        if (urlRes.ok) {
+          const data = await urlRes.json();
+          if (data.signed_url) {
+            signedUrl = data.signed_url;
+            addLog("voice", "Using signed URL for secure connection");
+          }
+        }
+      } catch {
+        // ignore — fall back to agentId
+      }
+      if (!signedUrl) {
+        addLog("voice", "Using public agent ID");
+      }
 
       const firstMsg = `Good morning, ${patientName}! This is CareCompanion AI calling. I noticed your blood pressure reading this morning was 155 over 95, which is a bit higher than your usual range. I wanted to check in with you — did you remember to take your Lisinopril last evening?`;
 
       const conversation = await Conversation.startSession({
-        agentId: "agent_8601kh042d5yf7atvdqa6nbfm9yb",
-        connectionType: "webrtc",
+        ...(signedUrl
+          ? { signedUrl }
+          : { agentId: "agent_8601kh042d5yf7atvdqa6nbfm9yb", connectionType: "webrtc" as const }),
 
         overrides: {
           agent: {
@@ -460,6 +479,9 @@ SAFETY RULES — you MUST follow these:
     if (phonePhase !== "app") return;
 
     addLog("voice", "AI monitoring detected vitals anomaly...");
+
+    // Pre-request mic permission now (close to user gesture from "Run Demo" click)
+    requestMicPermission();
 
     // Show the trend container
     const t0 = setTimeout(() => {

@@ -32,7 +32,7 @@ How they interact:
 | Day | Weight | Nausea | Engagement | Key Event |
 |-----|--------|--------|------------|-----------|
 | 1 | 247.2 | None | 92% | First injection, AI welcome |
-| 2 | 247.0 | Mild | 85% | AI checks on GI symptoms |
+| **2** | **247.0** | **Mild** | **85%** | **Proactive check-in voice call (trust building)** |
 | 3 | 246.4 | Moderate | 60% | Reduced intake, hydration coaching |
 | **4** | **246.0** | **Moderate** | **41%** | **Missed check-in → AI thinking → voice call → Epic BPA** |
 | 5 | 246.1 | Mild | 78% | Post-call recovery |
@@ -40,17 +40,17 @@ How they interact:
 | 7 | 245.6 | None | 94% | Weekly summary, -1.6 lbs |
 
 ## Three Panels
-1. **Patient View** (iPhone frame) — `src/components/demo/voice-agent.tsx` — Daily vitals card (weight, BP, glucose, nausea, hydration, engagement), AI messages, Day 4 voice call
-2. **Clinical Intelligence** — `src/components/demo/live-triage.tsx` — GLP-1 patient cohort grid → AI thinking feed (7 GLP-1 reasoning steps) → transcript → completion
-3. **Provider EHR (Epic)** — `src/components/demo/live-billing.tsx` — Dynamic flowsheet (grows per day), medications (Wegovy/Metformin/Lisinopril), BPA alerts, AI summary, provider actions
+1. **Patient View** (iPhone frame) — `src/components/demo/voice-agent.tsx` — iOS text notifications, daily vitals card, Day 2 proactive call, Day 4 incident call, simulated conversation with TTS audio
+2. **Clinical Intelligence** — `src/components/demo/live-triage.tsx` — GLP-1 patient cohort grid → AI thinking feed (Day 4) → transcript → completion + Day 7 Program ROI card
+3. **Provider EHR (Epic)** — `src/components/demo/live-billing.tsx` — Dynamic flowsheet (grows per day), medications (Wegovy/Metformin/Lisinopril), BPA alerts, AI summary, Day 7 clinical summary
 
 ## Key Files
 - `src/app/page.tsx` — Main layout, 3-panel split, header with 7-day stepper + day indicator pills
 - `src/components/demo/demo-context.tsx` — Central state: `currentDay`, `demoPhase`, `DAY_DATA`, `AI_THINKING_STEPS`, transcript, billing
-- `src/components/demo/voice-agent.tsx` — Daily vitals card + ElevenLabs voice call (Day 4) + fallback simulated GLP-1 conversation
+- `src/components/demo/voice-agent.tsx` — iOS text notifications + daily vitals card + simulated voice calls (Day 2 check-in, Day 4 incident) with TTS audio
 - `src/components/demo/live-triage.tsx` — GLP-1 patient cohort grid + AI reasoning feed + documenting/complete views
 - `src/components/demo/live-billing.tsx` — Epic EHR: dynamic flowsheet, medications, problems, BPA, AI summary, Day 7 weekly summary
-- `src/components/demo/script-guide.tsx` — Overlay: patient script for Day 4 voice call (nausea conversation)
+- `src/components/demo/script-guide.tsx` — Conversation Preview overlay (dynamic Day 2/Day 4 content, no mic needed)
 - `src/components/demo/developer-logs.tsx` — Slide-out dev logs panel
 - `src/lib/db/schema.ts` — Drizzle schema (patients, vitals, medications, alerts, billing)
 - `src/middleware.ts` — Basic auth
@@ -90,10 +90,15 @@ How they interact:
 ## Common Patterns
 - All demo state flows through `useDemo()` hook from DemoProvider context
 - `currentDay` drives which day's data is shown; `demoPhase` drives the Day 4 AI incident flow
+- Day 2: `advanceDay()` schedules `demoPhase("calling")` after 5.5s delay (text notification plays first)
+- Day 4: `advanceDay()` sets `demoPhase("detecting")` → full AI incident flow
 - Panel components read `currentDay` from context to render day-appropriate content
-- `DAY_DATA` is a static 7-element array — no API/DB needed for the 7-day simulation
+- `DAY_DATA` is a static 7-element array with `isCallDay` flag — no API/DB needed
 - VoiceAgent remounts per day via React `key={currentDay}` for clean state reset
+- iOS text notifications slide down from top on each day (except Day 4, empty phoneMessage)
+- Voice calls are fully simulated: async sequential script with audio fallback chain (ElevenLabs TTS → SpeechSynthesis → silent)
+- Day 2 proactive call uses `completeProactiveCall()` (returns to idle, no BPA/documenting)
+- Day 4 incident call uses `completeCall()` (triggers documenting → complete flow)
+- Revenue math lives in Clinical Intelligence panel (ProgramROI card, Day 7 only), NOT in EHR
 - Dynamic flowsheet in Epic panel grows columns as days advance
-- ElevenLabs voice: tries signed URL first → falls back to public agentId → falls back to simulated conversation
-- Mic permission pre-requested during "detecting" phase for later auto-accept
 - CSS animations via `<style>` blocks with `@keyframes` (no animation library)

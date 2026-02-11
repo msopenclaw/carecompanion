@@ -1,7 +1,7 @@
 "use client";
 
 import { useState, useEffect, useRef, useMemo } from "react";
-import { useDemo, AI_THINKING_STEPS, DAY_DATA } from "./demo-context";
+import { useDemo, AI_THINKING_STEPS, AI_THINKING_STEPS_DAY2, DAY_DATA } from "./demo-context";
 
 // ---------------------------------------------------------------------------
 // Types
@@ -237,7 +237,7 @@ function ProgramROI() {
 // ---------------------------------------------------------------------------
 
 function PatientListView() {
-  const { demoPhase, openAnalysis, currentDay } = useDemo();
+  const { demoPhase, currentDay } = useDemo();
   const isDetecting = demoPhase === "detecting";
 
   // Compute Margaret's dynamic data based on currentDay
@@ -300,11 +300,8 @@ function PatientListView() {
             <div
               key={patient.name}
               className={`grid grid-cols-[16px_1fr_32px_44px_1fr_1fr] gap-x-1.5 items-center px-1.5 py-[5px] border-b border-slate-100 transition-colors ${
-                showFlag ? "bg-red-50/60 cursor-pointer hover:bg-red-100/60" : ""
+                showFlag ? "bg-red-50/60" : ""
               }`}
-              onClick={showFlag ? openAnalysis : undefined}
-              role={showFlag ? "button" : undefined}
-              tabIndex={showFlag ? 0 : undefined}
             >
               {/* Status dot / flag */}
               <div className="flex items-center justify-center">
@@ -327,7 +324,7 @@ function PatientListView() {
                 </span>
                 {showFlag && (
                   <span className="text-[9px] text-red-500 font-medium whitespace-nowrap" style={{ animation: "fadeSlideIn 0.5s ease-out both" }}>
-                    Click to investigate
+                    Analyzing...
                   </span>
                 )}
               </div>
@@ -371,10 +368,13 @@ function PatientListView() {
 // ---------------------------------------------------------------------------
 
 function AIThinkingFeed() {
-  const { triggerCall, addLog } = useDemo();
+  const { triggerCall, addLog, currentDay } = useDemo();
+
+  // Use Day 2 or Day 4 thinking steps
+  const steps = currentDay === 2 ? AI_THINKING_STEPS_DAY2 : AI_THINKING_STEPS;
 
   const [stepStatuses, setStepStatuses] = useState<StepStatus[]>(() =>
-    AI_THINKING_STEPS.map(() => "pending")
+    steps.map(() => "pending")
   );
   const [decisionVisible, setDecisionVisible] = useState(false);
   const triggeredRef = useRef(false);
@@ -383,7 +383,7 @@ function AIThinkingFeed() {
     const timeouts: ReturnType<typeof setTimeout>[] = [];
     let cumulativeDelay = 400; // initial pause before first step starts
 
-    AI_THINKING_STEPS.forEach((step, idx) => {
+    steps.forEach((step, idx) => {
       // Start step (pending -> active)
       const startDelay = cumulativeDelay;
       timeouts.push(
@@ -433,7 +433,7 @@ function AIThinkingFeed() {
     return () => {
       timeouts.forEach(clearTimeout);
     };
-  }, [triggerCall, addLog]);
+  }, [triggerCall, addLog, steps]);
 
   return (
     <div className="flex flex-col h-full">
@@ -443,8 +443,12 @@ function AIThinkingFeed() {
           <IconBrain className="w-3.5 h-3.5 text-white" />
         </div>
         <div className="leading-none">
-          <h2 className="text-[13px] font-bold text-slate-800 tracking-tight">Engagement Analysis &mdash; Margaret Chen</h2>
-          <p className="text-[10px] text-indigo-500 font-medium mt-0.5">Clinical reasoning in progress</p>
+          <h2 className="text-[13px] font-bold text-slate-800 tracking-tight">
+            {currentDay === 2 ? "Text Sentiment Analysis" : "Engagement Analysis"} &mdash; Margaret Chen
+          </h2>
+          <p className="text-[10px] text-indigo-500 font-medium mt-0.5">
+            {currentDay === 2 ? "Discontinuation risk detected in text" : "Clinical reasoning in progress"}
+          </p>
         </div>
         <div className="ml-auto flex items-center gap-1">
           <span className="relative flex h-1.5 w-1.5">
@@ -461,7 +465,7 @@ function AIThinkingFeed() {
           {/* Vertical line */}
           <div className="absolute left-[11px] top-2 bottom-2 w-px bg-slate-200" />
 
-          {AI_THINKING_STEPS.map((step, idx) => {
+          {steps.map((step, idx) => {
             const status = stepStatuses[idx];
 
             const dotBg =
@@ -827,11 +831,9 @@ function CompleteView() {
 // ---------------------------------------------------------------------------
 
 export function LiveTriage() {
-  const { demoPhase, currentDay } = useDemo();
+  const { demoPhase } = useDemo();
 
-  // Keep patient grid visible during Day 2 proactive call (no AI thinking feed needed)
-  const showPatientList = demoPhase === "idle" || demoPhase === "detecting" ||
-    (currentDay === 2 && (demoPhase === "calling" || demoPhase === "active"));
+  const showPatientList = demoPhase === "idle" || demoPhase === "detecting";
 
   return (
     <div className="flex flex-col h-full w-full bg-white text-slate-800 font-sans select-none overflow-hidden">
@@ -944,8 +946,8 @@ export function LiveTriage() {
       <div className="flex-1 min-h-0 overflow-hidden">
         {showPatientList && <PatientListView />}
         {demoPhase === "analyzing" && <AIThinkingFeed />}
-        {demoPhase === "calling" && currentDay !== 2 && <CallingView />}
-        {demoPhase === "active" && currentDay !== 2 && <TranscriptView />}
+        {demoPhase === "calling" && <CallingView />}
+        {demoPhase === "active" && <TranscriptView />}
         {demoPhase === "documenting" && <DocumentingView />}
         {demoPhase === "complete" && <CompleteView />}
       </div>

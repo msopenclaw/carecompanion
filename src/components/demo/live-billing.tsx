@@ -135,6 +135,9 @@ export function LiveBilling() {
   const [showBpaBanner, setShowBpaBanner] = useState(false);
   const [showFullSummary, setShowFullSummary] = useState(false);
   const [inBasketBadge, setInBasketBadge] = useState(false);
+  const [selectedAction, setSelectedAction] = useState<string | null>(null);
+  const [actionConfirmed, setActionConfirmed] = useState(false);
+  const [doseChoice, setDoseChoice] = useState<string | null>(null);
 
   // Handle phase transitions
   useEffect(() => {
@@ -154,6 +157,9 @@ export function LiveBilling() {
       setShowBpaBanner(false);
       setShowFullSummary(false);
       setInBasketBadge(false);
+      setSelectedAction(null);
+      setActionConfirmed(false);
+      setDoseChoice(null);
     }
   }, [demoPhase]);
 
@@ -202,6 +208,20 @@ export function LiveBilling() {
         @keyframes epicBadgePulse {
           0%, 100% { transform: scale(1); }
           50% { transform: scale(1.2); }
+        }
+        @keyframes epicBlinkBorder {
+          0%, 100% { box-shadow: 0 0 0 2px rgba(217, 119, 6, 0.3); }
+          50% { box-shadow: 0 0 0 4px rgba(217, 119, 6, 0.6), 0 0 12px rgba(217, 119, 6, 0.2); }
+        }
+        @keyframes epicButtonBlink {
+          0%, 100% { box-shadow: 0 1px 3px rgba(0,0,0,0.1); }
+          50% { box-shadow: 0 0 0 3px rgba(59, 130, 246, 0.4), 0 0 12px rgba(59, 130, 246, 0.15); }
+        }
+        .epic-blink-border {
+          animation: epicBlinkBorder 1.5s ease-in-out infinite;
+        }
+        .epic-button-blink {
+          animation: epicButtonBlink 1.5s ease-in-out infinite;
         }
         .epic-bpa-slide {
           animation: epicBpaSlideIn 0.4s ease-out forwards, epicBpaPulse 2.5s ease-in-out 0.4s infinite;
@@ -391,7 +411,7 @@ export function LiveBilling() {
           {/* ============================================================ */}
           {showBpaBanner && !showFullSummary && (
             <div
-              className="epic-bpa-slide"
+              className="epic-bpa-slide epic-blink-border"
               onClick={handleBpaClick}
               style={{
                 margin: "8px 10px 0 10px",
@@ -617,14 +637,17 @@ export function LiveBilling() {
               </div>
 
               {/* -------------------------------------------------------- */}
-              {/* Provider Action Buttons (pills)                          */}
+              {/* Provider Action Buttons (pills) + Subsequent Steps      */}
               {/* -------------------------------------------------------- */}
-              <div style={{
-                backgroundColor: "#ffffff",
-                border: "1px solid #e2e8f0",
-                borderRadius: 4,
-                padding: "10px 14px",
-              }}>
+              <div
+                className={!selectedAction ? "epic-blink-border" : ""}
+                style={{
+                  backgroundColor: "#ffffff",
+                  border: "1px solid #e2e8f0",
+                  borderRadius: 4,
+                  padding: "10px 14px",
+                }}
+              >
                 <div style={{
                   fontSize: 11,
                   fontWeight: 700,
@@ -632,8 +655,22 @@ export function LiveBilling() {
                   textTransform: "uppercase",
                   letterSpacing: 0.6,
                   marginBottom: 10,
+                  display: "flex",
+                  alignItems: "center",
+                  gap: 6,
                 }}>
                   Provider Actions
+                  {!selectedAction && (
+                    <span style={{
+                      fontSize: 9,
+                      fontWeight: 500,
+                      color: "#f59e0b",
+                      textTransform: "none",
+                      letterSpacing: 0,
+                    }}>
+                      &larr; Select an action
+                    </span>
+                  )}
                 </div>
 
                 <div style={{
@@ -643,81 +680,347 @@ export function LiveBilling() {
                   marginBottom: 10,
                 }}>
                   {/* Adjust GLP-1 Dose */}
-                  <button style={{
-                    padding: "7px 16px",
-                    borderRadius: 20,
-                    border: "none",
-                    cursor: "pointer",
-                    fontSize: 12,
-                    fontWeight: 600,
-                    color: "#ffffff",
-                    background: "linear-gradient(135deg, #3b82f6, #2563eb)",
-                    boxShadow: "0 1px 3px rgba(37, 99, 235, 0.3)",
-                    transition: "transform 0.1s, box-shadow 0.1s",
-                  }}>
-                    Adjust GLP-1 Dose
-                  </button>
-
-                  {/* Schedule Telehealth */}
-                  <button style={{
-                    padding: "7px 16px",
-                    borderRadius: 20,
-                    border: "none",
-                    cursor: "pointer",
-                    fontSize: 12,
-                    fontWeight: 600,
-                    color: "#ffffff",
-                    background: "linear-gradient(135deg, #8b5cf6, #7c3aed)",
-                    boxShadow: "0 1px 3px rgba(124, 58, 237, 0.3)",
-                    transition: "transform 0.1s, box-shadow 0.1s",
-                  }}>
-                    Schedule Telehealth
-                  </button>
-
-                  {/* Order Labs (A1c) */}
-                  <button style={{
-                    padding: "7px 16px",
-                    borderRadius: 20,
-                    border: "none",
-                    cursor: "pointer",
-                    fontSize: 12,
-                    fontWeight: 600,
-                    color: "#ffffff",
-                    background: "linear-gradient(135deg, #14b8a6, #0d9488)",
-                    boxShadow: "0 1px 3px rgba(13, 148, 136, 0.3)",
-                    transition: "transform 0.1s, box-shadow 0.1s",
-                  }}>
-                    Order Labs (A1c)
-                  </button>
-
-                  {/* Resolve */}
                   <button
-                    onClick={resolveCase}
+                    className={!selectedAction ? "epic-button-blink" : ""}
+                    onClick={() => { if (!selectedAction) setSelectedAction("dose"); }}
                     style={{
                       padding: "7px 16px",
                       borderRadius: 20,
                       border: "none",
-                      cursor: "pointer",
+                      cursor: selectedAction && selectedAction !== "dose" ? "default" : "pointer",
                       fontSize: 12,
                       fontWeight: 600,
                       color: "#ffffff",
-                      background: "linear-gradient(135deg, #22c55e, #16a34a)",
-                      boxShadow: "0 1px 3px rgba(22, 163, 74, 0.3)",
-                      transition: "transform 0.1s, box-shadow 0.1s",
+                      background: selectedAction && selectedAction !== "dose"
+                        ? "#94a3b8"
+                        : selectedAction === "dose"
+                          ? "linear-gradient(135deg, #2563eb, #1d4ed8)"
+                          : "linear-gradient(135deg, #3b82f6, #2563eb)",
+                      boxShadow: selectedAction === "dose" ? "0 0 0 2px #3b82f6" : "0 1px 3px rgba(37, 99, 235, 0.3)",
+                      opacity: selectedAction && selectedAction !== "dose" ? 0.5 : 1,
+                      transition: "all 0.2s ease",
                     }}
                   >
-                    Resolve
+                    {selectedAction === "dose" ? "\u2713 " : ""}Adjust GLP-1 Dose
                   </button>
+
+                  {/* Schedule Telehealth */}
+                  <button
+                    className={!selectedAction ? "epic-button-blink" : ""}
+                    onClick={() => { if (!selectedAction) setSelectedAction("telehealth"); }}
+                    style={{
+                      padding: "7px 16px",
+                      borderRadius: 20,
+                      border: "none",
+                      cursor: selectedAction && selectedAction !== "telehealth" ? "default" : "pointer",
+                      fontSize: 12,
+                      fontWeight: 600,
+                      color: "#ffffff",
+                      background: selectedAction && selectedAction !== "telehealth"
+                        ? "#94a3b8"
+                        : selectedAction === "telehealth"
+                          ? "linear-gradient(135deg, #7c3aed, #6d28d9)"
+                          : "linear-gradient(135deg, #8b5cf6, #7c3aed)",
+                      boxShadow: selectedAction === "telehealth" ? "0 0 0 2px #8b5cf6" : "0 1px 3px rgba(124, 58, 237, 0.3)",
+                      opacity: selectedAction && selectedAction !== "telehealth" ? 0.5 : 1,
+                      transition: "all 0.2s ease",
+                    }}
+                  >
+                    {selectedAction === "telehealth" ? "\u2713 " : ""}Schedule Telehealth
+                  </button>
+
+                  {/* Order Labs (A1c) */}
+                  <button
+                    className={!selectedAction ? "epic-button-blink" : ""}
+                    onClick={() => { if (!selectedAction) setSelectedAction("labs"); }}
+                    style={{
+                      padding: "7px 16px",
+                      borderRadius: 20,
+                      border: "none",
+                      cursor: selectedAction && selectedAction !== "labs" ? "default" : "pointer",
+                      fontSize: 12,
+                      fontWeight: 600,
+                      color: "#ffffff",
+                      background: selectedAction && selectedAction !== "labs"
+                        ? "#94a3b8"
+                        : selectedAction === "labs"
+                          ? "linear-gradient(135deg, #0d9488, #0f766e)"
+                          : "linear-gradient(135deg, #14b8a6, #0d9488)",
+                      boxShadow: selectedAction === "labs" ? "0 0 0 2px #14b8a6" : "0 1px 3px rgba(13, 148, 136, 0.3)",
+                      opacity: selectedAction && selectedAction !== "labs" ? 0.5 : 1,
+                      transition: "all 0.2s ease",
+                    }}
+                  >
+                    {selectedAction === "labs" ? "\u2713 " : ""}Order Labs (A1c)
+                  </button>
+
+                  {/* Resolve (only shown when no action selected or after action confirmed) */}
+                  {(!selectedAction || actionConfirmed) && (
+                    <button
+                      className={actionConfirmed ? "epic-button-blink" : ""}
+                      onClick={resolveCase}
+                      style={{
+                        padding: "7px 16px",
+                        borderRadius: 20,
+                        border: "none",
+                        cursor: "pointer",
+                        fontSize: 12,
+                        fontWeight: 600,
+                        color: "#ffffff",
+                        background: "linear-gradient(135deg, #22c55e, #16a34a)",
+                        boxShadow: actionConfirmed ? "0 0 0 2px #22c55e" : "0 1px 3px rgba(22, 163, 74, 0.3)",
+                        transition: "all 0.2s ease",
+                      }}
+                    >
+                      {actionConfirmed ? "Resolve & Close Alert" : "Resolve"}
+                    </button>
+                  )}
                 </div>
 
-                <div style={{
-                  fontSize: 10,
-                  color: "#94a3b8",
-                  fontStyle: "italic",
-                  textAlign: "center",
-                }}>
-                  Select an action or resolve to close this alert
-                </div>
+                {/* ---- Subsequent Steps Based on Selection ---- */}
+
+                {/* Dose Adjustment Step */}
+                {selectedAction === "dose" && !actionConfirmed && (
+                  <div className="epic-fade-in" style={{
+                    border: "1px solid #bfdbfe",
+                    borderRadius: 4,
+                    backgroundColor: "#eff6ff",
+                    padding: "10px 12px",
+                    marginBottom: 8,
+                  }}>
+                    <div style={{ fontSize: 11, fontWeight: 700, color: "#1e40af", marginBottom: 8 }}>
+                      Dose Adjustment &mdash; Wegovy (semaglutide)
+                    </div>
+                    <div style={{ fontSize: 11, color: "#334155", marginBottom: 8 }}>
+                      Current: <strong>0.25mg SubQ weekly</strong> (Week 1 of 4)
+                    </div>
+                    <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
+                      {[
+                        { label: "Continue 0.25mg as prescribed", desc: "Standard titration — reassess at Week 4", value: "continue" },
+                        { label: "Hold dose 1 week", desc: "Skip next injection, restart when GI symptoms resolve", value: "hold" },
+                        { label: "Add ondansetron 4mg PRN", desc: "Anti-emetic for persistent nausea, continue Wegovy", value: "antiemetic" },
+                      ].map((opt) => (
+                        <button
+                          key={opt.value}
+                          className={doseChoice === opt.value ? "" : "epic-button-blink"}
+                          onClick={() => {
+                            setDoseChoice(opt.value);
+                            setTimeout(() => setActionConfirmed(true), 800);
+                          }}
+                          style={{
+                            display: "flex",
+                            flexDirection: "column",
+                            alignItems: "flex-start",
+                            padding: "8px 12px",
+                            borderRadius: 6,
+                            border: doseChoice === opt.value ? "2px solid #3b82f6" : "1px solid #cbd5e1",
+                            backgroundColor: doseChoice === opt.value ? "#dbeafe" : "#ffffff",
+                            cursor: doseChoice ? "default" : "pointer",
+                            textAlign: "left",
+                            width: "100%",
+                            transition: "all 0.2s ease",
+                          }}
+                        >
+                          <span style={{ fontSize: 12, fontWeight: 600, color: "#1e293b" }}>
+                            {doseChoice === opt.value ? "\u2713 " : ""}{opt.label}
+                          </span>
+                          <span style={{ fontSize: 10, color: "#64748b", marginTop: 2 }}>{opt.desc}</span>
+                        </button>
+                      ))}
+                    </div>
+                  </div>
+                )}
+
+                {/* Dose confirmed */}
+                {selectedAction === "dose" && actionConfirmed && (
+                  <div className="epic-fade-in" style={{
+                    border: "1px solid #bbf7d0",
+                    borderRadius: 4,
+                    backgroundColor: "#f0fdf4",
+                    padding: "8px 12px",
+                    marginBottom: 8,
+                    display: "flex",
+                    alignItems: "center",
+                    gap: 8,
+                  }}>
+                    <div style={{
+                      width: 18, height: 18, borderRadius: "50%", backgroundColor: "#dcfce7",
+                      border: "1.5px solid #22c55e", display: "flex", alignItems: "center", justifyContent: "center", flexShrink: 0,
+                    }}>
+                      <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="#16a34a" strokeWidth={3}>
+                        <path strokeLinecap="round" strokeLinejoin="round" d="M4.5 12.75l6 6 9-13.5" />
+                      </svg>
+                    </div>
+                    <span style={{ fontSize: 12, color: "#166534", fontWeight: 600 }}>
+                      Dose adjustment order placed &mdash; added to medication list
+                    </span>
+                  </div>
+                )}
+
+                {/* Telehealth Step */}
+                {selectedAction === "telehealth" && !actionConfirmed && (
+                  <div className="epic-fade-in" style={{
+                    border: "1px solid #ddd6fe",
+                    borderRadius: 4,
+                    backgroundColor: "#f5f3ff",
+                    padding: "10px 12px",
+                    marginBottom: 8,
+                  }}>
+                    <div style={{ fontSize: 11, fontWeight: 700, color: "#5b21b6", marginBottom: 8 }}>
+                      Schedule Telehealth Visit
+                    </div>
+                    <div style={{ fontSize: 11, color: "#334155", marginBottom: 6 }}>
+                      <strong>Patient:</strong> Margaret Chen &middot; <strong>Provider:</strong> Dr. Patel, MD
+                    </div>
+                    <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
+                      {[
+                        { label: "Tomorrow, 2:30 PM EST", desc: "Next available — 15 min video visit", value: "tomorrow" },
+                        { label: "Friday, 10:00 AM EST", desc: "End of week follow-up — 15 min video visit", value: "friday" },
+                      ].map((opt) => (
+                        <button
+                          key={opt.value}
+                          className="epic-button-blink"
+                          onClick={() => {
+                            setActionConfirmed(true);
+                          }}
+                          style={{
+                            display: "flex",
+                            flexDirection: "column",
+                            alignItems: "flex-start",
+                            padding: "8px 12px",
+                            borderRadius: 6,
+                            border: "1px solid #cbd5e1",
+                            backgroundColor: "#ffffff",
+                            cursor: "pointer",
+                            textAlign: "left",
+                            width: "100%",
+                            transition: "all 0.2s ease",
+                          }}
+                        >
+                          <span style={{ fontSize: 12, fontWeight: 600, color: "#1e293b" }}>{opt.label}</span>
+                          <span style={{ fontSize: 10, color: "#64748b", marginTop: 2 }}>{opt.desc}</span>
+                        </button>
+                      ))}
+                    </div>
+                  </div>
+                )}
+
+                {/* Telehealth confirmed */}
+                {selectedAction === "telehealth" && actionConfirmed && (
+                  <div className="epic-fade-in" style={{
+                    border: "1px solid #bbf7d0",
+                    borderRadius: 4,
+                    backgroundColor: "#f0fdf4",
+                    padding: "8px 12px",
+                    marginBottom: 8,
+                    display: "flex",
+                    alignItems: "center",
+                    gap: 8,
+                  }}>
+                    <div style={{
+                      width: 18, height: 18, borderRadius: "50%", backgroundColor: "#dcfce7",
+                      border: "1.5px solid #22c55e", display: "flex", alignItems: "center", justifyContent: "center", flexShrink: 0,
+                    }}>
+                      <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="#16a34a" strokeWidth={3}>
+                        <path strokeLinecap="round" strokeLinejoin="round" d="M4.5 12.75l6 6 9-13.5" />
+                      </svg>
+                    </div>
+                    <span style={{ fontSize: 12, color: "#166534", fontWeight: 600 }}>
+                      Telehealth visit scheduled &mdash; patient will receive notification
+                    </span>
+                  </div>
+                )}
+
+                {/* Labs Step */}
+                {selectedAction === "labs" && !actionConfirmed && (
+                  <div className="epic-fade-in" style={{
+                    border: "1px solid #99f6e4",
+                    borderRadius: 4,
+                    backgroundColor: "#f0fdfa",
+                    padding: "10px 12px",
+                    marginBottom: 8,
+                  }}>
+                    <div style={{ fontSize: 11, fontWeight: 700, color: "#0f766e", marginBottom: 8 }}>
+                      Lab Order &mdash; Margaret Chen
+                    </div>
+                    <div style={{
+                      display: "flex",
+                      flexDirection: "column",
+                      gap: 4,
+                      fontSize: 11,
+                      color: "#334155",
+                      marginBottom: 8,
+                    }}>
+                      <div style={{ display: "flex", alignItems: "center", gap: 6 }}>
+                        <input type="checkbox" checked readOnly style={{ accentColor: "#0d9488" }} />
+                        <span><strong>HbA1c</strong> &mdash; Glycated hemoglobin</span>
+                      </div>
+                      <div style={{ display: "flex", alignItems: "center", gap: 6 }}>
+                        <input type="checkbox" checked readOnly style={{ accentColor: "#0d9488" }} />
+                        <span><strong>BMP</strong> &mdash; Basic Metabolic Panel (renal function + electrolytes)</span>
+                      </div>
+                      <div style={{ display: "flex", alignItems: "center", gap: 6 }}>
+                        <input type="checkbox" checked readOnly style={{ accentColor: "#0d9488" }} />
+                        <span><strong>Lipid Panel</strong> &mdash; Cholesterol, triglycerides</span>
+                      </div>
+                    </div>
+                    <button
+                      className="epic-button-blink"
+                      onClick={() => setActionConfirmed(true)}
+                      style={{
+                        padding: "7px 16px",
+                        borderRadius: 6,
+                        border: "none",
+                        cursor: "pointer",
+                        fontSize: 12,
+                        fontWeight: 600,
+                        color: "#ffffff",
+                        background: "linear-gradient(135deg, #14b8a6, #0d9488)",
+                        width: "100%",
+                        transition: "all 0.2s ease",
+                      }}
+                    >
+                      Place Lab Order
+                    </button>
+                  </div>
+                )}
+
+                {/* Labs confirmed */}
+                {selectedAction === "labs" && actionConfirmed && (
+                  <div className="epic-fade-in" style={{
+                    border: "1px solid #bbf7d0",
+                    borderRadius: 4,
+                    backgroundColor: "#f0fdf4",
+                    padding: "8px 12px",
+                    marginBottom: 8,
+                    display: "flex",
+                    alignItems: "center",
+                    gap: 8,
+                  }}>
+                    <div style={{
+                      width: 18, height: 18, borderRadius: "50%", backgroundColor: "#dcfce7",
+                      border: "1.5px solid #22c55e", display: "flex", alignItems: "center", justifyContent: "center", flexShrink: 0,
+                    }}>
+                      <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="#16a34a" strokeWidth={3}>
+                        <path strokeLinecap="round" strokeLinejoin="round" d="M4.5 12.75l6 6 9-13.5" />
+                      </svg>
+                    </div>
+                    <span style={{ fontSize: 12, color: "#166534", fontWeight: 600 }}>
+                      Lab order placed &mdash; Order #LC-2026-78432 (LabCorp)
+                    </span>
+                  </div>
+                )}
+
+                {!selectedAction && (
+                  <div style={{
+                    fontSize: 10,
+                    color: "#94a3b8",
+                    fontStyle: "italic",
+                    textAlign: "center",
+                  }}>
+                    Select an action to take on this alert
+                  </div>
+                )}
               </div>
             </div>
           ) : (

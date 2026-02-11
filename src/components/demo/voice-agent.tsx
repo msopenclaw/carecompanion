@@ -660,7 +660,7 @@ export default function VoiceAgent({ patientName }: VoiceAgentProps) {
     transcript,
     addTranscript,
     addLog,
-    triggerCall,
+    openAnalysis,
     setPhaseActive,
     completeCall,
     completeProactiveCall,
@@ -721,10 +721,16 @@ export default function VoiceAgent({ patientName }: VoiceAgentProps) {
   const handleTextingComplete = useCallback(() => {
     const dd = currentDay >= 1 && currentDay <= 7 ? DAY_DATA[currentDay - 1] : null;
 
-    if (dd?.isCallDay) {
-      // On call days (Day 2), trigger the voice call after texting completes
+    if (dd?.isIncidentDay) {
+      // Day 4: return to vitals view — the detecting→analyzing flow handles the call
       const t = setTimeout(() => {
-        triggerCall();
+        setPhonePhase("app");
+      }, 1500);
+      timeoutsRef.current.push(t);
+    } else if (dd?.isCallDay) {
+      // Day 2: trigger AI analysis on middle panel → thinking feed → auto-triggers call
+      const t = setTimeout(() => {
+        openAnalysis();
       }, 2000);
       timeoutsRef.current.push(t);
     } else {
@@ -734,7 +740,7 @@ export default function VoiceAgent({ patientName }: VoiceAgentProps) {
       }, 2000);
       timeoutsRef.current.push(t);
     }
-  }, [currentDay, triggerCall]);
+  }, [currentDay, openAnalysis]);
 
   // ------ Audio playback for a single line ------
   const playLineAudio = useCallback(async (

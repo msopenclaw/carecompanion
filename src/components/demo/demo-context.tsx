@@ -148,7 +148,9 @@ export const DAY_DATA: DayData[] = [
     fluidOz: 32,
     checkInDone: false,
     engagementScore: 41,
-    textThread: [],
+    textThread: [
+      { sender: "ai", text: "Hi Margaret, Day 4 check-in. How\u2019s the nausea? Are you staying hydrated?" },
+    ],
     isIncidentDay: true,
     isCallDay: true,
   },
@@ -269,6 +271,41 @@ export const AI_THINKING_STEPS: ThinkingStep[] = [
     detail: "All criteria met: missed check-in + escalating nausea (Grade 2) + dehydration risk + provider protocol match. Initiating voice call to Margaret Chen for GI symptom management and re-engagement.",
     icon: "call",
     durationMs: 1500,
+  },
+];
+
+// ---------------------------------------------------------------------------
+// Day 2 AI Thinking steps (triggered by Margaret's concerning text)
+// ---------------------------------------------------------------------------
+
+export const AI_THINKING_STEPS_DAY2: ThinkingStep[] = [
+  {
+    id: "d2-1",
+    label: "Analyzing text sentiment",
+    detail: "Patient message: \"threw up after breakfast... not sure I want to keep taking this medication.\" Sentiment: negative. Discontinuation risk: HIGH (0.91 confidence).",
+    icon: "vitals",
+    durationMs: 1800,
+  },
+  {
+    id: "d2-2",
+    label: "Cross-referencing symptom trajectory",
+    detail: "Day 1: no symptoms. Day 2: nausea Grade 1 \u2192 vomiting reported. Rapid escalation in 24h consistent with semaglutide GI initiation pattern. 34% of patients experience this.",
+    icon: "meds",
+    durationMs: 1500,
+  },
+  {
+    id: "d2-3",
+    label: "Checking proactive outreach protocol",
+    detail: "Patient expressed discontinuation intent via text. Per Dr. Patel\u2019s standing order: immediate voice outreach when patient signals medication cessation within initiation window.",
+    icon: "plan",
+    durationMs: 1500,
+  },
+  {
+    id: "d2-4",
+    label: "Decision: Initiate proactive engagement call",
+    detail: "Discontinuation risk detected in text. Calling Margaret to provide nausea management coaching and encourage continuation. Coaching topics: small meals, ginger tea, hydration.",
+    icon: "call",
+    durationMs: 1200,
   },
 ];
 
@@ -417,8 +454,10 @@ export function DemoProvider({ children }: { children: ReactNode }) {
       const next = prev + 1;
       if (next > 7) return prev; // already at day 7
       if (next === 4) {
-        // Day 4: trigger the AI incident flow
+        // Day 4: trigger the AI incident flow — auto-advance to analyzing
         setDemoPhase("detecting");
+        const t = setTimeout(() => setDemoPhase("analyzing"), 3500);
+        stagedTimeouts.current.push(t);
       } else {
         // All other days (including Day 2): start idle, voice-agent handles text + call
         setDemoPhase("idle");

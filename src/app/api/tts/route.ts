@@ -14,19 +14,20 @@ export async function POST(request: Request) {
     }
 
     // Voice IDs:
-    // "ai"     → Rachel (calm, professional AI agent voice)
-    // "patient" → Dorothy (warm, older female — Margaret Chen, 72F)
+    // "ai"     → Sarah (mature, reassuring, confident — professional AI agent)
+    // "patient" → Lily (velvety actress, middle-aged — Margaret Chen, 72F)
     const VOICES: Record<string, string> = {
-      ai: "21m00Tcm4TlvDq8ikWAM",      // Rachel
-      patient: "ThT5KcBeYPX3keUQqHPh",  // Dorothy
+      ai: "EXAVITQu4vr4xnSDxMaL",      // Sarah
+      patient: "pFZP5JQG7iQjIQuC4Bku",  // Lily
     };
     const voiceId = VOICES[voice ?? "ai"] ?? VOICES.ai;
+    const isPatient = (voice === "patient");
 
     // Try local ELEVENLABS_API_KEY first, then proxy through Railway
     const localKey = process.env.ELEVENLABS_API_KEY;
 
     if (localKey) {
-      const result = await callElevenLabs(text, voiceId, localKey);
+      const result = await callElevenLabs(text, voiceId, localKey, isPatient);
       if (result.ok) return result.response;
       console.error("Local ElevenLabs error:", result.error);
     }
@@ -80,9 +81,16 @@ export async function POST(request: Request) {
 async function callElevenLabs(
   text: string,
   voiceId: string,
-  apiKey: string
+  apiKey: string,
+  isPatient: boolean = false,
 ): Promise<{ ok: true; response: Response } | { ok: false; error: string }> {
   try {
+    // Patient (Margaret, 72F): higher stability + lower similarity for a
+    // softer, steadier, more mature delivery
+    const voice_settings = isPatient
+      ? { stability: 0.85, similarity_boost: 0.6, style: 0.15, use_speaker_boost: false }
+      : { stability: 0.75, similarity_boost: 0.75, style: 0.0, use_speaker_boost: true };
+
     const response = await fetch(
       `https://api.elevenlabs.io/v1/text-to-speech/${voiceId}/stream`,
       {
@@ -94,12 +102,7 @@ async function callElevenLabs(
         body: JSON.stringify({
           text,
           model_id: "eleven_monolingual_v1",
-          voice_settings: {
-            stability: 0.75,
-            similarity_boost: 0.75,
-            style: 0.0,
-            use_speaker_boost: true,
-          },
+          voice_settings,
         }),
       }
     );

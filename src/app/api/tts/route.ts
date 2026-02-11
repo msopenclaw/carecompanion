@@ -1,14 +1,8 @@
+// Set RAILWAY_API_URL on Vercel only — Railway has the keys locally
+const RAILWAY_URL = process.env.RAILWAY_API_URL;
+
 export async function POST(request: Request) {
   try {
-    const apiKey = process.env.ELEVENLABS_API_KEY;
-
-    if (!apiKey) {
-      return Response.json(
-        { error: "TTS not configured" },
-        { status: 501 }
-      );
-    }
-
     const body = await request.json();
     const { text, voice } = body as { text: string; voice?: string };
 
@@ -28,6 +22,67 @@ export async function POST(request: Request) {
     };
     const voiceId = VOICES[voice ?? "ai"] ?? VOICES.ai;
 
+    // Try local ELEVENLABS_API_KEY first, then proxy through Railway
+    const localKey = process.env.ELEVENLABS_API_KEY;
+
+    if (localKey) {
+      const result = await callElevenLabs(text, voiceId, localKey);
+      if (result.ok) return result.response;
+      console.error("Local ElevenLabs error:", result.error);
+    }
+
+    // Proxy through Railway (where ElevenLabs key lives) — only if RAILWAY_API_URL is set
+    if (!RAILWAY_URL) {
+      return Response.json(
+        { error: "TTS not configured — set ELEVENLABS_API_KEY or RAILWAY_API_URL" },
+        { status: 501 }
+      );
+    }
+
+    try {
+      const railwayRes = await fetch(`${RAILWAY_URL}/api/tts`, {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          "Authorization": "Basic " + btoa("ms:openclaw"),
+        },
+        body: JSON.stringify({ text, voice }),
+      });
+
+      if (railwayRes.ok) {
+        return new Response(railwayRes.body, {
+          headers: {
+            "Content-Type": "audio/mpeg",
+            "Transfer-Encoding": "chunked",
+          },
+        });
+      }
+
+      const railwayError = await railwayRes.text();
+      console.error("Railway TTS proxy error:", railwayError);
+    } catch (proxyErr) {
+      console.error("Railway proxy failed:", proxyErr);
+    }
+
+    return Response.json(
+      { error: "TTS generation failed — check ElevenLabs API key" },
+      { status: 502 }
+    );
+  } catch (error) {
+    console.error("Error in TTS route:", error);
+    return Response.json(
+      { error: "Failed to process TTS request" },
+      { status: 500 }
+    );
+  }
+}
+
+async function callElevenLabs(
+  text: string,
+  voiceId: string,
+  apiKey: string
+): Promise<{ ok: true; response: Response } | { ok: false; error: string }> {
+  try {
     const response = await fetch(
       `https://api.elevenlabs.io/v1/text-to-speech/${voiceId}/stream`,
       {
@@ -51,25 +106,19 @@ export async function POST(request: Request) {
 
     if (!response.ok) {
       const errorText = await response.text();
-      console.error("ElevenLabs API error:", errorText);
-      return Response.json(
-        { error: "TTS generation failed" },
-        { status: 502 }
-      );
+      return { ok: false, error: errorText };
     }
 
-    // Stream the audio response back to the client
-    return new Response(response.body, {
-      headers: {
-        "Content-Type": "audio/mpeg",
-        "Transfer-Encoding": "chunked",
-      },
-    });
-  } catch (error) {
-    console.error("Error in TTS route:", error);
-    return Response.json(
-      { error: "Failed to process TTS request" },
-      { status: 500 }
-    );
+    return {
+      ok: true,
+      response: new Response(response.body, {
+        headers: {
+          "Content-Type": "audio/mpeg",
+          "Transfer-Encoding": "chunked",
+        },
+      }),
+    };
+  } catch (err) {
+    return { ok: false, error: String(err) };
   }
 }

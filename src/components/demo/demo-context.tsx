@@ -78,10 +78,33 @@ export interface DayData {
   fluidOz: number;
   checkInDone: boolean;
   engagementScore: number;
-  textThread: TextMessage[];  // multi-turn text conversation (AI + Margaret)
+  textThread: TextMessage[];  // multi-turn text conversation (AI-initiated)
+  patientInitThread?: TextMessage[];  // patient-initiated conversation (Days 5-7)
   isIncidentDay: boolean;
   isCallDay: boolean;     // true for days that trigger a voice call
 }
+
+// Helper to personalize text with patient's first name
+export function personalizeText(text: string, firstName: string): string {
+  return text.replace(/Margaret/g, firstName);
+}
+
+// Selected patient info (flows across all panels)
+export interface SelectedPatient {
+  firstName: string;
+  lastName: string;
+  age: number;
+  gender: string;
+  mrn: string;
+}
+
+const DEFAULT_PATIENT: SelectedPatient = {
+  firstName: "Margaret",
+  lastName: "Chen",
+  age: 72,
+  gender: "F",
+  mrn: "847291",
+};
 
 export const DAY_DATA: DayData[] = [
   {
@@ -169,6 +192,10 @@ export const DAY_DATA: DayData[] = [
       { sender: "patient", text: "Much better! Ginger tea really helped. Had breakfast and lunch. About 6\u20137 glasses of water." },
       { sender: "ai", text: "Wonderful progress! Keep following those small-meals tips. You're doing great!" },
     ],
+    patientInitThread: [
+      { sender: "patient", text: "Hey, just wanted to share \u2014 I had ginger tea this morning and it really helped! Feeling so much better than yesterday." },
+      { sender: "ai", text: "That's wonderful to hear, Margaret! Your nausea is definitely resolving. Keep up the hydration \u2014 you're at 52oz today!" },
+    ],
     isIncidentDay: false,
     isCallDay: false,
   },
@@ -187,6 +214,10 @@ export const DAY_DATA: DayData[] = [
       { sender: "patient", text: "Feeling normal today! Ate all three meals, took all my meds, and drinking lots of water." },
       { sender: "ai", text: "That's fantastic! Your body is adjusting beautifully to Wegovy. Keep it up!" },
     ],
+    patientInitThread: [
+      { sender: "patient", text: "I walked 20 minutes today! First real exercise since starting Wegovy. Feeling more like myself \ud83d\ude0a" },
+      { sender: "ai", text: "That's amazing progress, Margaret! Light exercise is great at this stage. Your weight is down 1.3 lbs and BP is improving too!" },
+    ],
     isIncidentDay: false,
     isCallDay: false,
   },
@@ -204,6 +235,10 @@ export const DAY_DATA: DayData[] = [
       { sender: "ai", text: "Week 1 complete! You've lost 1.6 lbs and your glucose improved 24%. How are you feeling about continuing?" },
       { sender: "patient", text: "Really good! Glad I didn't quit on Day 4. Thank you for calling me that day." },
       { sender: "ai", text: "You did amazingly well, Margaret. Next injection is tomorrow \u2014 same dose for 3 more weeks. I've sent a summary to Dr. Patel." },
+    ],
+    patientInitThread: [
+      { sender: "patient", text: "Dr. Patel's office called about the summary you sent. Thank you for keeping them in the loop!" },
+      { sender: "ai", text: "Of course! Dr. Patel will review your Week 1 progress at your next visit. You should be very proud \u2014 amazing first week!" },
     ],
     isIncidentDay: false,
     isCallDay: false,
@@ -316,6 +351,7 @@ export const AI_THINKING_STEPS_DAY2: ThinkingStep[] = [
 interface DemoState {
   demoPhase: DemoPhase;
   currentDay: number;       // 0 = pre-demo, 1-7 = active simulation day
+  selectedPatient: SelectedPatient;
   transcript: TranscriptEntry[];
   logs: LogEntry[];
   alerts: AlertEntry[];
@@ -326,6 +362,7 @@ interface DemoState {
 }
 
 interface DemoActions {
+  setSelectedPatient: (patient: SelectedPatient) => void;
   advanceDay: () => void;        // advance to next day (Day 4 triggers detecting)
   startDemo: () => void;         // backward compat — same as advanceDay from day 0
   openAnalysis: () => void;      // detecting → analyzing
@@ -374,6 +411,7 @@ export function DemoProvider({ children }: { children: ReactNode }) {
   const [billingEvents, setBillingEvents] = useState<BillingEvent[]>([]);
   const [showLogs, setShowLogs] = useState(false);
   const [showScript, setShowScript] = useState(false);
+  const [selectedPatient, setSelectedPatientState] = useState<SelectedPatient>(DEFAULT_PATIENT);
 
   const alertIdCounter = useRef(0);
   const stagedTimeouts = useRef<ReturnType<typeof setTimeout>[]>([]);
@@ -577,6 +615,10 @@ export function DemoProvider({ children }: { children: ReactNode }) {
     alertIdCounter.current = 0;
   }, []);
 
+  const setSelectedPatient = useCallback((patient: SelectedPatient) => {
+    setSelectedPatientState(patient);
+  }, []);
+
   const toggleLogs = useCallback(() => setShowLogs((prev) => !prev), []);
   const toggleScript = useCallback(() => setShowScript((prev) => !prev), []);
 
@@ -585,6 +627,7 @@ export function DemoProvider({ children }: { children: ReactNode }) {
   const value: DemoContextValue = {
     demoPhase,
     currentDay,
+    selectedPatient,
     transcript,
     logs,
     alerts,
@@ -592,6 +635,7 @@ export function DemoProvider({ children }: { children: ReactNode }) {
     billingEvents,
     showLogs,
     showScript,
+    setSelectedPatient,
     advanceDay,
     startDemo,
     openAnalysis,

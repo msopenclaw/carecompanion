@@ -129,7 +129,7 @@ function flagCellStyle(flag?: "amber" | "red"): React.CSSProperties {
 // ---------------------------------------------------------------------------
 
 export function LiveBilling() {
-  const { demoPhase, currentDay, resolveCase } = useDemo();
+  const { demoPhase, currentDay, resolveCase, selectedPatient } = useDemo();
 
   // BPA alert visibility states
   const [showBpaBanner, setShowBpaBanner] = useState(false);
@@ -287,7 +287,7 @@ export function LiveBilling() {
           {/* Patient context */}
           <div style={{ display: "flex", flexDirection: "column", gap: 1 }}>
             <span style={{ color: "white", fontSize: 12, fontWeight: 600 }}>
-              Chen, Margaret &middot; 72F &middot; MRN: 847291
+              {selectedPatient.lastName}, {selectedPatient.firstName} &middot; {selectedPatient.age}{selectedPatient.gender} &middot; MRN: {selectedPatient.mrn}
             </span>
             <span style={{ color: "rgba(255,255,255,0.55)", fontSize: 10 }}>
               DOB: 05/12/1953 &middot; PCP: Dr. Patel, MD &middot; Program: Wegovy 0.25mg
@@ -448,7 +448,7 @@ export function LiveBilling() {
                   color: "#92400e",
                   marginBottom: 2,
                 }}>
-                  BPA: CareCompanion AI Alert &mdash; Margaret Chen (GLP-1 Engagement)
+                  BPA: CareCompanion AI Alert &mdash; {selectedPatient.firstName} {selectedPatient.lastName} (GLP-1 Engagement)
                 </div>
                 <div style={{ fontSize: 11, color: "#a16207" }}>
                   AI-initiated GLP-1 engagement outreach completed. Nausea management + re-engagement. Review required.
@@ -545,7 +545,7 @@ export function LiveBilling() {
                   color: "#334155",
                   margin: "0 0 10px 0",
                 }}>
-                  Automated voice outreach completed with Margaret Chen regarding GLP-1
+                  Automated voice outreach completed with {selectedPatient.firstName} {selectedPatient.lastName} regarding GLP-1
                   initiation side effects and missed check-in (Day 4). Patient reported
                   Grade 2 nausea since Day 2, reduced oral intake ~50%, fluid intake below
                   40oz/day. Patient was considering discontinuation. AI provided dietary
@@ -870,7 +870,7 @@ export function LiveBilling() {
                       Schedule Telehealth Visit
                     </div>
                     <div style={{ fontSize: 11, color: "#334155", marginBottom: 6 }}>
-                      <strong>Patient:</strong> Margaret Chen &middot; <strong>Provider:</strong> Dr. Patel, MD
+                      <strong>Patient:</strong> {selectedPatient.firstName} {selectedPatient.lastName} &middot; <strong>Provider:</strong> Dr. Patel, MD
                     </div>
                     <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
                       {[
@@ -941,7 +941,7 @@ export function LiveBilling() {
                     marginBottom: 8,
                   }}>
                     <div style={{ fontSize: 11, fontWeight: 700, color: "#0f766e", marginBottom: 8 }}>
-                      Lab Order &mdash; Margaret Chen
+                      Lab Order &mdash; {selectedPatient.firstName} {selectedPatient.lastName}
                     </div>
                     <div style={{
                       display: "flex",
@@ -1200,7 +1200,7 @@ export function LiveBilling() {
                     <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="#16a34a" strokeWidth={2}>
                       <path strokeLinecap="round" strokeLinejoin="round" d="M9 12.75L11.25 15 15 9.75M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
                     </svg>
-                    Week 1 Summary &mdash; Margaret Chen
+                    Week 1 Summary &mdash; {selectedPatient.firstName} {selectedPatient.lastName}
                   </div>
                   <div style={{
                     display: "grid",

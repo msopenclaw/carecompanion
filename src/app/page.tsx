@@ -242,6 +242,19 @@ function DemoPage() {
             selectedId={currentPatientId}
             onSelect={(id) => {
               setSelectedPatientId(id);
+              const p = patients.find((pt) => pt.id === id);
+              if (p) {
+                const age = p.dateOfBirth
+                  ? Math.floor((Date.now() - new Date(p.dateOfBirth).getTime()) / 31557600000)
+                  : 72;
+                demo.setSelectedPatient({
+                  firstName: p.firstName,
+                  lastName: p.lastName,
+                  age,
+                  gender: p.gender || "F",
+                  mrn: id.replace(/\D/g, "").slice(-6).padStart(6, "0"),
+                });
+              }
               demo.resetDemo();
               setRefreshKey((k) => k + 1);
             }}

@@ -1,7 +1,7 @@
 "use client";
 
 import { useState, useEffect, useCallback, useRef } from "react";
-import { useDemo, DAY_DATA, type DayData, type TextMessage } from "./demo-context";
+import { useDemo, DAY_DATA, personalizeText, type DayData, type TextMessage } from "./demo-context";
 
 // ---------------------------------------------------------------------------
 // Types
@@ -657,6 +657,7 @@ export default function VoiceAgent({ patientName }: VoiceAgentProps) {
   const {
     demoPhase,
     currentDay,
+    selectedPatient,
     transcript,
     addTranscript,
     addLog,
@@ -675,6 +676,7 @@ export default function VoiceAgent({ patientName }: VoiceAgentProps) {
   const [showAlertBanner, setShowAlertBanner] = useState(false);
   const [showAnalyzingHint, setShowAnalyzingHint] = useState(false);
   const [showNotification, setShowNotification] = useState(false);
+  const [onSecondThread, setOnSecondThread] = useState(false);
 
   // Refs
   const timeoutsRef = useRef<ReturnType<typeof setTimeout>[]>([]);
@@ -727,20 +729,30 @@ export default function VoiceAgent({ patientName }: VoiceAgentProps) {
         setPhonePhase("app");
       }, 1500);
       timeoutsRef.current.push(t);
-    } else if (dd?.isCallDay) {
+    } else if (dd?.isCallDay && !onSecondThread) {
       // Day 2: trigger AI analysis on middle panel → thinking feed → auto-triggers call
       const t = setTimeout(() => {
         openAnalysis();
       }, 2000);
       timeoutsRef.current.push(t);
+    } else if (!onSecondThread && dd?.patientInitThread && dd.patientInitThread.length > 0) {
+      // First thread done, patient-initiated thread exists — show it after a pause
+      const t = setTimeout(() => {
+        setPhonePhase("app");
+      }, 1500);
+      const t2 = setTimeout(() => {
+        setOnSecondThread(true);
+        setShowNotification(true);
+      }, 4000);
+      timeoutsRef.current.push(t, t2);
     } else {
-      // Non-call days: return to vitals view after a pause
+      // Non-call days or second thread done: return to vitals view
       const t = setTimeout(() => {
         setPhonePhase("app");
       }, 2000);
       timeoutsRef.current.push(t);
     }
-  }, [currentDay, openAnalysis]);
+  }, [currentDay, openAnalysis, onSecondThread]);
 
   // ------ Audio playback for a single line ------
   const playLineAudio = useCallback(async (
@@ -1026,6 +1038,18 @@ export default function VoiceAgent({ patientName }: VoiceAgentProps) {
   const dayData: DayData | null =
     currentDay >= 1 && currentDay <= 7 ? DAY_DATA[currentDay - 1] : null;
 
+  // ------ Resolve active thread (first or patient-initiated) ------
+  const activeThread: TextMessage[] = (() => {
+    if (!dayData) return [];
+    const raw = onSecondThread && dayData.patientInitThread
+      ? dayData.patientInitThread
+      : dayData.textThread;
+    return raw.map((msg) => ({
+      ...msg,
+      text: personalizeText(msg.text, selectedPatient.firstName),
+    }));
+  })();
+
   // ======================================================================
   // RENDER
   // ======================================================================
@@ -1077,13 +1101,12 @@ export default function VoiceAgent({ patientName }: VoiceAgentProps) {
       `}</style>
 
       {/* iOS-style text notification overlay */}
-      {showNotification && dayData && dayData.textThread.length > 0 && (
+      {showNotification && activeThread.length > 0 && (
         <div style={{ position: "absolute", top: 0, left: 0, right: 0, zIndex: 50 }}>
           <TextNotification
-            message={dayData.textThread[0].text}
+            message={activeThread[0].text}
             onDismiss={() => {
               setShowNotification(false);
-              // Auto-transition to texting view
               setPhonePhase("texting");
             }}
             onTap={() => {
@@ -1114,9 +1137,9 @@ export default function VoiceAgent({ patientName }: VoiceAgentProps) {
       {/* ================================================================ */}
       {/* TEXTING VIEW — animated text conversation                        */}
       {/* ================================================================ */}
-      {phonePhase === "texting" && dayData && dayData.textThread.length > 0 && (
+      {phonePhase === "texting" && activeThread.length > 0 && (
         <TextingView
-          thread={dayData.textThread}
+          thread={activeThread}
           onComplete={handleTextingComplete}
         />
       )}
@@ -1131,7 +1154,7 @@ export default function VoiceAgent({ patientName }: VoiceAgentProps) {
             dayData.isIncidentDay && (showAlertBanner || demoPhase === "detecting" || demoPhase === "analyzing")
           }
           showAnalyzingHint={showAnalyzingHint}
-          onViewMessages={dayData.textThread.length > 0 ? () => setPhonePhase("texting") : undefined}
+          onViewMessages={activeThread.length > 0 ? () => setPhonePhase("texting") : undefined}
         />
       )}
 

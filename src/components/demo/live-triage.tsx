@@ -23,7 +23,7 @@ interface PatientRow {
 // ---------------------------------------------------------------------------
 
 const PATIENTS: PatientRow[] = [
-  { name: "Margaret Chen", age: 72, risk: 45, riskDetecting: 84, conditions: "T2D + Obesity + HTN", vital: "Eng: 92%" },
+  { name: "Margaret Chen", age: 72, risk: 45, riskDetecting: 84, conditions: "T2D + Obesity + HTN", vital: "Eng: 92%" }, // Primary patient
   { name: "James Rodriguez", age: 68, risk: 52, riskDetecting: 52, conditions: "T2D + Obesity", vital: "Wegovy 0.5mg W3" },
   { name: "Helen Murray", age: 58, risk: 38, riskDetecting: 38, conditions: "Obesity + HTN", vital: "Mounjaro 5mg W6" },
   { name: "Robert Kim", age: 71, risk: 42, riskDetecting: 42, conditions: "T2D + CKD", vital: "Ozempic 0.5mg W4" },
@@ -368,7 +368,7 @@ function PatientListView() {
 // ---------------------------------------------------------------------------
 
 function AIThinkingFeed() {
-  const { triggerCall, addLog, currentDay } = useDemo();
+  const { triggerCall, addLog, currentDay, selectedPatient } = useDemo();
 
   // Use Day 2 or Day 4 thinking steps
   const steps = currentDay === 2 ? AI_THINKING_STEPS_DAY2 : AI_THINKING_STEPS;
@@ -444,7 +444,7 @@ function AIThinkingFeed() {
         </div>
         <div className="leading-none">
           <h2 className="text-[13px] font-bold text-slate-800 tracking-tight">
-            {currentDay === 2 ? "Text Sentiment Analysis" : "Engagement Analysis"} &mdash; Margaret Chen
+            {currentDay === 2 ? "Text Sentiment Analysis" : "Engagement Analysis"} &mdash; {selectedPatient.firstName} {selectedPatient.lastName}
           </h2>
           <p className="text-[10px] text-indigo-500 font-medium mt-0.5">
             {currentDay === 2 ? "Discontinuation risk detected in text" : "Clinical reasoning in progress"}
@@ -565,7 +565,7 @@ function AIThinkingFeed() {
                   <span className="text-[10px] font-bold uppercase tracking-wider text-emerald-700 bg-emerald-200 rounded px-1.5 py-0.5">Decision</span>
                 </div>
                 <p className="text-[12px] font-semibold text-emerald-800 leading-snug">
-                  Initiating proactive engagement call to Margaret Chen
+                  Initiating proactive engagement call to {selectedPatient.firstName} {selectedPatient.lastName}
                 </p>
                 <p className="text-[10px] text-emerald-600 mt-1">
                   All criteria met per GLP-1 engagement protocol. Connecting now...
@@ -584,6 +584,7 @@ function AIThinkingFeed() {
 // ---------------------------------------------------------------------------
 
 function CallingView() {
+  const { selectedPatient } = useDemo();
   return (
     <div className="flex flex-col items-center justify-center h-full gap-4 px-6">
       <div className="relative">
@@ -598,7 +599,7 @@ function CallingView() {
       </div>
       <div className="text-center">
         <p className="text-[13px] font-semibold text-slate-800">Initiating engagement call</p>
-        <p className="text-[12px] text-slate-500 mt-0.5">Margaret Chen &middot; (555) 234-5678</p>
+        <p className="text-[12px] text-slate-500 mt-0.5">{selectedPatient.firstName} {selectedPatient.lastName} &middot; (555) 234-5678</p>
         <p className="text-[11px] text-blue-500 mt-2" style={{ animation: "dotPulse 1.5s ease-in-out infinite" }}>Connecting...</p>
       </div>
     </div>
@@ -610,7 +611,7 @@ function CallingView() {
 // ---------------------------------------------------------------------------
 
 function TranscriptView() {
-  const { transcript } = useDemo();
+  const { transcript, selectedPatient } = useDemo();
   const scrollRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
@@ -628,7 +629,7 @@ function TranscriptView() {
           <span className="relative inline-flex rounded-full h-2 w-2 bg-emerald-500" />
         </span>
         <span className="text-[13px] font-bold text-slate-800">Live Call</span>
-        <span className="text-[11px] text-slate-400">Margaret Chen</span>
+        <span className="text-[11px] text-slate-400">{selectedPatient.firstName} {selectedPatient.lastName}</span>
         <IconPhone className="w-3.5 h-3.5 text-emerald-500 ml-auto" />
       </div>
 
@@ -674,6 +675,7 @@ function TranscriptView() {
 // ---------------------------------------------------------------------------
 
 function DocumentingView() {
+  const { selectedPatient } = useDemo();
   const [stage, setStage] = useState(0);
 
   useEffect(() => {
@@ -716,7 +718,7 @@ function DocumentingView() {
         <div className="rounded-lg border border-slate-200 bg-white p-3" style={{ animation: "fadeSlideIn 0.4s ease-out both" }}>
           <h3 className="text-[11px] font-bold uppercase tracking-wider text-slate-500 mb-1.5">AI-Generated Clinical Summary</h3>
           <div className="text-[11px] text-slate-700 leading-relaxed space-y-1.5">
-            <p><strong>Patient:</strong> Margaret Chen, 72F</p>
+            <p><strong>Patient:</strong> {selectedPatient.firstName} {selectedPatient.lastName}, {selectedPatient.age}{selectedPatient.gender}</p>
             <p><strong>Chief Concern:</strong> GLP-1 initiation nausea &mdash; missed check-in Day 4 of Wegovy 0.25mg</p>
             <p><strong>Assessment:</strong> Grade 2 nausea since Day 2, peaking Day 3-4. Reduced oral intake ~50%, fluid intake below target. Considered discontinuing. No dehydration signs on assessment. Patient engaged and receptive.</p>
             <p><strong>Plan:</strong> Dietary counseling (small meals, ginger, hydration). Follow-up check-in Day 5. Flagged for Dr. Patel &mdash; consider ondansetron PRN. Continue Wegovy 0.25mg.</p>
@@ -762,6 +764,7 @@ function DocumentingView() {
 // ---------------------------------------------------------------------------
 
 function CompleteView() {
+  const { selectedPatient } = useDemo();
   return (
     <div className="flex flex-col h-full px-3 py-3 space-y-3 overflow-y-auto scrollbar-thin">
       {/* Header */}
@@ -771,7 +774,7 @@ function CompleteView() {
         </div>
         <div>
           <h2 className="text-[13px] font-bold text-slate-800">Engagement Re-Established</h2>
-          <p className="text-[10px] text-slate-400">Margaret Chen &mdash; Proactive outreach complete</p>
+          <p className="text-[10px] text-slate-400">{selectedPatient.firstName} {selectedPatient.lastName} &mdash; Proactive outreach complete</p>
         </div>
       </div>
 

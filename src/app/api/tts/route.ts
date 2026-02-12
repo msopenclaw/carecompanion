@@ -14,11 +14,11 @@ export async function POST(request: Request) {
     }
 
     // Voice IDs:
-    // "ai"     → Sarah (mature, reassuring, confident — professional AI agent)
-    // "patient" → Lily (velvety actress, middle-aged — Margaret Chen, 72F)
+    // "ai"     → Rachel (young, calm, confident — bedside manner, patience)
+    // "patient" → Dorothy (warm, elderly, motherly — Margaret Chen, 72F)
     const VOICES: Record<string, string> = {
-      ai: "EXAVITQu4vr4xnSDxMaL",      // Sarah
-      patient: "pFZP5JQG7iQjIQuC4Bku",  // Lily
+      ai: "21m00Tcm4TlvDq8ikWAM",       // Rachel
+      patient: "ThT5KcBeYPX3keUQqHPh",   // Dorothy
     };
     const voiceId = VOICES[voice ?? "ai"] ?? VOICES.ai;
     const isPatient = (voice === "patient");
@@ -85,11 +85,11 @@ async function callElevenLabs(
   isPatient: boolean = false,
 ): Promise<{ ok: true; response: Response } | { ok: false; error: string }> {
   try {
-    // Patient (Margaret, 72F): higher stability + lower similarity for a
-    // softer, steadier, more mature delivery
+    // Patient (Margaret, 72F): very stable, slower, elderly — warm and slightly confused
+    // AI (care agent): calm, confident, patient — warm bedside manner
     const voice_settings = isPatient
-      ? { stability: 0.85, similarity_boost: 0.6, style: 0.15, use_speaker_boost: false }
-      : { stability: 0.75, similarity_boost: 0.75, style: 0.0, use_speaker_boost: true };
+      ? { stability: 0.92, similarity_boost: 0.45, style: 0.05, use_speaker_boost: false }
+      : { stability: 0.65, similarity_boost: 0.80, style: 0.15, use_speaker_boost: true };
 
     const response = await fetch(
       `https://api.elevenlabs.io/v1/text-to-speech/${voiceId}/stream`,

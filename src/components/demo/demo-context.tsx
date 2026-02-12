@@ -345,6 +345,220 @@ export const AI_THINKING_STEPS_DAY2: ThinkingStep[] = [
 ];
 
 // ---------------------------------------------------------------------------
+// Daily AI Thinking Steps (shown for ALL days — daily monitoring routine)
+// Non-call days end with "no action needed"; call days end with "initiate call"
+// ---------------------------------------------------------------------------
+
+export const DAILY_THINKING_STEPS: Record<number, ThinkingStep[]> = {
+  1: [
+    {
+      id: "d1-1",
+      label: "Reviewing new patient onboarding data",
+      detail: "Margaret Chen initiated Wegovy 0.25mg today. Vitals baseline: Weight 247.2 lbs, BP 142/88, Glucose 168 mg/dL. All medications confirmed: Metformin 1000mg BID, Lisinopril 20mg daily.",
+      icon: "vitals",
+      durationMs: 1800,
+    },
+    {
+      id: "d1-2",
+      label: "Analyzing medication interaction risks",
+      detail: "Semaglutide + Metformin: additive GI risk (monitor nausea). Semaglutide + Lisinopril: monitor renal function if dehydration occurs. Standard GLP-1 initiation monitoring protocol activated.",
+      icon: "meds",
+      durationMs: 1600,
+    },
+    {
+      id: "d1-3",
+      label: "Decision: Normal monitoring — send welcome text",
+      detail: "All vitals within acceptable range. Engagement score: 92%. No risk factors detected. Sending welcome check-in message. Next review: Day 2.",
+      icon: "plan",
+      durationMs: 1200,
+    },
+  ],
+  2: AI_THINKING_STEPS_DAY2,
+  3: [
+    {
+      id: "d3-1",
+      label: "Reviewing 3-day engagement trend",
+      detail: "Engagement: 92% → 85% → 60%. Declining but patient still responding to texts. Nausea Grade 2 (moderate), food intake reduced ~50%. Check-in completed.",
+      icon: "vitals",
+      durationMs: 1800,
+    },
+    {
+      id: "d3-2",
+      label: "Cross-referencing dehydration markers",
+      detail: "Fluid intake 38oz (below 48oz minimum). Weight down 0.8 lbs in 2 days. Combined with Lisinopril + age 72 — monitoring renal risk. Not yet at intervention threshold.",
+      icon: "pattern",
+      durationMs: 1600,
+    },
+    {
+      id: "d3-3",
+      label: "Checking GI escalation protocol",
+      detail: "Nausea Grade 2 at Day 3 is within expected range for semaglutide initiation. 34% of patients experience this. Patient still engaged via text and reporting symptoms.",
+      icon: "meds",
+      durationMs: 1400,
+    },
+    {
+      id: "d3-4",
+      label: "Decision: Continue monitoring — send coaching text",
+      detail: "Symptoms concerning but patient engaged. Sending hydration and dietary coaching text. Flagged for automatic escalation if engagement drops below 50% or check-in missed tomorrow.",
+      icon: "plan",
+      durationMs: 1200,
+    },
+  ],
+  4: AI_THINKING_STEPS,
+  5: [
+    {
+      id: "d5-1",
+      label: "Reviewing post-outreach engagement",
+      detail: "Engagement score rebounded: 41% → 78%. Check-in completed. Nausea Grade 1 (improving). Fluid intake up to 52oz. Patient proactively reporting improvement.",
+      icon: "vitals",
+      durationMs: 1600,
+    },
+    {
+      id: "d5-2",
+      label: "Analyzing re-engagement indicators",
+      detail: "Patient texting proactively (positive sentiment: \"ginger tea helped!\"). Oral intake recovering. All medications taken. Proactive outreach on Day 4 successfully prevented discontinuation.",
+      icon: "data",
+      durationMs: 1500,
+    },
+    {
+      id: "d5-3",
+      label: "Decision: Re-engagement successful — standard monitoring",
+      detail: "Intervention on Day 4 was effective. Continue daily check-ins. No escalation needed. Preparing positive progress update for patient.",
+      icon: "plan",
+      durationMs: 1200,
+    },
+  ],
+  6: [
+    {
+      id: "d6-1",
+      label: "Analyzing symptom resolution trend",
+      detail: "Nausea Grade 0 — fully resolved. All meals consumed. Engagement 88%. BP improving: 128/78 mmHg. Weight: 245.9 lbs (-1.3 lbs from baseline).",
+      icon: "vitals",
+      durationMs: 1600,
+    },
+    {
+      id: "d6-2",
+      label: "Checking GLP-1 adherence trajectory",
+      detail: "On track for Week 2 injection. 5 of 6 check-ins completed. Patient resumed exercise (20 min walk). Fluid intake normalized at 60oz. GI tolerance achieved.",
+      icon: "data",
+      durationMs: 1500,
+    },
+    {
+      id: "d6-3",
+      label: "Decision: Excellent progress — preparing Week 1 summary",
+      detail: "Patient fully re-engaged. GI side effects resolved. Compiling clinical outcomes for Dr. Patel's review. Continue standard monitoring.",
+      icon: "plan",
+      durationMs: 1200,
+    },
+  ],
+  7: [
+    {
+      id: "d7-1",
+      label: "Compiling Week 1 clinical outcomes",
+      detail: "Weight: -1.6 lbs (247.2→245.6). Glucose: -24% (168→128 mg/dL). BP: 142/88→130/80. Nausea resolved. 7-day engagement rate: 94%. Critical event Day 4 resolved via AI outreach.",
+      icon: "vitals",
+      durationMs: 1800,
+    },
+    {
+      id: "d7-2",
+      label: "Generating provider summary for Dr. Patel",
+      detail: "Week 1 summary includes: vitals trends, GI symptom timeline, intervention log (Day 2 proactive call, Day 4 incident call), medication adherence, and patient self-reported outcomes.",
+      icon: "history",
+      durationMs: 1600,
+    },
+    {
+      id: "d7-3",
+      label: "Calculating program billing & ROI",
+      detail: "CPT codes captured: 99457 ($52), 99490 ($64), 99453 ($19), 99454 ($55). Total: $190/patient/month. Projected annual: $2,280/patient × 250 patients = $570,000.",
+      icon: "data",
+      durationMs: 1500,
+    },
+    {
+      id: "d7-4",
+      label: "Decision: Week 1 complete — summary sent to provider",
+      detail: "Clinical summary transmitted to Dr. Patel via EHR. Patient maintained on Wegovy 0.25mg. Next injection scheduled. Continue Week 2 monitoring protocol.",
+      icon: "plan",
+      durationMs: 1200,
+    },
+  ],
+};
+
+// ---------------------------------------------------------------------------
+// Call Reasoning Steps (internal AI reasoning shown during active voice calls)
+// Replaces live transcript on Clinical Intelligence panel
+// ---------------------------------------------------------------------------
+
+export const CALL_REASONING_STEPS: Record<number, ThinkingStep[]> = {
+  2: [
+    {
+      id: "cr2-1",
+      label: "Assessing patient emotional state",
+      detail: "Voice stress indicators: elevated. Patient reports vomiting and expresses discontinuation intent: \"thinking about stopping.\" Frustration level: moderate. Immediate de-escalation needed.",
+      icon: "vitals",
+      durationMs: 4000,
+    },
+    {
+      id: "cr2-2",
+      label: "Deploying empathetic coaching protocol",
+      detail: "Strategy: normalize GI side effects (34% incidence in week 1), cite clinical data on resolution timeline, provide actionable self-care tips. Tone: patient, calm, encouraging.",
+      icon: "plan",
+      durationMs: 5000,
+    },
+    {
+      id: "cr2-3",
+      label: "Monitoring de-escalation signals",
+      detail: "Patient receptive to tips. Key phrase detected: \"I really want this to work\" — commitment indicator. Voice stress decreasing. Discontinuation risk dropping: 0.91 → 0.34.",
+      icon: "pattern",
+      durationMs: 4500,
+    },
+    {
+      id: "cr2-4",
+      label: "Scheduling follow-up touchpoint",
+      detail: "Patient agreed to continue Wegovy. Coaching delivered: small meals, ginger tea, hydration. Setting Day 3 check-in. Proactive outreach successful — no provider escalation needed.",
+      icon: "history",
+      durationMs: 3000,
+    },
+  ],
+  4: [
+    {
+      id: "cr4-1",
+      label: "Assessing patient emotional state",
+      detail: "Voice stress indicators: elevated. Patient reports near-discontinuation: \"almost stopped taking it altogether.\" 3-day frustration accumulation detected. Critical re-engagement moment.",
+      icon: "vitals",
+      durationMs: 4000,
+    },
+    {
+      id: "cr4-2",
+      label: "Cross-referencing real-time vitals with conversation",
+      detail: "Fluid intake critically low (est. <32oz). Combined with Lisinopril 20mg + age 72 + eGFR 58 = elevated AKI risk. Urgent hydration intervention woven into coaching.",
+      icon: "meds",
+      durationMs: 4500,
+    },
+    {
+      id: "cr4-3",
+      label: "Deploying empathetic coaching protocol",
+      detail: "Normalizing GI side effects with clinical data. Citing Week 1 resolution timeline. Positive reinforcement: weight already down 1.2 lbs, glucose improving. Patient responding positively.",
+      icon: "plan",
+      durationMs: 5000,
+    },
+    {
+      id: "cr4-4",
+      label: "Monitoring re-engagement signals",
+      detail: "Patient tone shifting: frustration → hope. Key phrases: \"I want this to work,\" \"yes please.\" Re-engagement probability: 87%. Discontinuation risk: 0.91 → 0.22.",
+      icon: "pattern",
+      durationMs: 4000,
+    },
+    {
+      id: "cr4-5",
+      label: "Generating clinical documentation",
+      detail: "Drafting AI summary for Dr. Patel. Flagging ondansetron 4mg PRN consideration. Scheduling Day 5 follow-up. Creating Epic BPA for provider review and action.",
+      icon: "history",
+      durationMs: 3500,
+    },
+  ],
+};
+
+// ---------------------------------------------------------------------------
 // Context value shape
 // ---------------------------------------------------------------------------
 
@@ -369,6 +583,7 @@ interface DemoActions {
   triggerCall: () => void;       // analyzing → calling
   setPhaseActive: () => void;    // calling → active
   completeCall: () => void;      // active → documenting
+  completeAnalysis: () => void;       // analyzing → idle (non-call days)
   completeProactiveCall: () => void;  // calling/active → idle (Day 2 check-in)
   resolveCase: () => void;       // documenting → complete
   addTranscript: (speaker: "ai" | "patient", text: string) => void;
@@ -492,13 +707,17 @@ export function DemoProvider({ children }: { children: ReactNode }) {
       const next = prev + 1;
       if (next > 7) return prev; // already at day 7
       if (next === 4) {
-        // Day 4: trigger the AI incident flow — auto-advance to analyzing
+        // Day 4: trigger the AI incident flow — detecting → analyzing
         setDemoPhase("detecting");
         const t = setTimeout(() => setDemoPhase("analyzing"), 3500);
         stagedTimeouts.current.push(t);
-      } else {
-        // All other days (including Day 2): start idle, voice-agent handles text + call
+      } else if (next === 2) {
+        // Day 2: start idle — text plays first, then analysis triggers after texting
         setDemoPhase("idle");
+      } else {
+        // Days 1, 3, 5, 6, 7: start with AI analyzing (daily monitoring)
+        // After analysis completes → idle → text notification plays
+        setDemoPhase("analyzing");
       }
       return next;
     });
@@ -525,6 +744,10 @@ export function DemoProvider({ children }: { children: ReactNode }) {
 
   const completeCall = useCallback(() => {
     setDemoPhase("documenting");
+  }, []);
+
+  const completeAnalysis = useCallback(() => {
+    setDemoPhase("idle");
   }, []);
 
   const completeProactiveCall = useCallback(() => {
@@ -639,6 +862,7 @@ export function DemoProvider({ children }: { children: ReactNode }) {
     advanceDay,
     startDemo,
     openAnalysis,
+    completeAnalysis,
     triggerCall: triggerCallAction,
     setPhaseActive,
     completeCall,

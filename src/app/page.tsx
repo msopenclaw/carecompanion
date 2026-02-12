@@ -76,6 +76,16 @@ function DemoPage() {
       );
     }
 
+    // Non-call, non-incident days: show AI Monitoring during analyzing phase
+    if (demoPhase === "analyzing" && currentDay !== 2 && currentDay !== 4) {
+      return (
+        <div className="flex items-center gap-2 px-3 py-1.5 bg-indigo-500/10 border border-indigo-500/30 rounded-lg">
+          <div className="w-2 h-2 bg-indigo-400 rounded-full animate-pulse" />
+          <span className="text-indigo-400 text-xs font-medium">AI Monitoring...</span>
+        </div>
+      );
+    }
+
     // Day 2: proactive call in progress
     if (currentDay === 2 && demoPhase !== "idle") {
       return (
@@ -279,7 +289,7 @@ function DemoPage() {
         </div>
 
         {/* Panel 2: Clinical Intelligence */}
-        <div className="flex-1 min-w-0 min-h-0 flex flex-col">
+        <div className="flex-[0.85] min-w-0 min-h-0 flex flex-col">
           <div className="flex items-center gap-2 mb-2 shrink-0">
             <span className="text-[11px] font-semibold px-2 py-0.5 rounded-full bg-purple-500/15 text-purple-400 border border-purple-500/30">
               2. Clinical Intelligence
@@ -294,7 +304,7 @@ function DemoPage() {
         </div>
 
         {/* Panel 3: Provider EHR */}
-        <div className="flex-1 min-w-0 min-h-0 flex flex-col">
+        <div className="flex-[0.85] min-w-0 min-h-0 flex flex-col">
           <div className="flex items-center gap-2 mb-2 shrink-0">
             <span className="text-[11px] font-semibold px-2 py-0.5 rounded-full bg-amber-500/15 text-amber-400 border border-amber-500/30">
               3. Provider EHR

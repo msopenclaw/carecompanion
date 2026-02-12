@@ -680,6 +680,7 @@ export default function VoiceAgent({ patientName }: VoiceAgentProps) {
 
   // Refs
   const timeoutsRef = useRef<ReturnType<typeof setTimeout>[]>([]);
+  const notificationShownRef = useRef(false);
   const chatEndRef = useRef<HTMLDivElement>(null);
   const timerRef = useRef<ReturnType<typeof setInterval> | null>(null);
   const abortControllerRef = useRef<AbortController | null>(null);
@@ -709,15 +710,21 @@ export default function VoiceAgent({ patientName }: VoiceAgentProps) {
     return `${m}:${sec.toString().padStart(2, "0")}`;
   };
 
-  // ------ Text notification trigger (fires on mount since VoiceAgent remounts per day) ------
+  // ------ Text notification trigger (fires when phase becomes "idle") ------
+  // Non-call days start in "analyzing" → thinking feed plays → idle → notification
+  // Day 2 starts idle → notification immediately
+  // Day 4 starts detecting → no notification (patient unresponsive)
   useEffect(() => {
-    const dd = currentDay >= 1 && currentDay <= 7 ? DAY_DATA[currentDay - 1] : null;
-    if (dd && dd.textThread.length > 0) {
-      const t = setTimeout(() => setShowNotification(true), 800);
-      return () => clearTimeout(t);
-    }
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []);
+    if (demoPhase !== "idle" || currentDay < 1 || notificationShownRef.current) return;
+
+    const dd = DAY_DATA[currentDay - 1];
+    if (!dd || dd.textThread.length === 0 || dd.isIncidentDay) return;
+
+    notificationShownRef.current = true;
+    const t = setTimeout(() => setShowNotification(true), 800);
+    timeoutsRef.current.push(t);
+    return () => clearTimeout(t);
+  }, [demoPhase, currentDay]);
 
   // ------ Texting complete handler ------
   const handleTextingComplete = useCallback(() => {

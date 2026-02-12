@@ -1,7 +1,7 @@
 "use client";
 
 import { useState, useEffect, useRef, useMemo } from "react";
-import { useDemo, AI_THINKING_STEPS, AI_THINKING_STEPS_DAY2, DAY_DATA } from "./demo-context";
+import { useDemo, DAILY_THINKING_STEPS, CALL_REASONING_STEPS, DAY_DATA } from "./demo-context";
 
 // ---------------------------------------------------------------------------
 // Types
@@ -368,10 +368,12 @@ function PatientListView() {
 // ---------------------------------------------------------------------------
 
 function AIThinkingFeed() {
-  const { triggerCall, addLog, currentDay, selectedPatient } = useDemo();
+  const { triggerCall, completeAnalysis, addLog, currentDay, selectedPatient } = useDemo();
 
-  // Use Day 2 or Day 4 thinking steps
-  const steps = currentDay === 2 ? AI_THINKING_STEPS_DAY2 : AI_THINKING_STEPS;
+  // Look up thinking steps for the current day
+  const steps = DAILY_THINKING_STEPS[currentDay] || DAILY_THINKING_STEPS[1];
+  const dayData = currentDay >= 1 && currentDay <= 7 ? DAY_DATA[currentDay - 1] : null;
+  const isCallDay = dayData?.isCallDay || dayData?.isIncidentDay;
 
   const [stepStatuses, setStepStatuses] = useState<StepStatus[]>(() =>
     steps.map(() => "pending")
@@ -419,21 +421,25 @@ function AIThinkingFeed() {
       }, decisionDelay)
     );
 
-    // Auto trigger call after decision
-    const callDelay = decisionDelay + 1000;
+    // After decision: trigger call (call days) or complete analysis (non-call days)
+    const actionDelay = decisionDelay + 1000;
     timeouts.push(
       setTimeout(() => {
         if (!triggeredRef.current) {
           triggeredRef.current = true;
-          triggerCall();
+          if (isCallDay) {
+            triggerCall();
+          } else {
+            completeAnalysis();
+          }
         }
-      }, callDelay)
+      }, actionDelay)
     );
 
     return () => {
       timeouts.forEach(clearTimeout);
     };
-  }, [triggerCall, addLog, steps]);
+  }, [triggerCall, completeAnalysis, addLog, steps, isCallDay]);
 
   return (
     <div className="flex flex-col h-full">
@@ -444,10 +450,10 @@ function AIThinkingFeed() {
         </div>
         <div className="leading-none">
           <h2 className="text-[13px] font-bold text-slate-800 tracking-tight">
-            {currentDay === 2 ? "Text Sentiment Analysis" : "Engagement Analysis"} &mdash; {selectedPatient.firstName} {selectedPatient.lastName}
+            {currentDay === 2 ? "Text Sentiment Analysis" : currentDay === 4 ? "Engagement Analysis" : `Day ${currentDay} Monitoring`} &mdash; {selectedPatient.firstName} {selectedPatient.lastName}
           </h2>
           <p className="text-[10px] text-indigo-500 font-medium mt-0.5">
-            {currentDay === 2 ? "Discontinuation risk detected in text" : "Clinical reasoning in progress"}
+            {currentDay === 2 ? "Discontinuation risk detected in text" : currentDay === 4 ? "Clinical reasoning in progress" : "Daily AI analysis routine"}
           </p>
         </div>
         <div className="ml-auto flex items-center gap-1">
@@ -565,10 +571,16 @@ function AIThinkingFeed() {
                   <span className="text-[10px] font-bold uppercase tracking-wider text-emerald-700 bg-emerald-200 rounded px-1.5 py-0.5">Decision</span>
                 </div>
                 <p className="text-[12px] font-semibold text-emerald-800 leading-snug">
-                  Initiating proactive engagement call to {selectedPatient.firstName} {selectedPatient.lastName}
+                  {isCallDay
+                    ? `Initiating proactive engagement call to ${selectedPatient.firstName} ${selectedPatient.lastName}`
+                    : `No intervention needed — ${selectedPatient.firstName} ${selectedPatient.lastName} on track`
+                  }
                 </p>
                 <p className="text-[10px] text-emerald-600 mt-1">
-                  All criteria met per GLP-1 engagement protocol. Connecting now...
+                  {isCallDay
+                    ? "All criteria met per GLP-1 engagement protocol. Connecting now..."
+                    : "Sending daily check-in message. Continue standard monitoring."
+                  }
                 </p>
               </div>
             </div>
@@ -607,64 +619,172 @@ function CallingView() {
 }
 
 // ---------------------------------------------------------------------------
-// Live Transcript View (active phase)
+// Call Reasoning Feed (active phase) — AI internal reasoning during live call
+// Replaces the transcript view; call transcript is only on the phone
 // ---------------------------------------------------------------------------
 
-function TranscriptView() {
-  const { transcript, selectedPatient } = useDemo();
+function CallReasoningFeed() {
+  const { currentDay, selectedPatient, addLog } = useDemo();
+  const steps = CALL_REASONING_STEPS[currentDay] || CALL_REASONING_STEPS[4];
+
+  const [stepStatuses, setStepStatuses] = useState<StepStatus[]>(() =>
+    steps.map(() => "pending")
+  );
   const scrollRef = useRef<HTMLDivElement>(null);
+
+  useEffect(() => {
+    const timeouts: ReturnType<typeof setTimeout>[] = [];
+    let cumulativeDelay = 1500; // wait for call to start before reasoning begins
+
+    steps.forEach((step, idx) => {
+      const startDelay = cumulativeDelay;
+      timeouts.push(
+        setTimeout(() => {
+          setStepStatuses((prev) => {
+            const next = [...prev];
+            next[idx] = "active";
+            return next;
+          });
+          addLog("nlp", `Call reasoning: ${step.label}`);
+        }, startDelay)
+      );
+
+      cumulativeDelay += step.durationMs;
+      const endDelay = cumulativeDelay;
+      timeouts.push(
+        setTimeout(() => {
+          setStepStatuses((prev) => {
+            const next = [...prev];
+            next[idx] = "complete";
+            return next;
+          });
+        }, endDelay)
+      );
+    });
+
+    return () => {
+      timeouts.forEach(clearTimeout);
+    };
+  }, [steps, addLog]);
 
   useEffect(() => {
     if (scrollRef.current) {
       scrollRef.current.scrollTop = scrollRef.current.scrollHeight;
     }
-  }, [transcript.length]);
+  }, [stepStatuses]);
 
   return (
     <div className="flex flex-col h-full">
       {/* Header */}
-      <div className="flex items-center gap-2 px-3 py-2 border-b border-slate-200 flex-shrink-0">
-        <span className="relative flex h-2 w-2">
-          <span className="absolute inline-flex h-full w-full rounded-full bg-emerald-400" style={{ animation: "livePing 1.5s cubic-bezier(0,0,0.2,1) infinite" }} />
-          <span className="relative inline-flex rounded-full h-2 w-2 bg-emerald-500" />
-        </span>
-        <span className="text-[13px] font-bold text-slate-800">Live Call</span>
-        <span className="text-[11px] text-slate-400">{selectedPatient.firstName} {selectedPatient.lastName}</span>
-        <IconPhone className="w-3.5 h-3.5 text-emerald-500 ml-auto" />
+      <div className="flex items-center gap-2 px-3 py-2.5 border-b border-slate-200 flex-shrink-0">
+        <div className="flex items-center justify-center w-6 h-6 rounded-md bg-gradient-to-br from-violet-500 to-indigo-600">
+          <IconBrain className="w-3.5 h-3.5 text-white" />
+        </div>
+        <div className="leading-none">
+          <h2 className="text-[13px] font-bold text-slate-800 tracking-tight">
+            Internal Reasoning &mdash; {selectedPatient.firstName} {selectedPatient.lastName}
+          </h2>
+          <p className="text-[10px] text-emerald-500 font-medium mt-0.5">
+            Real-time AI analysis during voice call
+          </p>
+        </div>
+        <div className="ml-auto flex items-center gap-1">
+          <span className="relative flex h-1.5 w-1.5">
+            <span className="absolute inline-flex h-full w-full rounded-full bg-emerald-400" style={{ animation: "livePing 1.5s cubic-bezier(0,0,0.2,1) infinite" }} />
+            <span className="relative inline-flex rounded-full h-1.5 w-1.5 bg-emerald-500" />
+          </span>
+          <span className="text-[10px] text-emerald-600 font-semibold uppercase tracking-wider">Live Call</span>
+        </div>
       </div>
 
-      {/* Messages */}
-      <div ref={scrollRef} className="flex-1 min-h-0 overflow-y-auto scrollbar-thin px-3 py-2 space-y-2">
-        {transcript.length === 0 && (
-          <div className="flex items-center justify-center h-full">
-            <p className="text-[11px] text-slate-400">Waiting for conversation to begin...</p>
-          </div>
-        )}
-        {transcript.map((entry, idx) => {
-          const isAI = entry.speaker === "ai";
-          return (
-            <div
-              key={idx}
-              className={`flex ${isAI ? "justify-start" : "justify-end"}`}
-              style={{ animation: "fadeSlideIn 0.3s ease-out both" }}
-            >
-              <div className={`max-w-[85%] rounded-lg px-2.5 py-1.5 ${
-                isAI
-                  ? "bg-blue-50 border border-blue-200"
-                  : "bg-slate-100 border border-slate-200"
-              }`}>
-                <div className="flex items-center gap-1 mb-0.5">
-                  <span className={`text-[10px] font-bold uppercase tracking-wider ${isAI ? "text-blue-600" : "text-slate-500"}`}>
-                    {isAI ? "GLP-1 Co-Pilot" : "Patient"}
-                  </span>
+      {/* Reasoning timeline */}
+      <div ref={scrollRef} className="flex-1 min-h-0 overflow-y-auto scrollbar-thin px-3 py-2">
+        <div className="relative">
+          <div className="absolute left-[11px] top-2 bottom-2 w-px bg-slate-200" />
+
+          {steps.map((step, idx) => {
+            const status = stepStatuses[idx];
+
+            const dotBg =
+              status === "complete"
+                ? "bg-emerald-500"
+                : status === "active"
+                  ? "bg-violet-500"
+                  : "bg-slate-300";
+
+            const dotBorder =
+              status === "complete"
+                ? "border-emerald-200"
+                : status === "active"
+                  ? "border-violet-200"
+                  : "border-slate-200";
+
+            return (
+              <div
+                key={step.id}
+                className="relative pl-8 pb-3"
+                style={{
+                  animation: status !== "pending" ? `fadeSlideIn 0.35s ease-out ${idx * 0.05}s both` : undefined,
+                  opacity: status === "pending" ? 0.35 : 1,
+                  transition: "opacity 0.3s ease",
+                }}
+              >
+                <div
+                  className={`absolute left-0 top-[3px] w-[22px] h-[22px] rounded-full border-2 flex items-center justify-center ${dotBg} ${dotBorder}`}
+                  style={status === "active" ? { animation: "stepGlow 1.5s ease-in-out infinite" } : undefined}
+                >
+                  {status === "complete" ? (
+                    <IconCheck className="w-3 h-3 text-white" />
+                  ) : status === "active" ? (
+                    <IconSpinner className="w-3 h-3 text-white" />
+                  ) : (
+                    <span className="w-1.5 h-1.5 rounded-full bg-white/60" />
+                  )}
                 </div>
-                <p className={`text-[12px] leading-snug ${isAI ? "text-blue-900" : "text-slate-700"}`}>
-                  {entry.text}
-                </p>
+
+                <div
+                  className={`rounded-lg border px-3 py-2 transition-all duration-300 ${
+                    status === "complete"
+                      ? "border-emerald-200 bg-emerald-50/50"
+                      : status === "active"
+                        ? "border-violet-200 bg-violet-50/50"
+                        : "border-slate-200 bg-slate-50/50"
+                  }`}
+                >
+                  <div className="flex items-center gap-1.5">
+                    <span className={`${
+                      status === "complete" ? "text-emerald-600" : status === "active" ? "text-violet-600" : "text-slate-400"
+                    }`}>
+                      {stepIcon(step.icon, "w-3.5 h-3.5")}
+                    </span>
+                    <span className={`text-[12px] font-semibold ${
+                      status === "complete" ? "text-emerald-800" : status === "active" ? "text-violet-800" : "text-slate-500"
+                    }`}>
+                      {step.label}
+                    </span>
+                    {status === "active" && (
+                      <span className="text-[10px] text-violet-500 font-medium ml-auto">Analyzing...</span>
+                    )}
+                    {status === "complete" && (
+                      <span className="text-[10px] text-emerald-500 font-medium ml-auto">Done</span>
+                    )}
+                  </div>
+
+                  {(status === "active" || status === "complete") && (
+                    <p
+                      className={`text-[11px] leading-relaxed mt-1.5 ${
+                        status === "complete" ? "text-emerald-700/80" : "text-violet-700/80"
+                      }`}
+                      style={{ animation: "detailFadeIn 0.4s ease-out both" }}
+                    >
+                      {step.detail}
+                    </p>
+                  )}
+                </div>
               </div>
-            </div>
-          );
-        })}
+            );
+          })}
+        </div>
       </div>
     </div>
   );
@@ -950,7 +1070,7 @@ export function LiveTriage() {
         {showPatientList && <PatientListView />}
         {demoPhase === "analyzing" && <AIThinkingFeed />}
         {demoPhase === "calling" && <CallingView />}
-        {demoPhase === "active" && <TranscriptView />}
+        {demoPhase === "active" && <CallReasoningFeed />}
         {demoPhase === "documenting" && <DocumentingView />}
         {demoPhase === "complete" && <CompleteView />}
       </div>

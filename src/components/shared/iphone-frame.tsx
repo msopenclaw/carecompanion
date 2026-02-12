@@ -40,20 +40,20 @@ export function IPhoneFrame({ children, label, labelColor, sublabel }: IPhoneFra
           }}
         >
           {/* Side buttons */}
-          <div className="absolute -right-[2px] top-24 w-[3px] h-10 bg-[#2a2a2a] rounded-r-sm" />
-          <div className="absolute -left-[2px] top-16 w-[3px] h-4 bg-[#2a2a2a] rounded-l-sm" />
-          <div className="absolute -left-[2px] top-28 w-[3px] h-8 bg-[#2a2a2a] rounded-l-sm" />
-          <div className="absolute -left-[2px] top-38 w-[3px] h-8 bg-[#2a2a2a] rounded-l-sm" />
+          <div className="absolute -right-[2px] top-28 w-[3px] h-12 bg-[#2a2a2a] rounded-r-sm" />
+          <div className="absolute -left-[2px] top-20 w-[3px] h-5 bg-[#2a2a2a] rounded-l-sm" />
+          <div className="absolute -left-[2px] top-32 w-[3px] h-10 bg-[#2a2a2a] rounded-l-sm" />
+          <div className="absolute -left-[2px] top-44 w-[3px] h-10 bg-[#2a2a2a] rounded-l-sm" />
 
           {/* Screen */}
-          <div className="relative rounded-[2rem] overflow-hidden bg-black w-[260px] h-[540px]">
+          <div className="relative rounded-[2rem] overflow-hidden bg-black w-[312px] h-[648px]">
             {/* Status bar */}
             <div className="relative z-20 flex items-center justify-between px-6 pt-2 pb-0.5 bg-white">
               <span className="text-[9px] font-semibold text-black">9:41</span>
               {/* Dynamic Island */}
               <div className="absolute left-1/2 -translate-x-1/2 top-1">
-                <div className="w-[70px] h-[20px] bg-black rounded-full flex items-center justify-center">
-                  <div className="w-[6px] h-[6px] rounded-full bg-[#1a1a1a] border border-[#333] ml-6" />
+                <div className="w-[84px] h-[22px] bg-black rounded-full flex items-center justify-center">
+                  <div className="w-[7px] h-[7px] rounded-full bg-[#1a1a1a] border border-[#333] ml-7" />
                 </div>
               </div>
               <div className="flex items-center gap-0.5">

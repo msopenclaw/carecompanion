@@ -722,7 +722,7 @@ export default function VoiceAgent({ patientName }: VoiceAgentProps) {
 
     notificationShownRef.current = true;
     const t = setTimeout(() => setShowNotification(true), 800);
-    timeoutsRef.current.push(t);
+    // Don't push to timeoutsRef — the "reset on idle" effect clears it simultaneously
     return () => clearTimeout(t);
   }, [demoPhase, currentDay]);
 

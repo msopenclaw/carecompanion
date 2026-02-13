@@ -204,29 +204,204 @@ function BillingFooter() {
   );
 }
 
-/** Program ROI card — shown on Day 7 in the patient grid view */
-function ProgramROI() {
+/** Program ROI Hero — prominent Day 7 card shown above the patient grid */
+function ProgramROIHero() {
   const { currentDay } = useDemo();
   if (currentDay !== 7) return null;
 
   return (
-    <div className="mx-3 mb-2 rounded-lg border border-emerald-200 bg-emerald-50/60 p-3">
-      <h3 className="text-[10px] font-bold uppercase tracking-wider text-emerald-700 mb-2">
-        Program ROI &mdash; GLP-1 Cohort
-      </h3>
-      <div className="flex flex-wrap items-center gap-1.5 text-[10px] text-slate-700 mb-2">
-        <span className="font-mono font-semibold"><span className="text-amber-600">99453</span>: $19</span>
-        <span className="text-slate-400">+</span>
-        <span className="font-mono font-semibold"><span className="text-emerald-600">99454</span>: $55</span>
-        <span className="text-slate-400">+</span>
-        <span className="font-mono font-semibold"><span className="text-blue-600">99457</span>: $52</span>
-        <span className="text-slate-400">+</span>
-        <span className="font-mono font-semibold"><span className="text-purple-600">99490</span>: $64</span>
-        <span className="text-slate-400">=</span>
-        <span className="font-bold text-emerald-700">$190/patient/mo</span>
+    <div
+      className="mb-3 rounded-xl border-2 border-emerald-400 bg-gradient-to-br from-emerald-50 via-white to-emerald-50 p-4 shadow-sm"
+      style={{ animation: "fadeSlideIn 0.5s ease-out both" }}
+    >
+      {/* Header */}
+      <div className="flex items-center gap-2 mb-3">
+        <div className="w-6 h-6 rounded-md bg-gradient-to-br from-emerald-500 to-emerald-700 flex items-center justify-center">
+          <svg className="w-3.5 h-3.5 text-white" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2.5} strokeLinecap="round" strokeLinejoin="round">
+            <line x1="12" y1="1" x2="12" y2="23" />
+            <path d="M17 5H9.5a3.5 3.5 0 0 0 0 7h5a3.5 3.5 0 0 1 0 7H6" />
+          </svg>
+        </div>
+        <h3 className="text-[13px] font-bold text-emerald-800 tracking-tight">
+          Week 1 Program ROI &mdash; GLP-1 Cohort
+        </h3>
       </div>
-      <div className="text-[10px] font-semibold text-emerald-800 bg-emerald-100 rounded px-2 py-1 text-center">
-        Projected annual: $2,280/patient &times; 250 patients = $570,000
+
+      {/* CPT breakdown with colored badges */}
+      <div className="flex flex-wrap items-center gap-1.5 mb-3">
+        <span className="inline-flex items-center gap-1 rounded-md border border-amber-300 bg-amber-50 px-2 py-1">
+          <span className="text-[10px] font-bold text-amber-700 font-mono">99453</span>
+          <span className="text-[10px] font-semibold text-amber-600">$19</span>
+        </span>
+        <span className="text-slate-300 text-[10px]">+</span>
+        <span className="inline-flex items-center gap-1 rounded-md border border-emerald-300 bg-emerald-50 px-2 py-1">
+          <span className="text-[10px] font-bold text-emerald-700 font-mono">99454</span>
+          <span className="text-[10px] font-semibold text-emerald-600">$55</span>
+        </span>
+        <span className="text-slate-300 text-[10px]">+</span>
+        <span className="inline-flex items-center gap-1 rounded-md border border-blue-300 bg-blue-50 px-2 py-1">
+          <span className="text-[10px] font-bold text-blue-700 font-mono">99457</span>
+          <span className="text-[10px] font-semibold text-blue-600">$52</span>
+        </span>
+        <span className="text-slate-300 text-[10px]">+</span>
+        <span className="inline-flex items-center gap-1 rounded-md border border-purple-300 bg-purple-50 px-2 py-1">
+          <span className="text-[10px] font-bold text-purple-700 font-mono">99490</span>
+          <span className="text-[10px] font-semibold text-purple-600">$64</span>
+        </span>
+      </div>
+
+      {/* Big projected revenue */}
+      <div className="rounded-lg bg-gradient-to-r from-emerald-600 to-emerald-700 px-4 py-3 text-center mb-3">
+        <p className="text-[22px] font-extrabold text-white tracking-tight leading-none">$570,000<span className="text-[13px] font-semibold text-emerald-200">/year</span></p>
+        <p className="text-[10px] text-emerald-200 mt-1 font-medium">$190/patient/month &middot; $2,280/patient/year &middot; 250 patients</p>
+      </div>
+
+      {/* Clinical outcome stats */}
+      <div className="grid grid-cols-4 gap-1.5">
+        <div className="flex flex-col items-center rounded-md bg-emerald-100/60 border border-emerald-200 px-1.5 py-1.5">
+          <span className="text-[13px] font-bold text-emerald-700 leading-none">-1.6</span>
+          <span className="text-[9px] text-emerald-600 font-medium mt-0.5">lbs weight</span>
+        </div>
+        <div className="flex flex-col items-center rounded-md bg-blue-100/60 border border-blue-200 px-1.5 py-1.5">
+          <span className="text-[13px] font-bold text-blue-700 leading-none">-24%</span>
+          <span className="text-[9px] text-blue-600 font-medium mt-0.5">glucose</span>
+        </div>
+        <div className="flex flex-col items-center rounded-md bg-violet-100/60 border border-violet-200 px-1.5 py-1.5">
+          <span className="text-[13px] font-bold text-violet-700 leading-none">&darr;</span>
+          <span className="text-[9px] text-violet-600 font-medium mt-0.5">BP improved</span>
+        </div>
+        <div className="flex flex-col items-center rounded-md bg-amber-100/60 border border-amber-200 px-1.5 py-1.5">
+          <span className="text-[13px] font-bold text-amber-700 leading-none">94%</span>
+          <span className="text-[9px] text-amber-600 font-medium mt-0.5">engagement</span>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+/** Interaction Timeline — shows AI-managed engagement log for Days 5-7 */
+function InteractionLog() {
+  const { currentDay, selectedPatient } = useDemo();
+  if (currentDay < 5) return null;
+
+  type Entry = { icon: "text" | "phone" | "text-patient"; desc: string; detail: string; badge: string; badgeColor: string };
+  type DayLog = { day: number; entries: Entry[] };
+
+  const allDays: DayLog[] = [
+    {
+      day: 1,
+      entries: [
+        { icon: "text", desc: "Welcome check-in", detail: "3 messages", badge: "Completed", badgeColor: "bg-emerald-100 text-emerald-700 border-emerald-300" },
+      ],
+    },
+    {
+      day: 2,
+      entries: [
+        { icon: "text", desc: "Symptom check-in", detail: "3 messages", badge: "Completed", badgeColor: "bg-emerald-100 text-emerald-700 border-emerald-300" },
+        { icon: "phone", desc: "Proactive voice call", detail: "Nausea coaching", badge: "Proactive", badgeColor: "bg-blue-100 text-blue-700 border-blue-300" },
+      ],
+    },
+    {
+      day: 3,
+      entries: [
+        { icon: "text", desc: "Hydration coaching", detail: "3 messages", badge: "Warning", badgeColor: "bg-amber-100 text-amber-700 border-amber-300" },
+      ],
+    },
+    {
+      day: 4,
+      entries: [
+        { icon: "text", desc: "Check-in attempt", detail: "No response", badge: "Critical", badgeColor: "bg-red-100 text-red-700 border-red-300" },
+        { icon: "phone", desc: "Intervention call", detail: "Re-engagement", badge: "Escalated", badgeColor: "bg-red-100 text-red-700 border-red-300" },
+      ],
+    },
+    {
+      day: 5,
+      entries: [
+        { icon: "text", desc: "Recovery check-in", detail: "3 messages", badge: "Completed", badgeColor: "bg-emerald-100 text-emerald-700 border-emerald-300" },
+        { icon: "text-patient", desc: "Patient-initiated", detail: "2 messages", badge: "Engaged", badgeColor: "bg-emerald-100 text-emerald-700 border-emerald-300" },
+      ],
+    },
+    {
+      day: 6,
+      entries: [
+        { icon: "text", desc: "Progress update", detail: "3 messages", badge: "Completed", badgeColor: "bg-emerald-100 text-emerald-700 border-emerald-300" },
+        { icon: "text-patient", desc: "Patient-initiated", detail: "2 messages", badge: "Engaged", badgeColor: "bg-emerald-100 text-emerald-700 border-emerald-300" },
+      ],
+    },
+    {
+      day: 7,
+      entries: [
+        { icon: "text", desc: "Week summary", detail: "3 messages", badge: "Completed", badgeColor: "bg-emerald-100 text-emerald-700 border-emerald-300" },
+        { icon: "text-patient", desc: "Patient-initiated", detail: "2 messages", badge: "Engaged", badgeColor: "bg-emerald-100 text-emerald-700 border-emerald-300" },
+      ],
+    },
+  ];
+
+  const visibleDays = allDays.filter((d) => d.day <= currentDay);
+
+  function entryIcon(type: "text" | "phone" | "text-patient") {
+    if (type === "phone") {
+      return <IconPhone className="w-3 h-3 text-blue-500" />;
+    }
+    if (type === "text-patient") {
+      return (
+        <svg className="w-3 h-3 text-emerald-500" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2} strokeLinecap="round" strokeLinejoin="round">
+          <path d="M21 15a2 2 0 01-2 2H7l-4 4V5a2 2 0 012-2h14a2 2 0 012 2z" />
+        </svg>
+      );
+    }
+    return (
+      <svg className="w-3 h-3 text-slate-500" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2} strokeLinecap="round" strokeLinejoin="round">
+        <path d="M21 15a2 2 0 01-2 2H7l-4 4V5a2 2 0 012-2h14a2 2 0 012 2z" />
+      </svg>
+    );
+  }
+
+  return (
+    <div
+      className="mx-3 mb-2 rounded-lg border border-slate-200 bg-white p-3"
+      style={{ animation: "fadeSlideIn 0.4s ease-out both" }}
+    >
+      {/* Section header */}
+      <div className="mb-2">
+        <h3 className="text-[11px] font-bold uppercase tracking-wider text-slate-600">
+          Interaction Timeline &mdash; {selectedPatient.firstName} {selectedPatient.lastName}
+        </h3>
+        <p className="text-[10px] text-slate-400 mt-0.5">AI-managed engagement over 7 days</p>
+      </div>
+
+      {/* Vertical timeline */}
+      <div className="relative pl-4">
+        {/* Vertical line */}
+        <div className="absolute left-[5px] top-1 bottom-1 w-px bg-slate-200" />
+
+        {visibleDays.map((dayLog) => (
+          <div key={dayLog.day} className="relative mb-2 last:mb-0">
+            {/* Day marker dot */}
+            <div className="absolute left-[-13px] top-[3px] w-[10px] h-[10px] rounded-full border-2 border-slate-300 bg-white flex items-center justify-center">
+              <span className="w-[4px] h-[4px] rounded-full bg-slate-400" />
+            </div>
+
+            {/* Day label */}
+            <span className="text-[10px] font-bold text-slate-500 leading-none">Day {dayLog.day}</span>
+
+            {/* Entries */}
+            {dayLog.entries.map((entry, eIdx) => (
+              <div
+                key={eIdx}
+                className="flex items-center gap-1.5 mt-1 ml-1"
+                style={{ animation: `fadeSlideIn 0.3s ease-out ${eIdx * 0.05}s both` }}
+              >
+                <span className="flex-shrink-0">{entryIcon(entry.icon)}</span>
+                <span className="text-[10px] font-medium text-slate-700">{entry.desc}</span>
+                <span className="text-[10px] text-slate-400">{entry.detail}</span>
+                <span className={`text-[9px] font-semibold rounded px-1.5 py-px border ${entry.badgeColor} ml-auto`}>
+                  {entry.badge}
+                </span>
+              </div>
+            ))}
+          </div>
+        ))}
       </div>
     </div>
   );
@@ -279,6 +454,9 @@ function PatientListView() {
           <span className="text-[11px] font-bold uppercase tracking-wider text-slate-500">Patient Risk Grid</span>
           <span className="text-[10px] text-slate-400 ml-auto">{PATIENTS.length} active patients</span>
         </div>
+
+        {/* Program ROI Hero — prominent Day 7 card above grid */}
+        <ProgramROIHero />
 
         {/* Table header */}
         <div className="grid grid-cols-[16px_1fr_32px_44px_1fr_1fr] gap-x-1.5 items-center px-1.5 py-1 border-b border-slate-200">
@@ -351,11 +529,11 @@ function PatientListView() {
         })}
       </div>
 
+      {/* Interaction Timeline (Days 5-7) */}
+      <InteractionLog />
+
       {/* Stats bar */}
       <StatsBar />
-
-      {/* Program ROI (Day 7 only) */}
-      <ProgramROI />
 
       {/* Billing footer */}
       <BillingFooter />

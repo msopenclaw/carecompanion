@@ -585,6 +585,8 @@ interface DemoActions {
   completeCall: () => void;      // active → documenting
   completeAnalysis: () => void;       // analyzing → idle (non-call days)
   completeProactiveCall: () => void;  // calling/active → idle (Day 2 check-in)
+  skipToDay: (day: number) => void;  // jump to any day (1-7)
+  completeAnalysisQuick: () => void; // skip analysis phase immediately
   resolveCase: () => void;       // documenting → complete
   addTranscript: (speaker: "ai" | "patient", text: string) => void;
   addLog: (type: LogType, message: string, detail?: string) => void;
@@ -723,6 +725,30 @@ export function DemoProvider({ children }: { children: ReactNode }) {
     });
   }, []);
 
+  // ------ Skip to specific day ------
+
+  const skipToDay = useCallback((targetDay: number) => {
+    if (targetDay < 1 || targetDay > 7) return;
+    stagedTimeouts.current.forEach(clearTimeout);
+    stagedTimeouts.current = [];
+    setTranscript([]);
+    setAlerts([]);
+    setBillingMinutes(0);
+    setBillingEvents([]);
+
+    setCurrentDay(targetDay);
+
+    if (targetDay === 4) {
+      setDemoPhase("detecting");
+      const t = setTimeout(() => setDemoPhase("analyzing"), 3500);
+      stagedTimeouts.current.push(t);
+    } else if (targetDay === 2) {
+      setDemoPhase("idle");
+    } else {
+      setDemoPhase("analyzing");
+    }
+  }, []);
+
   // ------ Phase transitions ------
 
   const startDemo = useCallback(() => {
@@ -749,6 +775,18 @@ export function DemoProvider({ children }: { children: ReactNode }) {
   const completeAnalysis = useCallback(() => {
     setDemoPhase("idle");
   }, []);
+
+  const completeAnalysisQuick = useCallback(() => {
+    if (demoPhase === "analyzing") {
+      const dayData = currentDay >= 1 && currentDay <= 7 ? DAY_DATA[currentDay - 1] : null;
+      const isCallDay = dayData?.isCallDay || dayData?.isIncidentDay;
+      if (isCallDay) {
+        setDemoPhase("calling");
+      } else {
+        setDemoPhase("idle");
+      }
+    }
+  }, [demoPhase, currentDay]);
 
   const completeProactiveCall = useCallback(() => {
     setDemoPhase("idle");
@@ -863,6 +901,8 @@ export function DemoProvider({ children }: { children: ReactNode }) {
     startDemo,
     openAnalysis,
     completeAnalysis,
+    skipToDay,
+    completeAnalysisQuick,
     triggerCall: triggerCallAction,
     setPhaseActive,
     completeCall,

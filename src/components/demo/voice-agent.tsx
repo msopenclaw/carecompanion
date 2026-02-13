@@ -67,76 +67,125 @@ function delay(ms: number): Promise<void> {
 }
 
 // ---------------------------------------------------------------------------
+// iOS notification sound (Web Audio API tri-tone)
+// ---------------------------------------------------------------------------
+
+function playNotificationSound() {
+  try {
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const ctx = new (window.AudioContext || (window as unknown as Record<string, typeof AudioContext>).webkitAudioContext)();
+    const notes = [880, 1046.5, 1318.5]; // A5, C6, E6 - gentle ascending tri-tone
+    notes.forEach((freq, i) => {
+      const osc = ctx.createOscillator();
+      const gain = ctx.createGain();
+      osc.connect(gain);
+      gain.connect(ctx.destination);
+      osc.frequency.value = freq;
+      osc.type = 'sine';
+      const start = ctx.currentTime + i * 0.12;
+      gain.gain.setValueAtTime(0.12, start);
+      gain.gain.exponentialRampToValueAtTime(0.001, start + 0.15);
+      osc.start(start);
+      osc.stop(start + 0.15);
+    });
+  } catch { /* silent fallback */ }
+}
+
+// ---------------------------------------------------------------------------
 // Conversation scripts (voice calls)
 // ---------------------------------------------------------------------------
 
-/** Day 2 proactive call — triggered by Margaret's concerning text about nausea */
+/** Day 2 proactive call — warm coaching tone, Margaret is frustrated but engaged */
 function buildCheckInScript(): ScriptLine[] {
   return [
     {
       speaker: "ai",
-      text: "Hi Margaret, I saw your message about the nausea and vomiting. I wanted to call and talk you through this. How are you feeling right now?",
-      speakDuration: 4500,
+      text: "Hi Margaret! This is your CareCompanion checking in. I saw your message about the nausea \u2014 I wanted to talk through some things that can really help. How are you doing right now?",
+      speakDuration: 5000,
       preDelay: 1200,
     },
     {
       speaker: "patient",
-      text: "Not great. I threw up this morning and I'm honestly thinking about stopping the Wegovy.",
-      speakDuration: 3000,
+      text: "Hi... yeah, I threw up after breakfast. I'm worried this medication isn't right for me.",
+      speakDuration: 3200,
       preDelay: 1600,
     },
     {
       speaker: "ai",
-      text: "I completely understand. Nausea is actually the most common side effect in the first week — about a third of patients experience it. The good news is it almost always gets better within a few days. Can I share some tips?",
+      text: "I understand that feeling. The good news is that about a third of patients feel this way in the first couple of days, and it almost always passes. Your body is just adjusting. Can I share what's helped other patients?",
       speakDuration: 5500,
       preDelay: 1200,
     },
     {
       speaker: "patient",
-      text: "Yes please. I really want this to work.",
-      speakDuration: 2000,
+      text: "Yes, please. I really don't want to give up on this.",
+      speakDuration: 2200,
       preDelay: 1400,
     },
     {
       speaker: "ai",
-      text: "Try eating smaller meals throughout the day, keep ginger tea handy, and sip water often. Avoid greasy or heavy foods for now. Most patients feel much better by day five or six. I'll check in with you tomorrow — you're doing great, Margaret!",
-      speakDuration: 6000,
+      text: "Of course! Three things that work really well: eating smaller, more frequent meals instead of three big ones, keeping ginger tea or ginger candies handy, and sipping water throughout the day. Most patients feel significantly better by day five or six.",
+      speakDuration: 6500,
+      preDelay: 1000,
+    },
+    {
+      speaker: "patient",
+      text: "OK, I can try that. Thank you for calling me \u2014 I feel better just knowing someone is watching out for me.",
+      speakDuration: 3500,
+      preDelay: 1400,
+    },
+    {
+      speaker: "ai",
+      text: "That's exactly what I'm here for, Margaret. I'll check in with you again tomorrow. And remember, if anything feels wrong, just text me anytime.",
+      speakDuration: 4500,
       preDelay: 1000,
     },
   ];
 }
 
-/** Day 4 incident — nausea intervention, missed check-in */
+/** Day 4 incident — urgent clinical tone, Margaret has gone silent and is ready to quit */
 function buildIncidentScript(): ScriptLine[] {
   return [
     {
       speaker: "ai",
-      text: "Hi Margaret, I noticed you missed your check-in today, and your nausea has been increasing. How are you feeling?",
-      speakDuration: 4500,
+      text: "Margaret, hi \u2014 this is CareCompanion. I noticed you haven't checked in today and I wanted to make sure you're OK. How are you feeling?",
+      speakDuration: 4800,
       preDelay: 1200,
     },
     {
       speaker: "patient",
-      text: "Honestly, the nausea has been terrible. I almost stopped taking the Wegovy altogether.",
-      speakDuration: 3200,
-      preDelay: 1800,
+      text: "...not good. The nausea won't stop. I haven't eaten much in two days and honestly I was about to throw the Wegovy pen in the trash.",
+      speakDuration: 4200,
+      preDelay: 2000,
     },
     {
       speaker: "ai",
-      text: "I'm sorry to hear that. Nausea is actually very common in the first week — about a third of patients experience it. The good news is it almost always gets better. Can I share some tips?",
-      speakDuration: 5200,
+      text: "I'm really glad you picked up, Margaret. I can hear how frustrated you are, and I want you to know that what you're going through is something we can manage. Your vitals are actually showing good progress \u2014 you've already lost over a pound and your blood sugar is coming down. The nausea is your body adjusting.",
+      speakDuration: 7000,
       preDelay: 1400,
     },
     {
       speaker: "patient",
-      text: "Yes please. I really want this to work but the nausea made me feel like I should quit.",
-      speakDuration: 3000,
+      text: "But it's been four days! When does it stop?",
+      speakDuration: 2200,
       preDelay: 1600,
     },
     {
       speaker: "ai",
-      text: "Try eating smaller meals throughout the day, keep ginger tea handy, and sip water often — your fluid intake has been low. I'll note this for Dr. Patel in case they want to consider an anti-nausea medication. You're doing really well — you've already lost 1.2 pounds and your glucose is improving!",
-      speakDuration: 7000,
+      text: "For most patients, it starts improving significantly by day five or six. I also see your fluid intake has dropped quite a bit \u2014 that can actually make the nausea worse. I'm going to suggest Dr. Patel consider an anti-nausea medication for you, and I want you to focus on small sips of water throughout the day. Can you do that for me?",
+      speakDuration: 7500,
+      preDelay: 1200,
+    },
+    {
+      speaker: "patient",
+      text: "I... OK. I'll try. I just don't want to feel like this anymore.",
+      speakDuration: 2800,
+      preDelay: 1800,
+    },
+    {
+      speaker: "ai",
+      text: "I know, and you won't. You're almost through the hardest part. I'm going to check on you tomorrow, and I've flagged your chart so Dr. Patel's team will follow up too. You're not doing this alone, Margaret.",
+      speakDuration: 6000,
       preDelay: 1200,
     },
   ];
@@ -174,12 +223,16 @@ function TextNotification({
   message,
   onDismiss,
   onTap,
+  senderName,
 }: {
   message: string;
   onDismiss: () => void;
   onTap: () => void;
+  senderName?: string;
 }) {
   const [dismissing, setDismissing] = useState(false);
+  const displayName = senderName || "CareCompanion AI";
+  const isPatientSender = !!senderName && senderName !== "CareCompanion AI";
 
   useEffect(() => {
     const t = setTimeout(() => {
@@ -203,12 +256,22 @@ function TextNotification({
       }}
     >
       <div className="flex items-start gap-2">
-        <div className="w-7 h-7 rounded-lg bg-gradient-to-br from-blue-500 to-indigo-600 flex items-center justify-center flex-shrink-0 mt-0.5">
-          <span className="text-white font-bold text-[7px]">CC</span>
+        <div className={`w-7 h-7 rounded-lg flex items-center justify-center flex-shrink-0 mt-0.5 ${
+          isPatientSender
+            ? "bg-gradient-to-br from-emerald-500 to-teal-600"
+            : "bg-gradient-to-br from-blue-500 to-indigo-600"
+        }`}>
+          {isPatientSender ? (
+            <span className="text-white font-bold text-[8px]">
+              {senderName.split(" ").map(n => n[0]).join("")}
+            </span>
+          ) : (
+            <span className="text-white font-bold text-[7px]">CC</span>
+          )}
         </div>
         <div className="flex-1 min-w-0">
           <div className="flex items-center justify-between">
-            <span className="text-[9px] font-bold text-slate-900">CareCompanion AI</span>
+            <span className="text-[9px] font-bold text-slate-900">{displayName}</span>
             <span className="text-[8px] text-slate-400">now</span>
           </div>
           <p className="text-[9px] text-slate-600 leading-[1.4] mt-0.5 line-clamp-2">
@@ -227,16 +290,34 @@ function TextNotification({
 function TextingView({
   thread,
   onComplete,
+  showNoResponse,
+  isReplay,
 }: {
   thread: TextMessage[];
   onComplete: () => void;
+  showNoResponse?: boolean;
+  isReplay?: boolean;
 }) {
-  const [visibleCount, setVisibleCount] = useState(0);
-  const [showTyping, setShowTyping] = useState(true);
+  const [visibleCount, setVisibleCount] = useState(isReplay ? thread.length : 0);
+  const [showTyping, setShowTyping] = useState(!isReplay);
+  const [showNoResponseLabel, setShowNoResponseLabel] = useState(false);
   const scrollRef = useRef<HTMLDivElement>(null);
   const completedRef = useRef(false);
 
   useEffect(() => {
+    // If replay mode, show all messages immediately and complete
+    if (isReplay) {
+      setVisibleCount(thread.length);
+      setShowTyping(false);
+      if (!completedRef.current) {
+        completedRef.current = true;
+        // Small delay so the component renders before calling onComplete
+        const t = setTimeout(onComplete, 100);
+        return () => clearTimeout(t);
+      }
+      return;
+    }
+
     if (thread.length === 0) {
       onComplete();
       return;
@@ -266,7 +347,33 @@ function TextingView({
         setVisibleCount(i + 1);
       }
 
-      // All messages shown
+      // Check if we need the "no response" dramatic pause
+      const lastMessage = thread[thread.length - 1];
+      if (showNoResponse && lastMessage && lastMessage.sender === "ai") {
+        // Dramatic pause: show typing indicator as if patient is typing
+        await delay(1000);
+        if (cancelled) return;
+        setShowTyping(true);
+
+        // Wait 3.5 seconds (patient starts typing then goes silent)
+        await delay(3500);
+        if (cancelled) return;
+        setShowTyping(false);
+
+        // Show "Read - No response" label
+        setShowNoResponseLabel(true);
+
+        // Wait 2 seconds then complete
+        await delay(2000);
+        if (cancelled) return;
+        if (!completedRef.current) {
+          completedRef.current = true;
+          onComplete();
+        }
+        return;
+      }
+
+      // All messages shown (normal flow)
       await delay(1500);
       if (cancelled) return;
       if (!completedRef.current) {
@@ -277,7 +384,7 @@ function TextingView({
 
     animate();
     return () => { cancelled = true; };
-  }, [thread, onComplete]);
+  }, [thread, onComplete, showNoResponse, isReplay]);
 
   // Auto-scroll as messages appear
   useEffect(() => {
@@ -285,12 +392,17 @@ function TextingView({
       top: scrollRef.current.scrollHeight,
       behavior: "smooth",
     });
-  }, [visibleCount, showTyping]);
+  }, [visibleCount, showTyping, showNoResponseLabel]);
 
   const visibleMessages = thread.slice(0, visibleCount);
 
   // Determine who is "typing" next
   const nextMessage = visibleCount < thread.length ? thread[visibleCount] : null;
+
+  // For no-response mode, after all messages shown, typing indicator shows as patient
+  const typingAsSender = nextMessage
+    ? nextMessage.sender
+    : (showNoResponse && !showNoResponseLabel ? "patient" : null);
 
   return (
     <div className="flex flex-col h-full">
@@ -315,7 +427,7 @@ function TextingView({
             <div
               key={idx}
               className={`flex ${isAi ? "justify-start" : "justify-end"}`}
-              style={{ animation: "bubbleFadeIn 0.3s ease-out both" }}
+              style={isReplay ? undefined : { animation: "bubbleFadeIn 0.3s ease-out both" }}
             >
               <div
                 className={`max-w-[85%] rounded-2xl px-3 py-2 text-[10px] leading-[1.5] ${
@@ -331,11 +443,11 @@ function TextingView({
         })}
 
         {/* Typing indicator */}
-        {showTyping && nextMessage && (
-          <div className={`flex ${nextMessage.sender === "ai" ? "justify-start" : "justify-end"}`}>
+        {showTyping && typingAsSender && (
+          <div className={`flex ${typingAsSender === "ai" ? "justify-start" : "justify-end"}`}>
             <div
               className={`rounded-2xl px-3 py-2.5 ${
-                nextMessage.sender === "ai"
+                typingAsSender === "ai"
                   ? "bg-slate-700/80 rounded-tl-sm"
                   : "bg-blue-600/80 rounded-tr-sm"
               }`}
@@ -346,7 +458,7 @@ function TextingView({
                   <span
                     key={d}
                     className={`inline-block w-1.5 h-1.5 rounded-full ${
-                      nextMessage.sender === "ai" ? "bg-slate-400" : "bg-blue-200"
+                      typingAsSender === "ai" ? "bg-slate-400" : "bg-blue-200"
                     }`}
                     style={{
                       animation: `typingDot 1s ease-in-out ${d * 0.2}s infinite`,
@@ -355,6 +467,16 @@ function TextingView({
                 ))}
               </div>
             </div>
+          </div>
+        )}
+
+        {/* No response label (Day 4 dramatic pause) */}
+        {showNoResponseLabel && (
+          <div
+            className="flex justify-center py-2"
+            style={{ animation: "fadeIn 0.5s ease-out both" }}
+          >
+            <span className="text-[9px] text-slate-500/60 italic">Read &middot; No response</span>
           </div>
         )}
       </div>
@@ -446,7 +568,7 @@ function DailyVitalsCard({
                 <line x1="12" y1="17" x2="12.01" y2="17" />
               </svg>
               <span className="text-[9px] font-semibold text-red-400">
-                Missed Check-in {showAnalyzingHint ? "— AI analyzing..." : "— engagement drop detected"}
+                Missed Check-in {showAnalyzingHint ? "\u2014 AI analyzing..." : "\u2014 engagement drop detected"}
               </span>
             </div>
           </div>
@@ -677,6 +799,7 @@ export default function VoiceAgent({ patientName }: VoiceAgentProps) {
   const [showAnalyzingHint, setShowAnalyzingHint] = useState(false);
   const [showNotification, setShowNotification] = useState(false);
   const [onSecondThread, setOnSecondThread] = useState(false);
+  const [countdown, setCountdown] = useState(3);
 
   // Refs
   const timeoutsRef = useRef<ReturnType<typeof setTimeout>[]>([]);
@@ -685,6 +808,7 @@ export default function VoiceAgent({ patientName }: VoiceAgentProps) {
   const timerRef = useRef<ReturnType<typeof setInterval> | null>(null);
   const abortControllerRef = useRef<AbortController | null>(null);
   const preloadedAudioRef = useRef<Blob | null>(null);
+  const threadShownRef = useRef(false);
 
   // ------ Auto-scroll transcript ------
   useEffect(() => {
@@ -704,6 +828,25 @@ export default function VoiceAgent({ patientName }: VoiceAgentProps) {
     };
   }, [phonePhase]);
 
+  // ------ Visual countdown for ringing screen ------
+  useEffect(() => {
+    if (phonePhase === "ringing") {
+      setCountdown(3);
+      const interval = setInterval(() => {
+        setCountdown((c) => {
+          if (c <= 1) {
+            clearInterval(interval);
+            return 1;
+          }
+          return c - 1;
+        });
+      }, 1000);
+      return () => clearInterval(interval);
+    } else {
+      setCountdown(3);
+    }
+  }, [phonePhase]);
+
   const formatTime = (s: number) => {
     const m = Math.floor(s / 60);
     const sec = s % 60;
@@ -711,9 +854,9 @@ export default function VoiceAgent({ patientName }: VoiceAgentProps) {
   };
 
   // ------ Text notification trigger (fires when phase becomes "idle") ------
-  // Non-call days start in "analyzing" → thinking feed plays → idle → notification
-  // Day 2 starts idle → notification immediately
-  // Day 4 starts detecting → no notification (patient unresponsive)
+  // Non-call days start in "analyzing" -> thinking feed plays -> idle -> notification
+  // Day 2 starts idle -> notification immediately
+  // Day 4 starts detecting -> no notification (patient unresponsive)
   useEffect(() => {
     if (demoPhase !== "idle" || currentDay < 1 || notificationShownRef.current) return;
 
@@ -721,8 +864,11 @@ export default function VoiceAgent({ patientName }: VoiceAgentProps) {
     if (!dd || dd.textThread.length === 0 || dd.isIncidentDay) return;
 
     notificationShownRef.current = true;
-    const t = setTimeout(() => setShowNotification(true), 800);
-    // Don't push to timeoutsRef — the "reset on idle" effect clears it simultaneously
+    const t = setTimeout(() => {
+      setShowNotification(true);
+      playNotificationSound();
+    }, 800);
+    // Don't push to timeoutsRef -- the "reset on idle" effect clears it simultaneously
     return () => clearTimeout(t);
   }, [demoPhase, currentDay]);
 
@@ -730,26 +876,30 @@ export default function VoiceAgent({ patientName }: VoiceAgentProps) {
   const handleTextingComplete = useCallback(() => {
     const dd = currentDay >= 1 && currentDay <= 7 ? DAY_DATA[currentDay - 1] : null;
 
+    // Mark thread as shown for replay feature
+    threadShownRef.current = true;
+
     if (dd?.isIncidentDay) {
-      // Day 4: return to vitals view — the detecting→analyzing flow handles the call
+      // Day 4: return to vitals view -- the detecting->analyzing flow handles the call
       const t = setTimeout(() => {
         setPhonePhase("app");
       }, 1500);
       timeoutsRef.current.push(t);
     } else if (dd?.isCallDay && !onSecondThread) {
-      // Day 2: trigger AI analysis on middle panel → thinking feed → auto-triggers call
+      // Day 2: trigger AI analysis on middle panel -> thinking feed -> auto-triggers call
       const t = setTimeout(() => {
         openAnalysis();
       }, 2000);
       timeoutsRef.current.push(t);
     } else if (!onSecondThread && dd?.patientInitThread && dd.patientInitThread.length > 0) {
-      // First thread done, patient-initiated thread exists — show it after a pause
+      // First thread done, patient-initiated thread exists -- show it after a pause
       const t = setTimeout(() => {
         setPhonePhase("app");
       }, 1500);
       const t2 = setTimeout(() => {
         setOnSecondThread(true);
         setShowNotification(true);
+        playNotificationSound();
       }, 4000);
       timeoutsRef.current.push(t, t2);
     } else {
@@ -905,7 +1055,7 @@ export default function VoiceAgent({ patientName }: VoiceAgentProps) {
       } else {
         completeCall();
       }
-      addLog("voice", "Call ended — session complete");
+      addLog("voice", "Call ended \u2014 session complete");
     }
   }, [addTranscript, addLog, completeCall, completeProactiveCall, updateBilling, playLineAudio]);
 
@@ -931,7 +1081,7 @@ export default function VoiceAgent({ patientName }: VoiceAgentProps) {
     addLog("voice", "Call ended by user");
   }, [completeCall, completeProactiveCall, addLog, currentDay]);
 
-  // ------ Demo phase: "detecting" — Day 4 engagement drop ------
+  // ------ Demo phase: "detecting" -- Day 4 engagement drop ------
   useEffect(() => {
     if (demoPhase !== "detecting") return;
     if (phonePhase !== "app") return;
@@ -953,7 +1103,7 @@ export default function VoiceAgent({ patientName }: VoiceAgentProps) {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [demoPhase]);
 
-  // ------ Demo phase: "analyzing" — show hint text ------
+  // ------ Demo phase: "analyzing" -- show hint text ------
   useEffect(() => {
     if (demoPhase === "analyzing") {
       setShowAnalyzingHint(true);
@@ -962,7 +1112,7 @@ export default function VoiceAgent({ patientName }: VoiceAgentProps) {
     }
   }, [demoPhase]);
 
-  // ------ Demo phase: "calling" — show incoming call, auto-accept after 3s ------
+  // ------ Demo phase: "calling" -- show incoming call, auto-accept after 3s ------
   useEffect(() => {
     if (demoPhase !== "calling") return;
 
@@ -992,7 +1142,7 @@ export default function VoiceAgent({ patientName }: VoiceAgentProps) {
     const tAutoAccept = setTimeout(() => {
       setPhonePhase("call");
       setPhaseActive();
-      addLog("voice", "Call connected — simulated conversation starting");
+      addLog("voice", "Call connected \u2014 simulated conversation starting");
       runSimulatedConversation(isProactive);
     }, 3000);
 
@@ -1027,6 +1177,11 @@ export default function VoiceAgent({ patientName }: VoiceAgentProps) {
     }
   }, [demoPhase]);
 
+  // ------ Reset threadShownRef on remount (new day) ------
+  useEffect(() => {
+    threadShownRef.current = false;
+  }, [currentDay]);
+
   // ------ Cleanup on unmount ------
   useEffect(() => {
     return () => {
@@ -1056,6 +1211,12 @@ export default function VoiceAgent({ patientName }: VoiceAgentProps) {
       text: personalizeText(msg.text, selectedPatient.firstName),
     }));
   })();
+
+  // ------ Determine if texting view should show "no response" (Day 4, first thread) ------
+  const showNoResponseForTexting = !!(dayData?.isIncidentDay && !onSecondThread);
+
+  // ------ Determine if texting view should replay statically ------
+  const isTextReplay = threadShownRef.current && phonePhase === "texting";
 
   // ======================================================================
   // RENDER
@@ -1112,6 +1273,7 @@ export default function VoiceAgent({ patientName }: VoiceAgentProps) {
         <div style={{ position: "absolute", top: 0, left: 0, right: 0, zIndex: 50 }}>
           <TextNotification
             message={activeThread[0].text}
+            senderName={onSecondThread ? `${selectedPatient.firstName} ${selectedPatient.lastName}` : undefined}
             onDismiss={() => {
               setShowNotification(false);
               setPhonePhase("texting");
@@ -1125,15 +1287,34 @@ export default function VoiceAgent({ patientName }: VoiceAgentProps) {
       )}
 
       {/* ================================================================ */}
-      {/* IDLE STATE — Day 0, no data yet                                  */}
+      {/* IDLE STATE -- Day 0, no data yet                                 */}
       {/* ================================================================ */}
       {currentDay === 0 && phonePhase !== "ringing" && phonePhase !== "call" && phonePhase !== "ended" && (
-        <div className="flex flex-col h-full items-center justify-center">
-          <div className="w-12 h-12 rounded-2xl bg-gradient-to-br from-blue-500 to-indigo-600 flex items-center justify-center mb-3">
-            <span className="text-white font-bold text-sm">CC</span>
+        <div className="flex flex-col h-full items-center justify-center px-4">
+          <div className="w-14 h-14 rounded-2xl bg-gradient-to-br from-blue-500 to-indigo-600 flex items-center justify-center mb-3">
+            <span className="text-white font-bold text-base">CC</span>
           </div>
-          <h2 className="text-sm font-bold text-white mb-1">CareCompanion</h2>
-          <p className="text-[10px] text-slate-400 mb-4">Patient Health Monitor</p>
+          <h2 className="text-sm font-bold text-white mb-0.5">CareCompanion</h2>
+          <p className="text-[10px] text-slate-400 mb-3">Patient Health Monitor</p>
+
+          {/* Patient info */}
+          <div className="w-full max-w-[200px] rounded-xl bg-slate-800/60 border border-slate-700/50 px-3 py-2.5 mb-3">
+            <div className="text-[11px] font-bold text-white text-center mb-1">
+              {selectedPatient.firstName} {selectedPatient.lastName}
+            </div>
+            <div className="text-[9px] text-slate-400 text-center mb-1.5">
+              {selectedPatient.age}{selectedPatient.gender} &middot; BMI 34 &middot; T2D + Obesity + HTN
+            </div>
+            <div className="h-px bg-slate-700/50 mb-1.5" />
+            <div className="text-[9px] text-indigo-300 text-center font-medium">
+              Starting Wegovy 0.25mg &mdash; Week 1 Simulation
+            </div>
+          </div>
+
+          <p className="text-[8px] text-slate-500 mb-3 text-center">
+            Press Start Day 1 to begin the 7-day journey
+          </p>
+
           <div className="flex items-center gap-1 px-3 py-1.5 rounded-full bg-slate-800/60 border border-slate-700/40">
             <span className="w-2 h-2 rounded-full bg-emerald-400 animate-pulse" />
             <span className="text-[9px] text-slate-300">Ready to begin</span>
@@ -1142,17 +1323,19 @@ export default function VoiceAgent({ patientName }: VoiceAgentProps) {
       )}
 
       {/* ================================================================ */}
-      {/* TEXTING VIEW — animated text conversation                        */}
+      {/* TEXTING VIEW -- animated text conversation                       */}
       {/* ================================================================ */}
       {phonePhase === "texting" && activeThread.length > 0 && (
         <TextingView
           thread={activeThread}
           onComplete={handleTextingComplete}
+          showNoResponse={showNoResponseForTexting}
+          isReplay={isTextReplay}
         />
       )}
 
       {/* ================================================================ */}
-      {/* DAILY VITALS CARD — Days 1-7 (non-call states)                   */}
+      {/* DAILY VITALS CARD -- Days 1-7 (non-call states)                  */}
       {/* ================================================================ */}
       {dayData && (phonePhase === "app" || phonePhase === "alert") && currentDay >= 1 && (
         <DailyVitalsCard
@@ -1191,7 +1374,9 @@ export default function VoiceAgent({ patientName }: VoiceAgentProps) {
                 <path d="M22 16.92V19a2 2 0 0 1-2.18 2A19.79 19.79 0 0 1 3 4.18 2 2 0 0 1 5 2h2.09" />
               </svg>
             </div>
-            <span className="text-[8px] text-slate-400">Auto-connecting in 3s...</span>
+            <span className="text-[8px] text-slate-400">
+              Auto-connecting in <span className="text-emerald-400 font-bold text-[10px]">{countdown}</span>s...
+            </span>
           </div>
         </div>
       )}

@@ -39,6 +39,17 @@ function DemoPage() {
       .catch(console.error);
   }, []);
 
+  useEffect(() => {
+    const handleKeyDown = (e: KeyboardEvent) => {
+      if ((e.ctrlKey || e.metaKey) && e.key === 'd') {
+        e.preventDefault();
+        demo.toggleLogs();
+      }
+    };
+    window.addEventListener('keydown', handleKeyDown);
+    return () => window.removeEventListener('keydown', handleKeyDown);
+  }, [demo]);
+
   const selectedPatient = patients.find((p) => p.id === selectedPatientId);
 
   const handleRefresh = useCallback(() => {
@@ -79,9 +90,37 @@ function DemoPage() {
     // Non-call, non-incident days: show AI Monitoring during analyzing phase
     if (demoPhase === "analyzing" && currentDay !== 2 && currentDay !== 4) {
       return (
-        <div className="flex items-center gap-2 px-3 py-1.5 bg-indigo-500/10 border border-indigo-500/30 rounded-lg">
-          <div className="w-2 h-2 bg-indigo-400 rounded-full animate-pulse" />
-          <span className="text-indigo-400 text-xs font-medium">AI Monitoring...</span>
+        <div className="flex items-center gap-2">
+          <div className="flex items-center gap-2 px-3 py-1.5 bg-indigo-500/10 border border-indigo-500/30 rounded-lg">
+            <div className="w-2 h-2 bg-indigo-400 rounded-full animate-pulse" />
+            <span className="text-indigo-400 text-xs font-medium">AI Monitoring...</span>
+          </div>
+          <button
+            onClick={() => demo.completeAnalysisQuick()}
+            className="px-2 py-1 text-[10px] font-medium rounded bg-slate-800 text-slate-500 border border-slate-700 hover:text-slate-300 transition-all"
+          >
+            Skip
+          </button>
+        </div>
+      );
+    }
+
+    // Day 2/4: analyzing phase with skip button
+    if (demoPhase === "analyzing" && (currentDay === 2 || currentDay === 4)) {
+      return (
+        <div className="flex items-center gap-2">
+          <div className="flex items-center gap-2 px-3 py-1.5 bg-indigo-500/10 border border-indigo-500/30 rounded-lg">
+            <div className="w-2 h-2 bg-indigo-400 rounded-full animate-pulse" />
+            <span className="text-indigo-400 text-xs font-medium">
+              {currentDay === 2 ? "Text Sentiment Analysis..." : "Engagement Analysis..."}
+            </span>
+          </div>
+          <button
+            onClick={() => demo.completeAnalysisQuick()}
+            className="px-2 py-1 text-[10px] font-medium rounded bg-slate-800 text-slate-500 border border-slate-700 hover:text-slate-300 transition-all"
+          >
+            Skip
+          </button>
         </div>
       );
     }
@@ -221,21 +260,18 @@ function DemoPage() {
           {/* 7-day stepper button */}
           {renderStepperButton()}
 
-          {/* Developer Logs button */}
-          <button
-            onClick={() => demo.toggleLogs()}
-            className={`px-3 py-1.5 text-xs font-medium rounded-lg transition-all flex items-center gap-1.5 ${
-              demo.showLogs
-                ? "bg-indigo-500/20 text-indigo-300 border border-indigo-500/40"
-                : "bg-slate-800 text-slate-400 border border-slate-700 hover:text-slate-300"
-            }`}
-          >
-            <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
-              <polyline points="16,18 22,12 16,6" />
-              <polyline points="8,6 2,12 8,18" />
-            </svg>
-            Dev Logs
-          </button>
+          {/* Skip to Day 4 button */}
+          {demo.currentDay >= 1 && demo.currentDay < 4 && (
+            <button
+              onClick={() => demo.skipToDay(4)}
+              className="px-3 py-1.5 text-xs font-medium rounded-lg bg-slate-800 text-slate-400 border border-slate-700 hover:text-slate-300 hover:bg-slate-700 transition-all flex items-center gap-1.5"
+            >
+              <svg width="10" height="10" viewBox="0 0 24 24" fill="currentColor">
+                <path d="M5.5 5v14l7-7zM12.5 5v14l7-7z" />
+              </svg>
+              Skip to Day 4
+            </button>
+          )}
 
           {/* Script button */}
           <button

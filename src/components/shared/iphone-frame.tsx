@@ -48,8 +48,8 @@ export function IPhoneFrame({ children, label, labelColor, sublabel }: IPhoneFra
           {/* Screen */}
           <div className="relative rounded-[2rem] overflow-hidden bg-black w-[312px] h-[648px]">
             {/* Status bar */}
-            <div className="relative z-20 flex items-center justify-between px-6 pt-2 pb-0.5 bg-white">
-              <span className="text-[9px] font-semibold text-black">9:41</span>
+            <div className="relative z-20 flex items-center justify-between px-6 pt-2 pb-0.5 bg-slate-950">
+              <span className="text-[9px] font-semibold text-white">9:41</span>
               {/* Dynamic Island */}
               <div className="absolute left-1/2 -translate-x-1/2 top-1">
                 <div className="w-[84px] h-[22px] bg-black rounded-full flex items-center justify-center">
@@ -57,18 +57,18 @@ export function IPhoneFrame({ children, label, labelColor, sublabel }: IPhoneFra
                 </div>
               </div>
               <div className="flex items-center gap-0.5">
-                <svg width="11" height="8" viewBox="0 0 15 10" className="text-black">
+                <svg width="11" height="8" viewBox="0 0 15 10" className="text-white">
                   <rect x="0" y="7" width="2.5" height="3" fill="currentColor" rx="0.5" />
                   <rect x="3.5" y="5" width="2.5" height="5" fill="currentColor" rx="0.5" />
                   <rect x="7" y="3" width="2.5" height="7" fill="currentColor" rx="0.5" />
                   <rect x="10.5" y="0" width="2.5" height="10" fill="currentColor" rx="0.5" />
                 </svg>
-                <svg width="9" height="8" viewBox="0 0 13 10" className="text-black">
+                <svg width="9" height="8" viewBox="0 0 13 10" className="text-white">
                   <path d="M6.5 8.5a1 1 0 110 2 1 1 0 010-2z" fill="currentColor" />
                   <path d="M3.5 7a4.5 4.5 0 016 0" stroke="currentColor" strokeWidth="1.2" fill="none" strokeLinecap="round" />
                   <path d="M1 4.5a7.5 7.5 0 0111 0" stroke="currentColor" strokeWidth="1.2" fill="none" strokeLinecap="round" />
                 </svg>
-                <svg width="18" height="8" viewBox="0 0 22 10" className="text-black">
+                <svg width="18" height="8" viewBox="0 0 22 10" className="text-white">
                   <rect x="0" y="1" width="18" height="8" rx="1.5" stroke="currentColor" strokeWidth="1" fill="none" />
                   <rect x="1.5" y="2.5" width="14" height="5" rx="0.5" fill="currentColor" />
                   <rect x="19" y="3" width="2" height="4" rx="0.5" fill="currentColor" opacity="0.4" />
@@ -78,7 +78,7 @@ export function IPhoneFrame({ children, label, labelColor, sublabel }: IPhoneFra
 
             {/* Scrollable content — hidden scrollbar for mobile feel */}
             <div
-              className="h-[calc(100%-28px)] overflow-y-auto bg-white"
+              className="h-[calc(100%-28px)] overflow-y-auto bg-slate-950"
               style={{
                 scrollbarWidth: "none",
                 msOverflowStyle: "none",

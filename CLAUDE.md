@@ -8,7 +8,7 @@ Voice-first AI GLP-1 patient engagement platform demo for Medicare seniors. Sing
 ## Tech Stack
 - **Next.js 14** (App Router) + Tailwind CSS + shadcn/ui
 - **Neon PostgreSQL** + Drizzle ORM (`src/lib/db/`)
-- **ElevenLabs Conversational AI** (voice calls via WebRTC, agent ID: `agent_8601kh042d5yf7atvdqa6nbfm9yb`)
+- **ElevenLabs TTS** (Rachel voice for AI, Dorothy voice for patient — via `/api/tts`)
 - **Claude API** (chat, optional)
 - Deployed on **Vercel** at `carecompanion.earlygod.ai`
 
@@ -40,14 +40,14 @@ How they interact:
 | 7 | 245.6 | None | 94% | Weekly summary, -1.6 lbs |
 
 ## Three Panels
-1. **Patient View** (iPhone frame) — `src/components/demo/voice-agent.tsx` — iOS text notifications, daily vitals card, Day 2 proactive call, Day 4 incident call, simulated conversation with TTS audio
+1. **Patient View** (iPhone frame) — `src/components/demo/voice-agent.tsx` — iOS text notifications, iMessage-style texting view (multi-turn), daily vitals card with device source labels, Day 2 proactive call, Day 4 incident call, simulated conversation with TTS audio
 2. **Clinical Intelligence** — `src/components/demo/live-triage.tsx` — GLP-1 patient cohort grid → AI thinking feed (Day 4) → transcript → completion + Day 7 Program ROI card
 3. **Provider EHR (Epic)** — `src/components/demo/live-billing.tsx` — Dynamic flowsheet (grows per day), medications (Wegovy/Metformin/Lisinopril), BPA alerts, AI summary, Day 7 clinical summary
 
 ## Key Files
 - `src/app/page.tsx` — Main layout, 3-panel split, header with 7-day stepper + day indicator pills
-- `src/components/demo/demo-context.tsx` — Central state: `currentDay`, `demoPhase`, `DAY_DATA`, `AI_THINKING_STEPS`, transcript, billing
-- `src/components/demo/voice-agent.tsx` — iOS text notifications + daily vitals card + simulated voice calls (Day 2 check-in, Day 4 incident) with TTS audio
+- `src/components/demo/demo-context.tsx` — Central state: `currentDay`, `demoPhase`, `DAY_DATA` (with `textThread` arrays), `AI_THINKING_STEPS`, transcript, billing
+- `src/components/demo/voice-agent.tsx` — iOS text notifications + TextingView (animated iMessage-style) + daily vitals card (device source labels) + simulated voice calls (Day 2 check-in, Day 4 incident) with TTS audio
 - `src/components/demo/live-triage.tsx` — GLP-1 patient cohort grid + AI reasoning feed + documenting/complete views
 - `src/components/demo/live-billing.tsx` — Epic EHR: dynamic flowsheet, medications, problems, BPA, AI summary, Day 7 weekly summary
 - `src/components/demo/script-guide.tsx` — Conversation Preview overlay (dynamic Day 2/Day 4 content, no mic needed)
@@ -62,8 +62,8 @@ How they interact:
 - `GET /api/medications?patientId=X` — Medications
 - `GET /api/billing` — Billing entries
 - `POST /api/chat` — Claude chat
-- `POST /api/tts` — ElevenLabs TTS
-- `GET /api/elevenlabs-signed-url` — Signed URL for ElevenLabs Conversational AI
+- `POST /api/tts` — ElevenLabs TTS (accepts `voice: "ai"|"patient"` — Rachel or Dorothy)
+- `GET /api/elevenlabs-signed-url` — Signed URL for ElevenLabs Conversational AI (legacy)
 
 ## Clinical Content
 - **Patient**: Margaret Chen, 72F, BMI 34, T2D + Obesity + HTN
@@ -90,15 +90,16 @@ How they interact:
 ## Common Patterns
 - All demo state flows through `useDemo()` hook from DemoProvider context
 - `currentDay` drives which day's data is shown; `demoPhase` drives the Day 4 AI incident flow
-- Day 2: `advanceDay()` schedules `demoPhase("calling")` after 5.5s delay (text notification plays first)
-- Day 4: `advanceDay()` sets `demoPhase("detecting")` → full AI incident flow
+- Day 2: notification → texting view → texting completes → `triggerCall()` → voice call → `completeProactiveCall()` (returns to idle)
+- Day 4: `advanceDay()` sets `demoPhase("detecting")` → full AI incident flow → voice call → `completeCall()` (documenting → complete)
 - Panel components read `currentDay` from context to render day-appropriate content
-- `DAY_DATA` is a static 7-element array with `isCallDay` flag — no API/DB needed
+- `DAY_DATA` is a static 7-element array with `textThread` (multi-turn text conversations) + `isCallDay` flag — no API/DB needed
 - VoiceAgent remounts per day via React `key={currentDay}` for clean state reset
-- iOS text notifications slide down from top on each day (except Day 4, empty phoneMessage)
+- Each day: notification → TextingView (animated iMessage bubbles) → vitals card (or voice call on Day 2/4)
+- Day 4 has empty `textThread` — no notification, no texting (Margaret is disengaged)
+- Vitals come from connected devices (Smart Scale, BP Cuff, Glucometer); nausea/hydration/meds are self-reported via text thread
 - Voice calls are fully simulated: async sequential script with audio fallback chain (ElevenLabs TTS → SpeechSynthesis → silent)
-- Day 2 proactive call uses `completeProactiveCall()` (returns to idle, no BPA/documenting)
-- Day 4 incident call uses `completeCall()` (triggers documenting → complete flow)
+- Two ElevenLabs voices: AI = Rachel (`21m00Tcm4TlvDq8ikWAM`), Patient = Dorothy (`ThT5KcBeYPX3keUQqHPh`)
 - Revenue math lives in Clinical Intelligence panel (ProgramROI card, Day 7 only), NOT in EHR
 - Dynamic flowsheet in Epic panel grows columns as days advance
 - CSS animations via `<style>` blocks with `@keyframes` (no animation library)

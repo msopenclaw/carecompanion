@@ -45,32 +45,81 @@ interface FlowsheetRowDef {
   unit: string;
   accessor: (d: typeof DAY_DATA[number]) => number;
   flagFn?: (val: number) => "amber" | "red" | undefined;
+  lowerIsBetter?: boolean;
 }
 
 const FLOWSHEET_ROWS: FlowsheetRowDef[] = [
-  { label: "Weight", unit: "lbs", accessor: (d) => d.weight },
-  { label: "BP Systolic", unit: "mmHg", accessor: (d) => d.bpSys },
-  { label: "BP Diastolic", unit: "mmHg", accessor: (d) => d.bpDia },
-  { label: "Glucose", unit: "mg/dL", accessor: (d) => d.glucose },
+  { label: "Weight", unit: "lbs", accessor: (d) => d.weight, lowerIsBetter: true },
+  { label: "BP Systolic", unit: "mmHg", accessor: (d) => d.bpSys, lowerIsBetter: true },
+  { label: "BP Diastolic", unit: "mmHg", accessor: (d) => d.bpDia, lowerIsBetter: true },
+  { label: "Glucose", unit: "mg/dL", accessor: (d) => d.glucose, lowerIsBetter: true },
   {
     label: "Nausea Grade",
     unit: "0-3",
     accessor: (d) => d.nauseaGrade,
     flagFn: (v) => (v >= 3 ? "red" : v >= 2 ? "amber" : undefined),
+    lowerIsBetter: true,
   },
   {
     label: "Fluid Intake",
     unit: "oz",
     accessor: (d) => d.fluidOz,
     flagFn: (v) => (v < 40 ? "red" : undefined),
+    lowerIsBetter: false,
   },
   {
     label: "Engagement",
     unit: "%",
     accessor: (d) => d.engagementScore,
     flagFn: (v) => (v < 50 ? "red" : undefined),
+    lowerIsBetter: false,
   },
 ];
+
+// ---------------------------------------------------------------------------
+// Mini sparkline for flowsheet trend column
+// ---------------------------------------------------------------------------
+
+function Sparkline({ values, color = "#3b82f6", width = 44, height = 16 }: {
+  values: number[];
+  color?: string;
+  width?: number;
+  height?: number;
+}) {
+  if (values.length < 2) return null;
+
+  const min = Math.min(...values);
+  const max = Math.max(...values);
+  const range = max - min || 1;
+  const padding = 2;
+  const innerHeight = height - padding * 2;
+  const innerWidth = width - padding * 2;
+
+  const points = values.map((v, i) => {
+    const x = padding + (i / (values.length - 1)) * innerWidth;
+    const y = padding + innerHeight - ((v - min) / range) * innerHeight;
+    return `${x},${y}`;
+  }).join(' ');
+
+  return (
+    <svg width={width} height={height} viewBox={`0 0 ${width} ${height}`}>
+      <polyline
+        points={points}
+        fill="none"
+        stroke={color}
+        strokeWidth="1.5"
+        strokeLinecap="round"
+        strokeLinejoin="round"
+      />
+      {/* End dot */}
+      {values.length > 0 && (() => {
+        const lastX = padding + ((values.length - 1) / (values.length - 1)) * innerWidth;
+        const lastY = padding + innerHeight - ((values[values.length - 1] - min) / range) * innerHeight;
+        return <circle cx={lastX} cy={lastY} r="2" fill={color} />;
+      })()}
+    </svg>
+  );
+}
 
 // ---------------------------------------------------------------------------
 // Sidebar Icon SVGs
@@ -1121,6 +1170,18 @@ export function LiveBilling() {
                               </th>
                             );
                           })}
+                          <th style={{
+                            textAlign: "center",
+                            padding: "6px 4px",
+                            fontSize: 10,
+                            fontWeight: 600,
+                            color: "#64748b",
+                            borderBottom: "1px solid #e2e8f0",
+                            borderLeft: "1px solid #e2e8f0",
+                            whiteSpace: "nowrap",
+                          }}>
+                            Trend
+                          </th>
                         </tr>
                       </thead>
                       <tbody>
@@ -1168,6 +1229,21 @@ export function LiveBilling() {
                                 </td>
                               );
                             })}
+                            <td style={{
+                              textAlign: "center",
+                              padding: "3px 4px",
+                              borderBottom: ri < FLOWSHEET_ROWS.length - 1 ? "1px solid #f1f5f9" : "none",
+                              borderLeft: "1px solid #e2e8f0",
+                            }}>
+                              {visibleDays.length >= 2 && (() => {
+                                const vals = visibleDays.map(d => row.accessor(d));
+                                const first = vals[0];
+                                const last = vals[vals.length - 1];
+                                const improving = row.lowerIsBetter ? last < first : last > first;
+                                const color = improving ? "#10b981" : last === first ? "#64748b" : "#ef4444";
+                                return <Sparkline values={vals} color={color} />;
+                              })()}
+                            </td>
                           </tr>
                         ))}
                       </tbody>

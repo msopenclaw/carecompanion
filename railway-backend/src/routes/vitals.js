@@ -57,15 +57,40 @@ router.get("/", async (req, res) => {
   }
 });
 
-// GET /api/vitals/latest
+// POST /api/vitals/log — single vital log (iOS client)
+router.post("/log", async (req, res) => {
+  try {
+    const { vitalType, value, unit, source } = req.body;
+    if (!vitalType || value === undefined || !unit) {
+      return res.status(400).json({ error: "vitalType, value, and unit required" });
+    }
+
+    const [inserted] = await db.insert(vitals).values({
+      patientId: req.user.userId,
+      vitalType,
+      value,
+      unit,
+      source: source || "manual",
+      recordedAt: new Date(),
+    }).returning();
+
+    res.status(201).json(inserted);
+  } catch (err) {
+    console.error("Vital log error:", err);
+    res.status(500).json({ error: "Failed to log vital" });
+  }
+});
+
+// GET /api/vitals/latest — returns array of latest readings
 router.get("/latest", async (req, res) => {
   try {
     const vitalTypes = [
       "weight", "blood_pressure_systolic", "blood_pressure_diastolic",
       "heart_rate", "blood_glucose", "oxygen_saturation", "temperature",
+      "hydration",
     ];
 
-    const latest = {};
+    const results = [];
     for (const type of vitalTypes) {
       const [row] = await db.select().from(vitals)
         .where(and(
@@ -74,10 +99,10 @@ router.get("/latest", async (req, res) => {
         ))
         .orderBy(desc(vitals.recordedAt))
         .limit(1);
-      if (row) latest[type] = row;
+      if (row) results.push(row);
     }
 
-    res.json(latest);
+    res.json(results);
   } catch (err) {
     console.error("Latest vitals error:", err);
     res.status(500).json({ error: "Failed to fetch latest vitals" });

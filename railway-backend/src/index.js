@@ -126,7 +126,29 @@ cron.schedule(`0 */${cronInterval} * * *`, async () => {
 // Start Server
 // ---------------------------------------------------------------------------
 
+// ---------------------------------------------------------------------------
+// Startup Migrations
+// ---------------------------------------------------------------------------
+
+async function runStartupMigrations() {
+  try {
+    const { neon } = require("@neondatabase/serverless");
+    const sql = neon(process.env.DATABASE_URL);
+    await sql`ALTER TYPE vital_type ADD VALUE IF NOT EXISTS 'hydration'`;
+    console.log("[MIGRATION] vital_type enum updated");
+  } catch (err) {
+    // IF NOT EXISTS not supported on older PG, enum value may already exist
+    if (err.message && err.message.includes("already exists")) {
+      console.log("[MIGRATION] vital_type hydration already exists");
+    } else {
+      console.error("[MIGRATION] Warning:", err.message);
+    }
+  }
+}
+
 const PORT = process.env.PORT || 3000;
-server.listen(PORT, () => {
-  console.log(`CareCompanion backend running on port ${PORT}`);
+runStartupMigrations().then(() => {
+  server.listen(PORT, () => {
+    console.log(`CareCompanion backend running on port ${PORT}`);
+  });
 });

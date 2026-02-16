@@ -43,8 +43,15 @@ async function runScheduledActions() {
         content: body,
       });
 
-      // Send push notification
-      await sendPush(action.userId, { title, body });
+      // Send push notification with routing data
+      await sendPush(action.userId, {
+        title,
+        body,
+        data: {
+          route: messageType === "call_request" ? "call" : "messages",
+          messageType,
+        },
+      });
 
       // Update lastTriggeredAt
       await db.update(scheduledActions)
@@ -88,6 +95,14 @@ function isDue(action, now) {
       lastLocal.getDate() === localNow.getDate()
     ) {
       return false; // Already fired today
+    }
+
+    // Check interval_days (for every_2_days, every_3_days, etc.)
+    const intervalDays = action.intervalDays || 1;
+    if (intervalDays > 1) {
+      const msSinceLast = Date.now() - new Date(action.lastTriggeredAt).getTime();
+      const daysSinceLast = msSinceLast / (24 * 60 * 60 * 1000);
+      if (daysSinceLast < intervalDays) return false;
     }
   }
 

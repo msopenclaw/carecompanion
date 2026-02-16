@@ -85,6 +85,14 @@ GUIDELINES:
 - Reference their specific medication, vitals, and side effects when relevant
 - Address the patient by first name (${patientName}) naturally, not every message`;
 
+    // Save patient message before generating response
+    await db.insert(messages).values({
+      userId: req.user.userId,
+      sender: "patient",
+      messageType: "text",
+      content: message,
+    });
+
     const genAI = new GoogleGenerativeAI(GEMINI_API_KEY);
     const model = genAI.getGenerativeModel({ model: "gemini-3-flash-preview" });
 

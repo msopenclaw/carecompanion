@@ -294,6 +294,7 @@ const scheduledActions = pgTable("scheduled_actions", {
   recurrenceDay: varchar("recurrence_day", { length: 10 }),
   timezone: varchar("timezone", { length: 50 }).default("America/New_York").notNull(),
   isActive: boolean("is_active").default(true).notNull(),
+  intervalDays: integer("interval_days").default(1).notNull(),
   lastTriggeredAt: timestamp("last_triggered_at", { withTimezone: true }),
   createdVia: varchar("created_via", { length: 20 }).default("voice").notNull(),
   createdAt: timestamp("created_at", { withTimezone: true }).defaultNow().notNull(),

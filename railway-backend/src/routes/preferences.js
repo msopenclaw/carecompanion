@@ -2,6 +2,7 @@ const express = require("express");
 const { eq } = require("drizzle-orm");
 const { db } = require("../db");
 const { userPreferences } = require("../db/schema");
+const { syncScheduledActions } = require("../services/preferenceScheduler");
 
 const router = express.Router();
 
@@ -35,6 +36,14 @@ router.post("/", async (req, res) => {
         userId: req.user.userId,
         ...data,
       }).returning();
+    }
+
+    // Sync scheduled actions based on new preferences
+    try {
+      await syncScheduledActions(req.user.userId, result);
+    } catch (syncErr) {
+      console.error("Scheduled actions sync error:", syncErr);
+      // Don't fail the preference save if sync fails
     }
 
     res.json(result);

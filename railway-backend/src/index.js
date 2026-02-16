@@ -162,6 +162,7 @@ async function runStartupMigrations() {
       created_via VARCHAR(20) NOT NULL DEFAULT 'voice',
       created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
     )`;
+    await sql`ALTER TABLE scheduled_actions ADD COLUMN IF NOT EXISTS interval_days INTEGER NOT NULL DEFAULT 1`;
     console.log("[MIGRATION] scheduled_actions table + vital_type enum updated");
   } catch (err) {
     // IF NOT EXISTS not supported on older PG, enum value may already exist

@@ -245,10 +245,15 @@ Respond in valid JSON with this exact format:
       content: decision.message,
       triggeredBy: actionRow.id,
     });
-    // Send push notification
+    // Send push notification with routing data
+    const msgType = decision.urgency === "high" || decision.urgency === "critical" ? "alert" : "check_in";
     await sendPush(userId, {
       title: coordinator?.name || "Care Coordinator",
       body: decision.message.length > 100 ? decision.message.substring(0, 97) + "..." : decision.message,
+      data: {
+        route: decision.action === "call" ? "call" : "messages",
+        messageType: msgType,
+      },
     });
   }
 

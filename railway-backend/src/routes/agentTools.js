@@ -121,12 +121,13 @@ router.post("/update-preference", async (req, res) => {
 
     if (existing) {
       await db.update(userPreferences)
-        .set({ [preference]: value, updatedAt: new Date() })
+        .set({ [preference]: value, setVia: existing.setVia || "voice_call", updatedAt: new Date() })
         .where(eq(userPreferences.userId, user_id));
     } else {
       await db.insert(userPreferences).values({
         userId: user_id,
         [preference]: value,
+        setVia: "voice_call",
       });
     }
 

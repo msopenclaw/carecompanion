@@ -142,8 +142,14 @@ async function executeTool(name, args, userId, ctx) {
         .where(eq(userPreferences.userId, userId));
       if (existing) {
         await db.update(userPreferences)
-          .set({ [args.preference]: val, updatedAt: new Date() })
+          .set({ [args.preference]: val, setVia: existing.setVia || "voice_call", updatedAt: new Date() })
           .where(eq(userPreferences.userId, userId));
+      } else {
+        await db.insert(userPreferences).values({
+          userId,
+          [args.preference]: val,
+          setVia: "voice_call",
+        });
       }
       return { success: true, message: `Updated ${args.preference} to ${val}` };
     }

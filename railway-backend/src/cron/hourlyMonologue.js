@@ -6,6 +6,7 @@ const {
   messages, aiActions, engagementConfig, userCoordinator, careCoordinators,
   userPreferences,
 } = require("../db/schema");
+const { sendPush } = require("../services/pushService");
 
 /**
  * Hourly Monologue — The Autonomous AI Brain
@@ -244,7 +245,11 @@ Respond in valid JSON with this exact format:
       content: decision.message,
       triggeredBy: actionRow.id,
     });
-    // TODO: Send push notification via APNs
+    // Send push notification
+    await sendPush(userId, {
+      title: coordinator?.name || "Care Coordinator",
+      body: decision.message.length > 100 ? decision.message.substring(0, 97) + "..." : decision.message,
+    });
   }
 
   return {

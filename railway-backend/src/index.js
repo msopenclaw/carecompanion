@@ -25,7 +25,9 @@ const preferencesRoutes = require("./routes/preferences");
 const day1Routes = require("./routes/day1");
 const voiceHandler = require("./routes/voice");
 const voiceApiRoutes = require("./routes/voiceApi");
+const agentToolsRoutes = require("./routes/agentTools");
 const { runHourlyMonologue } = require("./cron/hourlyMonologue");
+const { runScheduledActions } = require("./cron/scheduledActions");
 
 const app = express();
 app.set("trust proxy", 1);
@@ -77,6 +79,7 @@ app.use("/api/consents", authMiddleware, consentsRoutes);
 app.use("/api/preferences", authMiddleware, preferencesRoutes);
 app.use("/api/day1", authMiddleware, day1Routes);
 app.use("/api/voice", authMiddleware, voiceApiRoutes);
+app.use("/api/agent-tools", agentToolsRoutes);
 
 // ---------------------------------------------------------------------------
 // Admin Routes (JWT + admin role required)
@@ -122,6 +125,15 @@ cron.schedule(`0 */${cronInterval} * * *`, async () => {
   }
 });
 
+// Scheduled actions — every minute
+cron.schedule("* * * * *", async () => {
+  try {
+    await runScheduledActions();
+  } catch (err) {
+    console.error("[CRON] Scheduled actions failed:", err);
+  }
+});
+
 // ---------------------------------------------------------------------------
 // Start Server
 // ---------------------------------------------------------------------------
@@ -136,7 +148,21 @@ async function runStartupMigrations() {
     const sql = neon(process.env.DATABASE_URL);
     await sql`ALTER TYPE vital_type ADD VALUE IF NOT EXISTS 'hydration'`;
     await sql`ALTER TYPE vital_type ADD VALUE IF NOT EXISTS 'steps'`;
-    console.log("[MIGRATION] vital_type enum updated");
+    await sql`CREATE TABLE IF NOT EXISTS scheduled_actions (
+      id UUID DEFAULT gen_random_uuid() PRIMARY KEY,
+      user_id UUID NOT NULL REFERENCES users(id),
+      action_type VARCHAR(30) NOT NULL,
+      label VARCHAR(200),
+      scheduled_time VARCHAR(5) NOT NULL,
+      recurrence VARCHAR(20) NOT NULL DEFAULT 'daily',
+      recurrence_day VARCHAR(10),
+      timezone VARCHAR(50) NOT NULL DEFAULT 'America/New_York',
+      is_active BOOLEAN NOT NULL DEFAULT true,
+      last_triggered_at TIMESTAMPTZ,
+      created_via VARCHAR(20) NOT NULL DEFAULT 'voice',
+      created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+    )`;
+    console.log("[MIGRATION] scheduled_actions table + vital_type enum updated");
   } catch (err) {
     // IF NOT EXISTS not supported on older PG, enum value may already exist
     if (err.message && err.message.includes("already exists")) {

@@ -284,9 +284,24 @@ const userPreferences = pgTable("user_preferences", {
   updatedAt: timestamp("updated_at", { withTimezone: true }).defaultNow().notNull(),
 });
 
+const scheduledActions = pgTable("scheduled_actions", {
+  id: uuid("id").defaultRandom().primaryKey(),
+  userId: uuid("user_id").references(() => users.id).notNull(),
+  actionType: varchar("action_type", { length: 30 }).notNull(),
+  label: varchar("label", { length: 200 }),
+  scheduledTime: varchar("scheduled_time", { length: 5 }).notNull(),
+  recurrence: varchar("recurrence", { length: 20 }).default("daily").notNull(),
+  recurrenceDay: varchar("recurrence_day", { length: 10 }),
+  timezone: varchar("timezone", { length: 50 }).default("America/New_York").notNull(),
+  isActive: boolean("is_active").default(true).notNull(),
+  lastTriggeredAt: timestamp("last_triggered_at", { withTimezone: true }),
+  createdVia: varchar("created_via", { length: 20 }).default("voice").notNull(),
+  createdAt: timestamp("created_at", { withTimezone: true }).defaultNow().notNull(),
+});
+
 module.exports = {
   providers, patients, vitals, medications, medicationLogs, alerts,
   users, userProfiles, careCoordinators, userCoordinator,
   aiActions, messages, pushTokens, voiceSessions, escalations, consents, engagementConfig,
-  userPreferences,
+  userPreferences, scheduledActions,
 };

@@ -19,10 +19,23 @@ router.get("/signed-url", async (req, res) => {
     }
 
     // Get conversation token (JWT) from ElevenLabs — required by the Swift SDK
+    // Pass user_id as dynamic variable so agent tools know which user is calling
     const response = await fetch(
-      `https://api.elevenlabs.io/v1/convai/conversation/token?agent_id=${ELEVENLABS_AGENT_ID}`,
+      "https://api.elevenlabs.io/v1/convai/conversation/token",
       {
-        headers: { "xi-api-key": ELEVENLABS_API_KEY },
+        method: "POST",
+        headers: {
+          "xi-api-key": ELEVENLABS_API_KEY,
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({
+          agent_id: ELEVENLABS_AGENT_ID,
+          conversation_config_override: {
+            dynamic_variables: {
+              user_id: req.user.userId,
+            },
+          },
+        }),
       },
     );
 

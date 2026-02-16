@@ -135,6 +135,7 @@ async function runStartupMigrations() {
     const { neon } = require("@neondatabase/serverless");
     const sql = neon(process.env.DATABASE_URL);
     await sql`ALTER TYPE vital_type ADD VALUE IF NOT EXISTS 'hydration'`;
+    await sql`ALTER TYPE vital_type ADD VALUE IF NOT EXISTS 'steps'`;
     console.log("[MIGRATION] vital_type enum updated");
   } catch (err) {
     // IF NOT EXISTS not supported on older PG, enum value may already exist

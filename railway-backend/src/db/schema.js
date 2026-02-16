@@ -8,7 +8,7 @@ const {
 
 const vitalTypeEnum = pgEnum("vital_type", [
   "blood_pressure_systolic", "blood_pressure_diastolic", "heart_rate",
-  "blood_glucose", "weight", "oxygen_saturation", "temperature", "hydration",
+  "blood_glucose", "weight", "oxygen_saturation", "temperature", "hydration", "steps",
 ]);
 
 const medStatusEnum = pgEnum("med_status", ["taken", "missed", "late", "skipped"]);

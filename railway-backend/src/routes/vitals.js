@@ -87,7 +87,7 @@ router.get("/latest", async (req, res) => {
     const vitalTypes = [
       "weight", "blood_pressure_systolic", "blood_pressure_diastolic",
       "heart_rate", "blood_glucose", "oxygen_saturation", "temperature",
-      "hydration",
+      "hydration", "steps",
     ];
 
     const results = [];

@@ -3,7 +3,7 @@ const bcrypt = require("bcryptjs");
 const jwt = require("jsonwebtoken");
 const { eq } = require("drizzle-orm");
 const { db } = require("../db");
-const { users, userProfiles } = require("../db/schema");
+const { users, userProfiles, patients } = require("../db/schema");
 
 const router = express.Router();
 const JWT_SECRET = process.env.JWT_SECRET || "dev-secret-change-me";
@@ -67,6 +67,19 @@ router.post("/register", async (req, res) => {
       phone: phone || null,
       ageBracket,
     });
+
+    // Create patients row (needed for FK on vitals, medications, messages)
+    try {
+      await db.insert(patients).values({
+        id: newUser.id,
+        firstName,
+        lastName,
+        dateOfBirth,
+        gender: gender || "prefer_not_to_say",
+      });
+    } catch (e) {
+      console.log("[Auth] patients row may already exist:", e.message);
+    }
 
     const tokens = generateTokens(newUser);
 
@@ -158,6 +171,19 @@ router.post("/apple", async (req, res) => {
         lastName,
         ageBracket: "25-39",
       });
+
+      // Create patients row (needed for FK on vitals, medications, messages)
+      try {
+        await db.insert(patients).values({
+          id: user.id,
+          firstName,
+          lastName,
+          dateOfBirth: "2000-01-01",
+          gender: "prefer_not_to_say",
+        });
+      } catch (e) {
+        console.log("[Auth] patients row may already exist:", e.message);
+      }
     }
 
     const tokens = generateTokens(user);

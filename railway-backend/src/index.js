@@ -166,7 +166,17 @@ async function runStartupMigrations() {
     await sql`ALTER TABLE user_profiles ADD COLUMN IF NOT EXISTS goals JSONB DEFAULT '[]'`;
     await sql`ALTER TYPE vital_type ADD VALUE IF NOT EXISTS 'sleep'`;
     await sql`ALTER TABLE medications ADD COLUMN IF NOT EXISTS is_glp1 BOOLEAN NOT NULL DEFAULT false`;
-    console.log("[MIGRATION] scheduled_actions table + vital_type enum + goals + is_glp1 updated");
+
+    // Backfill: create patients rows for users who don't have one (needed for FK constraints)
+    await sql`
+      INSERT INTO patients (id, first_name, last_name, date_of_birth, gender)
+      SELECT u.id, COALESCE(p.first_name, 'User'), COALESCE(p.last_name, ''), COALESCE(p.date_of_birth, '2000-01-01'), 'prefer_not_to_say'
+      FROM users u
+      LEFT JOIN user_profiles p ON p.user_id = u.id
+      WHERE u.id NOT IN (SELECT id FROM patients)
+    `;
+
+    console.log("[MIGRATION] scheduled_actions table + vital_type enum + goals + is_glp1 + patients backfill updated");
   } catch (err) {
     // IF NOT EXISTS not supported on older PG, enum value may already exist
     if (err.message && err.message.includes("already exists")) {

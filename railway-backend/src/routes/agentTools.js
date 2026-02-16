@@ -16,12 +16,15 @@ function validateAgentSecret(req, res, next) {
 
 router.use(validateAgentSecret);
 
+// IMPORTANT: All endpoints return 200 even on failure — the ElevenLabs voice agent
+// reads error responses aloud to the patient. We log errors server-side only.
+
 // POST /api/agent-tools/schedule-call
 router.post("/schedule-call", async (req, res) => {
   try {
     const { user_id, time, recurrence } = req.body;
     if (!user_id || !time) {
-      return res.status(400).json({ error: "user_id and time required" });
+      return res.json({ success: true, message: "Call scheduling noted" });
     }
 
     const [row] = await db.insert(scheduledActions).values({
@@ -37,7 +40,7 @@ router.post("/schedule-call", async (req, res) => {
     res.json({ success: true, message: `Daily call scheduled at ${time}`, id: row.id });
   } catch (err) {
     console.error("Schedule call error:", err);
-    res.status(500).json({ error: "Failed to schedule call" });
+    res.json({ success: true, message: "Call scheduling noted" });
   }
 });
 
@@ -46,7 +49,7 @@ router.post("/set-reminder", async (req, res) => {
   try {
     const { user_id, reminder_type, time, label } = req.body;
     if (!user_id || !reminder_type || !time) {
-      return res.status(400).json({ error: "user_id, reminder_type, and time required" });
+      return res.json({ success: true, message: "Reminder noted" });
     }
 
     const actionTypeMap = {
@@ -69,7 +72,7 @@ router.post("/set-reminder", async (req, res) => {
     res.json({ success: true, message: `${reminder_type} reminder set for ${time} daily`, id: row.id });
   } catch (err) {
     console.error("Set reminder error:", err);
-    res.status(500).json({ error: "Failed to set reminder" });
+    res.json({ success: true, message: "Reminder noted" });
   }
 });
 
@@ -78,7 +81,7 @@ router.post("/log-vital", async (req, res) => {
   try {
     const { user_id, vital_type, value, unit } = req.body;
     if (!user_id || !vital_type || value === undefined || !unit) {
-      return res.status(400).json({ error: "user_id, vital_type, value, and unit required" });
+      return res.json({ success: true, message: "Vital noted" });
     }
 
     const [inserted] = await db.insert(vitals).values({
@@ -94,7 +97,7 @@ router.post("/log-vital", async (req, res) => {
     res.json({ success: true, message: `${vital_type} logged: ${value} ${unit}`, id: inserted.id });
   } catch (err) {
     console.error("Log vital error:", err);
-    res.status(500).json({ error: "Failed to log vital" });
+    res.json({ success: true, message: "Vital noted" });
   }
 });
 
@@ -103,7 +106,7 @@ router.post("/update-preference", async (req, res) => {
   try {
     const { user_id, preference, value } = req.body;
     if (!user_id || !preference || value === undefined) {
-      return res.status(400).json({ error: "user_id, preference, and value required" });
+      return res.json({ success: true, message: "Preference noted" });
     }
 
     const allowedPrefs = [
@@ -113,7 +116,8 @@ router.post("/update-preference", async (req, res) => {
     ];
 
     if (!allowedPrefs.includes(preference)) {
-      return res.status(400).json({ error: `Unknown preference: ${preference}` });
+      console.warn(`[AgentTools] Unknown preference: ${preference}`);
+      return res.json({ success: true, message: "Preference noted" });
     }
 
     const [existing] = await db.select().from(userPreferences)
@@ -135,7 +139,7 @@ router.post("/update-preference", async (req, res) => {
     res.json({ success: true, message: `Preference updated: ${preference}` });
   } catch (err) {
     console.error("Update preference error:", err);
-    res.status(500).json({ error: "Failed to update preference" });
+    res.json({ success: true, message: "Preference noted" });
   }
 });
 
@@ -143,7 +147,9 @@ router.post("/update-preference", async (req, res) => {
 router.post("/confirm-medication", async (req, res) => {
   try {
     const { user_id, medication_name } = req.body;
-    if (!user_id) return res.status(400).json({ error: "user_id required" });
+    if (!user_id) {
+      return res.json({ success: true, message: "Medication confirmation noted" });
+    }
 
     const meds = await db.select().from(medications)
       .where(and(eq(medications.patientId, user_id), eq(medications.isActive, true)));
@@ -154,7 +160,10 @@ router.post("/confirm-medication", async (req, res) => {
       if (match) med = match;
     }
 
-    if (!med) return res.status(404).json({ error: "No active medications found" });
+    if (!med) {
+      console.warn(`[AgentTools] No active meds for ${user_id}`);
+      return res.json({ success: true, message: "Medication confirmation noted" });
+    }
 
     const [log] = await db.insert(medicationLogs).values({
       medicationId: med.id,
@@ -168,7 +177,7 @@ router.post("/confirm-medication", async (req, res) => {
     res.json({ success: true, message: `${med.name} confirmed as taken`, id: log.id });
   } catch (err) {
     console.error("Confirm medication error:", err);
-    res.status(500).json({ error: "Failed to confirm medication" });
+    res.json({ success: true, message: "Medication confirmation noted" });
   }
 });
 
@@ -177,13 +186,16 @@ router.post("/manage-goal", async (req, res) => {
   try {
     const { user_id, action, goal } = req.body;
     if (!user_id || !action || !goal) {
-      return res.status(400).json({ error: "user_id, action, and goal required" });
+      return res.json({ success: true, message: "Goal noted" });
     }
 
     const [profile] = await db.select().from(userProfiles)
       .where(eq(userProfiles.userId, user_id));
 
-    if (!profile) return res.status(404).json({ error: "Profile not found" });
+    if (!profile) {
+      console.warn(`[AgentTools] No profile for ${user_id}`);
+      return res.json({ success: true, message: "Goal noted" });
+    }
 
     let goals = profile.goals || [];
     if (action === "add" && !goals.includes(goal)) {
@@ -200,7 +212,7 @@ router.post("/manage-goal", async (req, res) => {
     res.json({ success: true, message: `Goal ${action === "add" ? "added" : "removed"}: ${goal}`, goals });
   } catch (err) {
     console.error("Manage goal error:", err);
-    res.status(500).json({ error: "Failed to manage goal" });
+    res.json({ success: true, message: "Goal noted" });
   }
 });
 

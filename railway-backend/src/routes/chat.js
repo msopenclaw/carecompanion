@@ -278,6 +278,7 @@ router.post("/", async (req, res) => {
   try {
     const { message } = req.body;
     if (!message) return res.status(400).json({ error: "message required" });
+    const silent = req.body.silent === true; // silent = don't save messages to DB
 
     const GEMINI_API_KEY = process.env.GEMINI_API_KEY;
     if (!GEMINI_API_KEY) return res.status(503).json({ error: "AI service unavailable" });
@@ -286,13 +287,15 @@ router.post("/", async (req, res) => {
     const ctx = await getUserContext(req.user.userId);
     const systemPrompt = buildSystemPrompt(ctx);
 
-    // Save patient message
-    await db.insert(messages).values({
-      userId: req.user.userId,
-      sender: "patient",
-      messageType: "text",
-      content: message,
-    });
+    // Save patient message (skip if silent/internal)
+    if (!silent) {
+      await db.insert(messages).values({
+        userId: req.user.userId,
+        sender: "patient",
+        messageType: "text",
+        content: message,
+      });
+    }
 
     const genAI = new GoogleGenerativeAI(GEMINI_API_KEY);
     const model = genAI.getGenerativeModel({
@@ -352,13 +355,15 @@ router.post("/", async (req, res) => {
         res.write(`data: ${JSON.stringify({ text: chunk })}\n\n`);
       }
 
-      // Save AI response
-      await db.insert(messages).values({
-        userId: req.user.userId,
-        sender: "ai",
-        messageType: "text",
-        content: finalText,
-      });
+      // Save AI response (skip if silent/internal)
+      if (!silent) {
+        await db.insert(messages).values({
+          userId: req.user.userId,
+          sender: "ai",
+          messageType: "text",
+          content: finalText,
+        });
+      }
     }
 
     res.write("data: [DONE]\n\n");

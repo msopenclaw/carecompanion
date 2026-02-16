@@ -5,21 +5,49 @@ const { careCoordinators, userCoordinator } = require("../db/schema");
 
 const router = express.Router();
 
+// Map coordinator names to env var agent IDs
+const AGENT_ID_MAP = {
+  sarah: () => process.env.ELEVENLABS_AGENT_ID_SARAH,
+  michael: () => process.env.ELEVENLABS_AGENT_ID_MICHAEL,
+  hope: () => process.env.ELEVENLABS_AGENT_ID_HOPE,
+  james: () => process.env.ELEVENLABS_AGENT_ID_JAMES,
+};
+
 // GET /api/voice/signed-url — get ElevenLabs conversation token (JWT for LiveKit)
 router.get("/signed-url", async (req, res) => {
   try {
     const ELEVENLABS_API_KEY = process.env.ELEVENLABS_API_KEY;
-    const ELEVENLABS_AGENT_ID = process.env.ELEVENLABS_AGENT_ID;
 
     if (!ELEVENLABS_API_KEY) {
       return res.status(503).json({ error: "Voice service unavailable (no API key)" });
     }
-    if (!ELEVENLABS_AGENT_ID) {
+
+    // Look up the user's assigned coordinator to pick the right agent
+    let agentId = process.env.ELEVENLABS_AGENT_ID; // fallback
+    let coordinatorName = "Sarah";
+
+    const [uc] = await db.select().from(userCoordinator)
+      .where(eq(userCoordinator.userId, req.user.userId));
+
+    if (uc) {
+      const [coord] = await db.select().from(careCoordinators)
+        .where(eq(careCoordinators.id, uc.coordinatorId));
+      if (coord) {
+        coordinatorName = coord.name;
+        const lookup = AGENT_ID_MAP[coord.name.toLowerCase()];
+        if (lookup) {
+          agentId = lookup() || agentId;
+        }
+      }
+    }
+
+    if (!agentId) {
       return res.status(503).json({ error: "Voice service unavailable (no agent configured)" });
     }
 
-    // Get conversation token (JWT) from ElevenLabs — required by the Swift SDK
-    // Pass user_id as dynamic variable so agent tools know which user is calling
+    console.log(`[Voice] User ${req.user.userId} → coordinator ${coordinatorName} → agent ${agentId}`);
+
+    // Get conversation token (JWT) from ElevenLabs
     const response = await fetch(
       "https://api.elevenlabs.io/v1/convai/conversation/token",
       {
@@ -29,7 +57,7 @@ router.get("/signed-url", async (req, res) => {
           "Content-Type": "application/json",
         },
         body: JSON.stringify({
-          agent_id: ELEVENLABS_AGENT_ID,
+          agent_id: agentId,
           conversation_config_override: {
             dynamic_variables: {
               user_id: req.user.userId,
@@ -46,7 +74,6 @@ router.get("/signed-url", async (req, res) => {
     }
 
     const data = await response.json();
-    // SDK expects this as "signedUrl" but it's actually a JWT token
     res.json({ signedUrl: data.token });
   } catch (err) {
     console.error("Voice token error:", err);

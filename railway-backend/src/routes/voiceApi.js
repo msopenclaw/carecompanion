@@ -47,23 +47,11 @@ router.get("/signed-url", async (req, res) => {
 
     console.log(`[Voice] User ${req.user.userId} → coordinator ${coordinatorName} → agent ${agentId}`);
 
-    // Get conversation token (JWT) from ElevenLabs
+    // Get conversation token (JWT) from ElevenLabs — GET request with agent_id
     const response = await fetch(
-      "https://api.elevenlabs.io/v1/convai/conversation/token",
+      `https://api.elevenlabs.io/v1/convai/conversation/token?agent_id=${agentId}`,
       {
-        method: "POST",
-        headers: {
-          "xi-api-key": ELEVENLABS_API_KEY,
-          "Content-Type": "application/json",
-        },
-        body: JSON.stringify({
-          agent_id: agentId,
-          conversation_config_override: {
-            dynamic_variables: {
-              user_id: req.user.userId,
-            },
-          },
-        }),
+        headers: { "xi-api-key": ELEVENLABS_API_KEY },
       },
     );
 
@@ -74,7 +62,8 @@ router.get("/signed-url", async (req, res) => {
     }
 
     const data = await response.json();
-    res.json({ signedUrl: data.token });
+    // Return token + userId so iOS can pass user_id as override to the SDK
+    res.json({ signedUrl: data.token, userId: req.user.userId });
   } catch (err) {
     console.error("Voice token error:", err);
     res.status(500).json({ error: "Voice service error" });

@@ -167,6 +167,28 @@ async function runStartupMigrations() {
     await sql`ALTER TYPE vital_type ADD VALUE IF NOT EXISTS 'sleep'`;
     await sql`ALTER TABLE medications ADD COLUMN IF NOT EXISTS is_glp1 BOOLEAN NOT NULL DEFAULT false`;
 
+    // Create user_preferences table if it doesn't exist
+    await sql`CREATE TABLE IF NOT EXISTS user_preferences (
+      id UUID DEFAULT gen_random_uuid() PRIMARY KEY,
+      user_id UUID NOT NULL UNIQUE REFERENCES users(id),
+      checkin_frequency VARCHAR(20) NOT NULL DEFAULT 'once_daily',
+      checkin_time_preference VARCHAR(20) NOT NULL DEFAULT 'morning',
+      med_reminder_enabled BOOLEAN NOT NULL DEFAULT true,
+      med_reminder_prep_night_before BOOLEAN NOT NULL DEFAULT true,
+      hydration_nudges_enabled BOOLEAN NOT NULL DEFAULT true,
+      hydration_nudges_per_day INTEGER NOT NULL DEFAULT 3,
+      weighin_prompt VARCHAR(20) NOT NULL DEFAULT 'daily_morning',
+      exercise_nudges_enabled BOOLEAN NOT NULL DEFAULT false,
+      preferred_channel VARCHAR(20) NOT NULL DEFAULT 'both',
+      voice_call_frequency VARCHAR(20) NOT NULL DEFAULT 'every_2_days',
+      glucose_alert_mode VARCHAR(20),
+      quiet_start VARCHAR(5) NOT NULL DEFAULT '22:00',
+      quiet_end VARCHAR(5) NOT NULL DEFAULT '07:00',
+      set_via VARCHAR(20) NOT NULL DEFAULT 'day1_chat',
+      created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+      updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+    )`;
+
     // Backfill: create patients rows for users who don't have one (needed for FK constraints)
     await sql`
       INSERT INTO patients (id, first_name, last_name, date_of_birth, gender)

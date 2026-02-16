@@ -8,7 +8,7 @@ const {
 
 const vitalTypeEnum = pgEnum("vital_type", [
   "blood_pressure_systolic", "blood_pressure_diastolic", "heart_rate",
-  "blood_glucose", "weight", "oxygen_saturation", "temperature", "hydration", "steps",
+  "blood_glucose", "weight", "oxygen_saturation", "temperature", "hydration", "steps", "sleep",
 ]);
 
 const medStatusEnum = pgEnum("med_status", ["taken", "missed", "late", "skipped"]);
@@ -76,6 +76,7 @@ const medications = pgTable("medications", {
   frequency: varchar("frequency", { length: 100 }).notNull(),
   scheduledTimes: jsonb("scheduled_times").default([]).notNull(),
   isActive: boolean("is_active").default(true).notNull(),
+  isGlp1: boolean("is_glp1").default(false).notNull(),
   prescribedBy: uuid("prescribed_by").references(() => providers.id),
   startDate: date("start_date"),
   endDate: date("end_date"),
@@ -143,6 +144,7 @@ const userProfiles = pgTable("user_profiles", {
   injectionDay: varchar("injection_day", { length: 10 }),
   otherMedications: jsonb("other_medications").default([]),
   currentSideEffects: jsonb("current_side_effects").default([]),
+  goals: jsonb("goals").default([]),
   ageBracket: varchar("age_bracket", { length: 10 }),
   createdAt: timestamp("created_at", { withTimezone: true }).defaultNow().notNull(),
   updatedAt: timestamp("updated_at", { withTimezone: true }).defaultNow().notNull(),

@@ -134,6 +134,7 @@ PATIENT PROFILE:
 - Injection day: ${profile.injectionDay || "not set"}
 - Conditions: ${JSON.stringify(profile.conditions || [])}
 - Current side effects: ${JSON.stringify(profile.currentSideEffects || [])}
+- Goals: ${JSON.stringify(profile.goals || [])}
 
 ENGAGEMENT RULES (${profile.ageBracket} age group):
 - Primary channel: ${engConfig?.primaryChannel || "text"}

@@ -1,7 +1,7 @@
 const express = require("express");
-const { eq } = require("drizzle-orm");
+const { eq, and } = require("drizzle-orm");
 const { db } = require("../db");
-const { userProfiles, userCoordinator, careCoordinators } = require("../db/schema");
+const { userProfiles, userCoordinator, careCoordinators, medications } = require("../db/schema");
 
 const router = express.Router();
 
@@ -40,7 +40,7 @@ router.put("/", async (req, res) => {
       firstName, lastName, dateOfBirth, gender, phone, heightInches,
       startingWeight, conditions, activityLevel, glp1Medication,
       glp1Dosage, glp1StartDate, injectionDay, otherMedications,
-      currentSideEffects,
+      currentSideEffects, goals,
     } = req.body;
 
     const updates = {};
@@ -68,6 +68,7 @@ router.put("/", async (req, res) => {
     if (injectionDay !== undefined) updates.injectionDay = injectionDay;
     if (otherMedications !== undefined) updates.otherMedications = otherMedications;
     if (currentSideEffects !== undefined) updates.currentSideEffects = currentSideEffects;
+    if (goals !== undefined) updates.goals = goals;
 
     updates.updatedAt = new Date();
 
@@ -75,6 +76,30 @@ router.put("/", async (req, res) => {
       .set(updates)
       .where(eq(userProfiles.userId, req.user.userId))
       .returning();
+
+    // Auto-create medication records from GLP-1 info
+    if (glp1Medication) {
+      const existingGlp1 = await db.select().from(medications)
+        .where(and(eq(medications.patientId, req.user.userId), eq(medications.isGlp1, true)));
+
+      if (existingGlp1.length === 0) {
+        await db.insert(medications).values({
+          patientId: req.user.userId,
+          name: glp1Medication,
+          dosage: glp1Dosage || "",
+          frequency: "weekly",
+          isGlp1: true,
+          isActive: true,
+          startDate: glp1StartDate || null,
+        });
+        console.log(`[Profile] Created GLP-1 medication: ${glp1Medication} for ${req.user.userId}`);
+      } else {
+        // Update existing GLP-1 med
+        await db.update(medications)
+          .set({ name: glp1Medication, dosage: glp1Dosage || "", updatedAt: new Date() })
+          .where(and(eq(medications.patientId, req.user.userId), eq(medications.isGlp1, true)));
+      }
+    }
 
     res.json(updated);
   } catch (err) {

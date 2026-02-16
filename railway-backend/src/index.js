@@ -163,7 +163,10 @@ async function runStartupMigrations() {
       created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
     )`;
     await sql`ALTER TABLE scheduled_actions ADD COLUMN IF NOT EXISTS interval_days INTEGER NOT NULL DEFAULT 1`;
-    console.log("[MIGRATION] scheduled_actions table + vital_type enum updated");
+    await sql`ALTER TABLE user_profiles ADD COLUMN IF NOT EXISTS goals JSONB DEFAULT '[]'`;
+    await sql`ALTER TYPE vital_type ADD VALUE IF NOT EXISTS 'sleep'`;
+    await sql`ALTER TABLE medications ADD COLUMN IF NOT EXISTS is_glp1 BOOLEAN NOT NULL DEFAULT false`;
+    console.log("[MIGRATION] scheduled_actions table + vital_type enum + goals + is_glp1 updated");
   } catch (err) {
     // IF NOT EXISTS not supported on older PG, enum value may already exist
     if (err.message && err.message.includes("already exists")) {

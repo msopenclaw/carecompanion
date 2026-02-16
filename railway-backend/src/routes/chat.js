@@ -1,91 +1,286 @@
 const express = require("express");
-const { eq, desc, and, gte } = require("drizzle-orm");
+const { eq } = require("drizzle-orm");
 const { GoogleGenerativeAI } = require("@google/generative-ai");
 const { db } = require("../db");
 const {
-  userProfiles, careCoordinators, userCoordinator, vitals, medications, messages,
+  vitals, medications, medicationLogs, userProfiles,
+  userPreferences, scheduledActions, messages,
 } = require("../db/schema");
+const { getUserContext } = require("../services/userContext");
 
 const router = express.Router();
 
-// POST /api/chat — Gemini streaming chat
-router.post("/", async (req, res) => {
-  try {
-    const { message } = req.body;
-    if (!message) {
-      return res.status(400).json({ error: "message required" });
+// ---------------------------------------------------------------------------
+// Gemini Function Declarations
+// ---------------------------------------------------------------------------
+
+const toolDeclarations = [
+  {
+    name: "log_vital",
+    description: "Log a vital reading for the patient (weight in lbs, hydration in oz, sleep in hours, blood_glucose in mg/dL, heart_rate in bpm, steps, blood_pressure_systolic/diastolic in mmHg)",
+    parameters: {
+      type: "OBJECT",
+      properties: {
+        vital_type: { type: "STRING", description: "weight, hydration, sleep, blood_glucose, heart_rate, steps, blood_pressure_systolic, blood_pressure_diastolic" },
+        value: { type: "NUMBER", description: "Numeric value" },
+        unit: { type: "STRING", description: "Unit: lbs, oz, hours, mg/dL, bpm, steps, mmHg" },
+      },
+      required: ["vital_type", "value", "unit"],
+    },
+  },
+  {
+    name: "confirm_medication",
+    description: "Confirm that the patient took a specific medication today. Use the medication_id from the context, or leave empty to confirm all.",
+    parameters: {
+      type: "OBJECT",
+      properties: {
+        medication_name: { type: "STRING", description: "Name of the medication to confirm (e.g. 'Wegovy', 'Metformin'). If unclear, confirm all." },
+      },
+      required: ["medication_name"],
+    },
+  },
+  {
+    name: "update_preference",
+    description: "Update a patient preference. Allowed: checkinFrequency (once_daily/twice_daily), checkinTimePreference (morning/evening/both), medReminderEnabled (true/false), hydrationNudgesEnabled (true/false), hydrationNudgesPerDay (number), voiceCallFrequency (daily/every_2_days/every_3_days/weekly), quietStart (HH:MM), quietEnd (HH:MM), preferredChannel (text/voice/both), exerciseNudgesEnabled (true/false)",
+    parameters: {
+      type: "OBJECT",
+      properties: {
+        preference: { type: "STRING" },
+        value: { type: "STRING" },
+      },
+      required: ["preference", "value"],
+    },
+  },
+  {
+    name: "add_goal",
+    description: "Add a daily goal to the patient's profile (e.g. '8hrs Sleep', '10K Steps', '30min Walk', '64oz Water', '3 Meals')",
+    parameters: {
+      type: "OBJECT",
+      properties: {
+        goal: { type: "STRING", description: "Goal label" },
+      },
+      required: ["goal"],
+    },
+  },
+  {
+    name: "remove_goal",
+    description: "Remove a daily goal from the patient's profile",
+    parameters: {
+      type: "OBJECT",
+      properties: {
+        goal: { type: "STRING", description: "Goal label to remove" },
+      },
+      required: ["goal"],
+    },
+  },
+  {
+    name: "set_reminder",
+    description: "Schedule a daily reminder for the patient",
+    parameters: {
+      type: "OBJECT",
+      properties: {
+        reminder_type: { type: "STRING", description: "medication, hydration, checkin, custom" },
+        time: { type: "STRING", description: "Time in HH:MM (24h)" },
+        label: { type: "STRING", description: "Reminder description" },
+      },
+      required: ["reminder_type", "time"],
+    },
+  },
+];
+
+// ---------------------------------------------------------------------------
+// Tool Execution
+// ---------------------------------------------------------------------------
+
+async function executeTool(name, args, userId, ctx) {
+  console.log(`[Chat] Executing tool: ${name}`, args);
+
+  switch (name) {
+    case "log_vital": {
+      await db.insert(vitals).values({
+        patientId: userId,
+        vitalType: args.vital_type,
+        value: parseFloat(args.value),
+        unit: args.unit,
+        source: "text_agent",
+        recordedAt: new Date(),
+      });
+      return { success: true, message: `Logged ${args.vital_type}: ${args.value} ${args.unit}` };
     }
 
-    const GEMINI_API_KEY = process.env.GEMINI_API_KEY;
-    if (!GEMINI_API_KEY) {
-      return res.status(503).json({ error: "AI service unavailable" });
+    case "confirm_medication": {
+      const searchName = (args.medication_name || "").toLowerCase();
+      const med = ctx.medications.find(m =>
+        m.name.toLowerCase().includes(searchName)) || ctx.medications[0];
+      if (!med) return { success: false, message: "No medications found for this patient" };
+
+      await db.insert(medicationLogs).values({
+        medicationId: med.id,
+        patientId: userId,
+        scheduledAt: new Date(),
+        takenAt: new Date(),
+        status: "taken",
+      });
+      return { success: true, message: `Confirmed ${med.name} as taken` };
     }
 
-    // Gather context
-    const [profile] = await db.select().from(userProfiles)
-      .where(eq(userProfiles.userId, req.user.userId));
-
-    let coordinatorName = "your care coordinator";
-    let coordinatorPersonality = `You are a registered nurse and AI care coordinator specializing in GLP-1 weight management therapy. You have years of clinical experience with metabolic health patients. You communicate with the warmth, confidence, and professional sophistication of an experienced nurse — direct but compassionate, knowledgeable but never condescending. You use simple language but never dumb things down.`;
-    const [uc] = await db.select().from(userCoordinator)
-      .where(eq(userCoordinator.userId, req.user.userId));
-    if (uc) {
-      const [coord] = await db.select().from(careCoordinators)
-        .where(eq(careCoordinators.id, uc.coordinatorId));
-      if (coord) {
-        coordinatorPersonality = coord.personalityPrompt;
-        coordinatorName = coord.name;
+    case "update_preference": {
+      const allowedPrefs = [
+        "checkinFrequency", "checkinTimePreference", "medReminderEnabled",
+        "hydrationNudgesEnabled", "hydrationNudgesPerDay", "voiceCallFrequency",
+        "quietStart", "quietEnd", "preferredChannel", "exerciseNudgesEnabled",
+      ];
+      if (!allowedPrefs.includes(args.preference)) {
+        return { success: false, message: `Unknown preference: ${args.preference}` };
       }
+      let val = args.value;
+      if (val === "true") val = true;
+      if (val === "false") val = false;
+      if (!isNaN(Number(val)) && typeof val === "string" && val.match(/^\d+$/)) val = parseInt(val);
+
+      const [existing] = await db.select().from(userPreferences)
+        .where(eq(userPreferences.userId, userId));
+      if (existing) {
+        await db.update(userPreferences)
+          .set({ [args.preference]: val, updatedAt: new Date() })
+          .where(eq(userPreferences.userId, userId));
+      }
+      return { success: true, message: `Updated ${args.preference} to ${val}` };
     }
 
-    // Recent vitals
-    const since7d = new Date(Date.now() - 7 * 24 * 60 * 60 * 1000);
-    const recentVitals = await db.select().from(vitals)
-      .where(and(eq(vitals.patientId, req.user.userId), gte(vitals.recordedAt, since7d)))
-      .orderBy(desc(vitals.recordedAt))
-      .limit(20);
+    case "add_goal": {
+      const [profile] = await db.select().from(userProfiles)
+        .where(eq(userProfiles.userId, userId));
+      const goals = profile?.goals || [];
+      if (!goals.includes(args.goal)) {
+        goals.push(args.goal);
+        await db.update(userProfiles)
+          .set({ goals, updatedAt: new Date() })
+          .where(eq(userProfiles.userId, userId));
+      }
+      return { success: true, message: `Added goal: ${args.goal}` };
+    }
 
-    // Recent messages
-    const recentMessages = await db.select().from(messages)
-      .where(eq(messages.userId, req.user.userId))
-      .orderBy(desc(messages.createdAt))
-      .limit(10);
+    case "remove_goal": {
+      const [profile] = await db.select().from(userProfiles)
+        .where(eq(userProfiles.userId, userId));
+      const goals = (profile?.goals || []).filter(g => g !== args.goal);
+      await db.update(userProfiles)
+        .set({ goals, updatedAt: new Date() })
+        .where(eq(userProfiles.userId, userId));
+      return { success: true, message: `Removed goal: ${args.goal}` };
+    }
 
-    const patientName = profile ? profile.firstName : "there";
-    const systemPrompt = `${coordinatorPersonality}
+    case "set_reminder": {
+      const typeMap = { medication: "med_reminder", hydration: "hydration_reminder", checkin: "checkin_reminder", custom: "custom_reminder" };
+      await db.insert(scheduledActions).values({
+        userId,
+        actionType: typeMap[args.reminder_type] || "custom_reminder",
+        label: args.label || `${args.reminder_type} reminder`,
+        scheduledTime: args.time,
+        recurrence: "daily",
+        createdVia: "text",
+      });
+      return { success: true, message: `Reminder set for ${args.time} daily` };
+    }
+
+    default:
+      return { error: `Unknown tool: ${name}` };
+  }
+}
+
+// ---------------------------------------------------------------------------
+// System Prompt Builder
+// ---------------------------------------------------------------------------
+
+function buildSystemPrompt(ctx) {
+  const { profile, coordinator, recentVitals, medications: meds, recentMessages, preferences, voiceSessions, activeReminders } = ctx;
+
+  const coordinatorName = coordinator?.name || "your care coordinator";
+  const coordinatorPersonality = coordinator?.personalityPrompt ||
+    `You are a registered nurse and AI care coordinator specializing in GLP-1 weight management therapy. You communicate with warmth, confidence, and professional sophistication.`;
+
+  const patientName = profile ? profile.firstName : "there";
+
+  return `${coordinatorPersonality}
 
 YOUR IDENTITY:
 - Your name is ${coordinatorName}
 - You are a registered nurse and AI care coordinator
 - You have clinical experience in weight management, metabolic health, and GLP-1 therapy
-- When the patient asks who you are, introduce yourself warmly by name and role
 
 PATIENT CONTEXT:
 - Name: ${profile ? `${profile.firstName} ${profile.lastName}` : "Patient"}
 - Age bracket: ${profile?.ageBracket || "unknown"}
 - GLP-1 Medication: ${profile?.glp1Medication || "unknown"} ${profile?.glp1Dosage || ""}
-- Start date: ${profile?.glp1StartDate || "unknown"}
-- Conditions: ${profile?.conditions ? JSON.stringify(profile.conditions) : "none listed"}
-- Current side effects: ${profile?.currentSideEffects ? JSON.stringify(profile.currentSideEffects) : "none reported"}
+- Start date: ${profile?.glp1StartDate || "unknown"} (Day ${ctx.glp1DaysSinceStart ?? "?"}, Week ${ctx.glp1WeekNumber ?? "?"})
+- Conditions: ${profile?.conditions?.length ? profile.conditions.join(", ") : "none listed"}
+- Side effects: ${profile?.currentSideEffects?.length ? profile.currentSideEffects.join(", ") : "none reported"}
+- Goals: ${profile?.goals?.length ? profile.goals.join(", ") : "none set"}
 
-RECENT VITALS (last 7 days):
-${recentVitals.map((v) => `${v.vitalType}: ${v.value} ${v.unit} at ${v.recordedAt}`).join("\n") || "No vitals recorded"}
+MEDICATIONS:
+${meds.map(m => `- ${m.name} ${m.dosage} (${m.frequency}) [ID: ${m.id}] ${m.takenToday ? "✓ taken today" : "not taken today"}`).join("\n") || "None"}
+
+PREFERENCES:
+${preferences ? `- Check-ins: ${preferences.checkinFrequency}, ${preferences.checkinTimePreference}
+- Med reminders: ${preferences.medReminderEnabled ? "on" : "off"}
+- Hydration nudges: ${preferences.hydrationNudgesEnabled ? `${preferences.hydrationNudgesPerDay}x/day` : "off"}
+- Channel: ${preferences.preferredChannel}
+- Voice calls: ${preferences.voiceCallFrequency}
+- Quiet hours: ${preferences.quietStart} - ${preferences.quietEnd}` : "Not configured"}
+
+RECENT VITALS (7 days):
+${recentVitals.map(v => `${v.vitalType}: ${v.value} ${v.unit} at ${v.recordedAt}`).join("\n") || "No vitals recorded"}
 
 RECENT CONVERSATION:
-${recentMessages.map((m) => `[${m.sender}]: ${m.content}`).reverse().join("\n") || "No prior messages"}
+${recentMessages.map(m => `[${m.sender}]: ${m.content}`).join("\n") || "No prior messages"}
+
+RECENT VOICE CALLS:
+${voiceSessions.length ? voiceSessions.map(s => `${s.startedAt} (${s.durationSeconds}s)${s.summary ? ": " + s.summary : ""}`).join("\n") : "None"}
+
+ACTIVE REMINDERS:
+${activeReminders.map(r => `${r.label} at ${r.scheduledTime} (${r.recurrence})`).join("\n") || "None"}
+
+CAPABILITIES:
+You can take actions using your tools:
+- Log vitals (weight, water, sleep, blood glucose, etc.)
+- Confirm medications as taken
+- Update patient preferences (check-in frequency, quiet hours, channel, etc.)
+- Add or remove daily goals
+- Set reminders
+Use tools when the patient's message implies an action. For example:
+- "I weigh 178 today" → use log_vital
+- "I took my Wegovy" → use confirm_medication
+- "Stop texting me after 9pm" → use update_preference to set quietStart to 21:00
+- "Add a sleep goal" → use add_goal
 
 GUIDELINES:
 - Respond as ${coordinatorName}, a professional nurse care coordinator
-- Communicate with the warmth, confidence, and clinical expertise of an experienced nurse
-- Be direct but compassionate. Knowledgeable but never condescending
-- Use clear, simple language — no medical jargon unless you explain it
-- If the patient reports concerning symptoms, acknowledge them and provide evidence-based tips
-- Never diagnose or prescribe — recommend they contact their provider for medical decisions
+- Be direct but compassionate, knowledgeable but never condescending
 - Keep responses concise (2-3 sentences for casual chat, more for clinical questions)
 - Reference their specific medication, vitals, and side effects when relevant
-- Address the patient by first name (${patientName}) naturally, not every message`;
+- Address the patient by first name (${patientName}) naturally, not every message
+- When you take an action with a tool, confirm what you did briefly
+- Never diagnose or prescribe — recommend they contact their provider for medical decisions`;
+}
 
-    // Save patient message before generating response
+// ---------------------------------------------------------------------------
+// POST /api/chat — Gemini streaming chat with function calling
+// ---------------------------------------------------------------------------
+
+router.post("/", async (req, res) => {
+  try {
+    const { message } = req.body;
+    if (!message) return res.status(400).json({ error: "message required" });
+
+    const GEMINI_API_KEY = process.env.GEMINI_API_KEY;
+    if (!GEMINI_API_KEY) return res.status(503).json({ error: "AI service unavailable" });
+
+    // Get full context
+    const ctx = await getUserContext(req.user.userId);
+    const systemPrompt = buildSystemPrompt(ctx);
+
+    // Save patient message
     await db.insert(messages).values({
       userId: req.user.userId,
       sender: "patient",
@@ -94,36 +289,69 @@ GUIDELINES:
     });
 
     const genAI = new GoogleGenerativeAI(GEMINI_API_KEY);
-    const model = genAI.getGenerativeModel({ model: "gemini-3-flash-preview" });
-
-    const result = await model.generateContentStream({
-      contents: [
-        { role: "user", parts: [{ text: systemPrompt + "\n\nPatient says: " + message }] },
-      ],
-      generationConfig: { maxOutputTokens: 1500 },
+    const model = genAI.getGenerativeModel({
+      model: "gemini-2.0-flash",
+      tools: [{ functionDeclarations: toolDeclarations }],
     });
 
-    // Stream response as SSE
+    // Multi-turn function calling loop
+    let contents = [
+      { role: "user", parts: [{ text: systemPrompt + "\n\nPatient says: " + message }] },
+    ];
+
+    let finalText = "";
+    let maxRounds = 5;
+
+    while (maxRounds-- > 0) {
+      const result = await model.generateContent({ contents, generationConfig: { maxOutputTokens: 1500 } });
+      const parts = result.response.candidates[0].content.parts;
+
+      const functionCalls = parts.filter(p => p.functionCall);
+      if (functionCalls.length === 0) {
+        finalText = parts.map(p => p.text || "").join("");
+        break;
+      }
+
+      // Add model's response to conversation history
+      contents.push({ role: "model", parts });
+
+      // Execute tools and build responses
+      const functionResponses = [];
+      for (const fc of functionCalls) {
+        const toolResult = await executeTool(
+          fc.functionCall.name,
+          fc.functionCall.args,
+          req.user.userId,
+          ctx,
+        );
+        functionResponses.push({
+          functionResponse: { name: fc.functionCall.name, response: toolResult },
+        });
+        console.log(`[Chat] Tool ${fc.functionCall.name} result:`, toolResult);
+      }
+
+      contents.push({ role: "user", parts: functionResponses });
+    }
+
+    // Stream final text as SSE
     res.setHeader("Content-Type", "text/event-stream");
     res.setHeader("Cache-Control", "no-cache");
     res.setHeader("Connection", "keep-alive");
 
-    let fullResponse = "";
-    for await (const chunk of result.stream) {
-      const text = chunk.text();
-      if (text) {
-        fullResponse += text;
-        res.write(`data: ${JSON.stringify({ text })}\n\n`);
+    if (finalText) {
+      // Send in chunks for streaming feel
+      const chunkSize = 20;
+      for (let i = 0; i < finalText.length; i += chunkSize) {
+        const chunk = finalText.slice(i, i + chunkSize);
+        res.write(`data: ${JSON.stringify({ text: chunk })}\n\n`);
       }
-    }
 
-    // Save AI response as message
-    if (fullResponse) {
+      // Save AI response
       await db.insert(messages).values({
         userId: req.user.userId,
         sender: "ai",
         messageType: "text",
-        content: fullResponse,
+        content: finalText,
       });
     }
 

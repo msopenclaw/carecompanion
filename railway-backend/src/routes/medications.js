@@ -25,8 +25,12 @@ router.get("/", async (req, res) => {
       ));
 
     const medsWithLogs = meds.map((med) => ({
-      ...med,
-      todayLogs: logs.filter((l) => l.medicationId === med.id),
+      id: med.id,
+      name: med.name,
+      dosage: med.dosage,
+      frequency: med.frequency,
+      isGlp1: med.isGlp1 || false,
+      takenToday: logs.some(l => l.medicationId === med.id && (l.status === "taken" || l.status === "late")),
     }));
 
     res.json(medsWithLogs);
@@ -39,15 +43,15 @@ router.get("/", async (req, res) => {
 // POST /api/medications/confirm
 router.post("/confirm", async (req, res) => {
   try {
-    const { medicationId, scheduledAt } = req.body;
-    if (!medicationId || !scheduledAt) {
-      return res.status(400).json({ error: "medicationId and scheduledAt required" });
+    const { medicationId } = req.body;
+    if (!medicationId) {
+      return res.status(400).json({ error: "medicationId required" });
     }
 
     const [log] = await db.insert(medicationLogs).values({
       medicationId,
       patientId: req.user.userId,
-      scheduledAt: new Date(scheduledAt),
+      scheduledAt: new Date(),
       takenAt: new Date(),
       status: "taken",
     }).returning();

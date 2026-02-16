@@ -1,7 +1,7 @@
 const express = require("express");
-const { eq } = require("drizzle-orm");
+const { eq, and, gte } = require("drizzle-orm");
 const { db } = require("../db");
-const { scheduledActions, vitals, userPreferences } = require("../db/schema");
+const { scheduledActions, vitals, userPreferences, userProfiles, medications, medicationLogs } = require("../db/schema");
 
 const router = express.Router();
 
@@ -135,6 +135,71 @@ router.post("/update-preference", async (req, res) => {
   } catch (err) {
     console.error("Update preference error:", err);
     res.status(500).json({ error: "Failed to update preference" });
+  }
+});
+
+// POST /api/agent-tools/confirm-medication
+router.post("/confirm-medication", async (req, res) => {
+  try {
+    const { user_id, medication_name } = req.body;
+    if (!user_id) return res.status(400).json({ error: "user_id required" });
+
+    const meds = await db.select().from(medications)
+      .where(and(eq(medications.patientId, user_id), eq(medications.isActive, true)));
+
+    let med = meds[0];
+    if (medication_name) {
+      const match = meds.find(m => m.name.toLowerCase().includes(medication_name.toLowerCase()));
+      if (match) med = match;
+    }
+
+    if (!med) return res.status(404).json({ error: "No active medications found" });
+
+    const [log] = await db.insert(medicationLogs).values({
+      medicationId: med.id,
+      patientId: user_id,
+      scheduledAt: new Date(),
+      takenAt: new Date(),
+      status: "taken",
+    }).returning();
+
+    console.log(`[AgentTools] Confirmed ${med.name} for ${user_id}`);
+    res.json({ success: true, message: `${med.name} confirmed as taken`, id: log.id });
+  } catch (err) {
+    console.error("Confirm medication error:", err);
+    res.status(500).json({ error: "Failed to confirm medication" });
+  }
+});
+
+// POST /api/agent-tools/manage-goal
+router.post("/manage-goal", async (req, res) => {
+  try {
+    const { user_id, action, goal } = req.body;
+    if (!user_id || !action || !goal) {
+      return res.status(400).json({ error: "user_id, action, and goal required" });
+    }
+
+    const [profile] = await db.select().from(userProfiles)
+      .where(eq(userProfiles.userId, user_id));
+
+    if (!profile) return res.status(404).json({ error: "Profile not found" });
+
+    let goals = profile.goals || [];
+    if (action === "add" && !goals.includes(goal)) {
+      goals.push(goal);
+    } else if (action === "remove") {
+      goals = goals.filter(g => g !== goal);
+    }
+
+    await db.update(userProfiles)
+      .set({ goals, updatedAt: new Date() })
+      .where(eq(userProfiles.userId, user_id));
+
+    console.log(`[AgentTools] ${action} goal "${goal}" for ${user_id}`);
+    res.json({ success: true, message: `Goal ${action === "add" ? "added" : "removed"}: ${goal}`, goals });
+  } catch (err) {
+    console.error("Manage goal error:", err);
+    res.status(500).json({ error: "Failed to manage goal" });
   }
 });
 

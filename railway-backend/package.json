@@ -6,7 +6,8 @@
   "scripts": {
     "start": "node src/index.js",
     "dev": "node --watch src/index.js",
-    "seed": "node src/db/seed.js"
+    "seed": "node src/db/seed.js",
+    "test": "jest --forceExit --detectOpenHandles"
   },
   "dependencies": {
     "@google/generative-ai": "^0.21.0",
@@ -25,5 +26,8 @@
   },
   "engines": {
     "node": ">=18"
+  },
+  "devDependencies": {
+    "jest": "^30.2.0"
   }
 }

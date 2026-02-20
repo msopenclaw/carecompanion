@@ -306,30 +306,37 @@ ${voiceSessions.length ? voiceSessions.map(s => `${s.startedAt} (${s.durationSec
 ACTIVE REMINDERS:
 ${activeReminders.map(r => `${r.label} at ${r.scheduledTime} (${r.recurrence})`).join("\n") || "None"}
 
-CAPABILITIES:
-You MUST call at least one tool per turn. NEVER respond with plain text — always use a tool.
-When the patient's message implies an action, call the action tool(s) PLUS chat_response together.
+TOOL CALLING RULES (CRITICAL):
+You MUST call at least one tool per turn. NEVER respond with plain text.
+When the patient mentions ANY of these, you MUST call the corresponding action tool AND chat_response:
+- Mentions taking a medication → MUST call add_medication (this records it for tracking, NOT a prescription)
+- Reports a vital (weight, water, sleep, steps) → MUST call log_vital
+- Says they took a med → MUST call confirm_medication
+- Wants to change a preference → MUST call update_preference
+- Mentions a goal → MUST call add_goal or remove_goal
+
+NEVER just "note" or "remember" something — always call the tool to save it to the database.
+NEVER say you will "escalate", "forward to a team", "pass it along", or "let someone know".
+You have FULL authority to execute ALL tools. Act immediately.
+
 Available tools:
-- chat_response: Use this for ALL conversational replies (greetings, health advice, questions, encouragement)
+- chat_response: ALL conversational replies
 - log_vital: Log vitals (weight, water, sleep, blood glucose, etc.)
-- confirm_medication: Confirm medications as taken
-- add_medication: Add a new medication to the patient's tracking list. This is NOT prescribing — you are recording what the patient tells you they take.
-- update_preference: Update patient preferences (check-in frequency, quiet hours, channel, etc.)
+- confirm_medication: Confirm a med as taken today
+- add_medication: Add a medication to tracking (name, dosage, frequency). ALWAYS use this when patient mentions a medication they take.
+- update_preference: Update preferences
 - add_goal / remove_goal: Add or remove daily goals (e.g. "10K Steps", "8hrs Sleep", "64oz Water", "30min Walk")
-- set_reminder: Set reminders
+- set_reminder: Schedule reminders
 
-IMPORTANT: You CAN and SHOULD directly use these tools. Do NOT say you will "escalate", "forward to a team", or "let someone know". You have full authority to add medications, update goals, change preferences, and log vitals. Just do it and confirm.
-
-Examples:
-- "Hi, how are you?" → call chat_response
-- "I weigh 178 today" → call log_vital + chat_response
-- "I took my Wegovy" → call confirm_medication + chat_response
-- "Stop texting me after 9pm" → call update_preference(preference="quietStart", value="21:00") + chat_response
-- "Check in once a day" → call update_preference(preference="checkinFrequency", value="once_daily") + chat_response
-- "Add a sleep goal" → call add_goal(goal="8hrs Sleep") + chat_response
-- "I also take Metformin 500mg" → call add_medication(name="Metformin", dosage="500mg") + chat_response
-- "Change my steps goal to 10K" → call remove_goal(goal="5K Steps") + add_goal(goal="10K Steps") + chat_response
-- "I want to aim for 10000 steps a day" → call add_goal(goal="10K Steps") + chat_response
+Examples — you MUST follow this pattern:
+- "Hi, how are you?" → chat_response only
+- "I weigh 178 today" → log_vital(vital_type="weight", value=178, unit="lbs") + chat_response
+- "I took my Wegovy" → confirm_medication + chat_response
+- "I take Metformin 500mg daily" → add_medication(name="Metformin", dosage="500mg", frequency="daily") + chat_response
+- "I also take Lisinopril 10mg" → add_medication(name="Lisinopril", dosage="10mg", frequency="daily") + chat_response
+- "I take Metformin and Lisinopril" → add_medication for EACH one + chat_response
+- "Stop texting after 9pm" → update_preference(preference="quietStart", value="21:00") + chat_response
+- "I want a 10K steps goal" → add_goal(goal="10K Steps") + chat_response
 
 TRANSCRIPT EXTRACTION:
 If the patient sends a voice call transcript, extract ALL preferences discussed and save each one using update_preference. Look for:
@@ -405,6 +412,7 @@ router.post("/", async (req, res) => {
       const parts = result.response.candidates[0].content.parts;
 
       const functionCalls = parts.filter(p => p.functionCall);
+      console.log(`[Chat] Gemini returned ${functionCalls.length} tool call(s):`, functionCalls.map(fc => fc.functionCall.name).join(", "));
 
       // chat_response is a terminal tool — extract the message and stop
       const chatResponse = functionCalls.find(fc => fc.functionCall.name === "chat_response");

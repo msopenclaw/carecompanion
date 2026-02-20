@@ -16,6 +16,17 @@ const router = express.Router();
 
 const toolDeclarations = [
   {
+    name: "chat_response",
+    description: "Respond to the patient with a text message. Use this for greetings, questions, health advice, or any message that does NOT require logging data or changing settings.",
+    parameters: {
+      type: "OBJECT",
+      properties: {
+        message: { type: "STRING", description: "The response message to send to the patient" },
+      },
+      required: ["message"],
+    },
+  },
+  {
     name: "log_vital",
     description: "Log a vital reading for the patient (weight in lbs, hydration in oz, sleep in hours, blood_glucose in mg/dL, heart_rate in bpm, steps, blood_pressure_systolic/diastolic in mmHg)",
     parameters: {
@@ -37,6 +48,19 @@ const toolDeclarations = [
         medication_name: { type: "STRING", description: "Name of the medication to confirm (e.g. 'Wegovy', 'Metformin'). If unclear, confirm all." },
       },
       required: ["medication_name"],
+    },
+  },
+  {
+    name: "add_medication",
+    description: "Add a new medication the patient is taking. Use when patient says they take a medication not already in their list.",
+    parameters: {
+      type: "OBJECT",
+      properties: {
+        name: { type: "STRING", description: "Medication name (e.g. 'Metformin', 'Lisinopril')" },
+        dosage: { type: "STRING", description: "Dosage (e.g. '500mg', '10mg')" },
+        frequency: { type: "STRING", description: "How often: daily, twice_daily, weekly, as_needed" },
+      },
+      required: ["name", "dosage"],
     },
   },
   {
@@ -96,6 +120,9 @@ async function executeTool(name, args, userId, ctx) {
   console.log(`[Chat] Executing tool: ${name}`, args);
 
   switch (name) {
+    case "chat_response":
+      return { type: "chat_response", message: args.message };
+
     case "log_vital": {
       await db.insert(vitals).values({
         patientId: userId,
@@ -122,6 +149,19 @@ async function executeTool(name, args, userId, ctx) {
         status: "taken",
       });
       return { success: true, message: `Confirmed ${med.name} as taken` };
+    }
+
+    case "add_medication": {
+      const [inserted] = await db.insert(medications).values({
+        patientId: userId,
+        name: args.name,
+        dosage: args.dosage,
+        frequency: args.frequency || "daily",
+        isGlp1: false,
+        scheduledTimes: [],
+        startDate: new Date().toISOString().split("T")[0],
+      }).returning();
+      return { success: true, message: `Added ${inserted.name} ${inserted.dosage}`, medication: { id: inserted.id, name: inserted.name } };
     }
 
     case "update_preference": {
@@ -187,6 +227,24 @@ async function executeTool(name, args, userId, ctx) {
         recurrence: "daily",
         createdVia: "text",
       });
+
+      // Also update user_preferences so it shows on Profile page
+      const prefUpdates = {};
+      if (args.reminder_type === "medication") prefUpdates.medReminderEnabled = true;
+      if (args.reminder_type === "hydration") prefUpdates.hydrationNudgesEnabled = true;
+      if (args.reminder_type === "checkin") prefUpdates.checkinFrequency = "once_daily";
+
+      if (Object.keys(prefUpdates).length > 0) {
+        const [existing] = await db.select().from(userPreferences).where(eq(userPreferences.userId, userId));
+        if (existing) {
+          await db.update(userPreferences)
+            .set({ ...prefUpdates, setVia: existing.setVia || "text", updatedAt: new Date() })
+            .where(eq(userPreferences.userId, userId));
+        } else {
+          await db.insert(userPreferences).values({ userId, ...prefUpdates, setVia: "text" });
+        }
+      }
+
       return { success: true, message: `Reminder set for ${args.time} daily` };
     }
 
@@ -204,7 +262,7 @@ function buildSystemPrompt(ctx) {
 
   const coordinatorName = coordinator?.name || "your care coordinator";
   const coordinatorPersonality = coordinator?.personalityPrompt ||
-    `You are a registered nurse and AI care coordinator specializing in GLP-1 weight management therapy. You communicate with warmth, confidence, and professional sophistication.`;
+    `You are an AI care coordinator specializing in GLP-1 weight management support. You communicate with warmth, confidence, and professional sophistication.`;
 
   const patientName = profile ? profile.firstName : "there";
 
@@ -212,8 +270,9 @@ function buildSystemPrompt(ctx) {
 
 YOUR IDENTITY:
 - Your name is ${coordinatorName}
-- You are a registered nurse and AI care coordinator
-- You have clinical experience in weight management, metabolic health, and GLP-1 therapy
+- You are an AI-powered care coordinator (NOT a nurse, doctor, or medical professional)
+- You are knowledgeable about weight management, metabolic health, and GLP-1 therapy
+- You support patients but always defer clinical decisions to their healthcare provider
 
 PATIENT CONTEXT:
 - Name: ${profile ? `${profile.firstName} ${profile.lastName}` : "Patient"}
@@ -248,20 +307,36 @@ ACTIVE REMINDERS:
 ${activeReminders.map(r => `${r.label} at ${r.scheduledTime} (${r.recurrence})`).join("\n") || "None"}
 
 CAPABILITIES:
-You can take actions using your tools:
-- Log vitals (weight, water, sleep, blood glucose, etc.)
-- Confirm medications as taken
-- Update patient preferences (check-in frequency, quiet hours, channel, etc.)
-- Add or remove daily goals
-- Set reminders
-Use tools when the patient's message implies an action. For example:
-- "I weigh 178 today" → use log_vital
-- "I took my Wegovy" → use confirm_medication
-- "Stop texting me after 9pm" → use update_preference to set quietStart to 21:00
-- "Add a sleep goal" → use add_goal
+You MUST always call exactly one tool per turn. NEVER respond with plain text — always use a tool.
+Available tools:
+- chat_response: Use this for ALL conversational replies (greetings, health advice, questions, encouragement)
+- log_vital: Log vitals (weight, water, sleep, blood glucose, etc.)
+- confirm_medication: Confirm medications as taken
+- update_preference: Update patient preferences (check-in frequency, quiet hours, channel, etc.)
+- add_goal / remove_goal: Add or remove daily goals
+- set_reminder: Set reminders
+When the patient's message implies an action, call the action tool PLUS chat_response together. Examples:
+- "Hi, how are you?" → call chat_response
+- "I weigh 178 today" → call log_vital + chat_response
+- "I took my Wegovy" → call confirm_medication + chat_response
+- "Stop texting me after 9pm" → call update_preference(preference="quietStart", value="21:00") + chat_response
+- "Check in once a day" → call update_preference(preference="checkinFrequency", value="once_daily") + chat_response
+- "Add a sleep goal" → call add_goal + chat_response
+
+TRANSCRIPT EXTRACTION:
+If the patient sends a voice call transcript, extract ALL preferences discussed and save each one using update_preference. Look for:
+- Check-in frequency (once_daily / twice_daily)
+- Preferred communication channel (text / voice / both)
+- Voice call frequency (daily / every_2_days / every_3_days / weekly)
+- Medication reminders (true / false)
+- Hydration nudges (true / false) and how many per day
+- Weigh-in preference (daily_morning / self_directed)
+- Quiet hours (quietStart / quietEnd in HH:MM)
+- Exercise nudges (true / false)
+Call update_preference once for EACH preference found. Then respond with a brief summary of what you saved.
 
 GUIDELINES:
-- Respond as ${coordinatorName}, a professional nurse care coordinator
+- Respond as ${coordinatorName}, an AI care coordinator
 - Be direct but compassionate, knowledgeable but never condescending
 - Keep responses concise (2-3 sentences for casual chat, more for clinical questions)
 - Reference their specific medication, vitals, and side effects when relevant
@@ -299,24 +374,45 @@ router.post("/", async (req, res) => {
 
     const genAI = new GoogleGenerativeAI(GEMINI_API_KEY);
     const model = genAI.getGenerativeModel({
-      model: "gemini-2.0-flash",
-      tools: [{ functionDeclarations: toolDeclarations }],
+      model: "gemini-3-flash-preview",
+      systemInstruction: systemPrompt,
     });
 
-    // Multi-turn function calling loop
+    // Multi-turn function calling loop (mode=ANY forces tool use every turn)
     let contents = [
-      { role: "user", parts: [{ text: systemPrompt + "\n\nPatient says: " + message }] },
+      { role: "user", parts: [{ text: message }] },
     ];
 
     let finalText = "";
     let maxRounds = 5;
 
     while (maxRounds-- > 0) {
-      const result = await model.generateContent({ contents, generationConfig: { maxOutputTokens: 1500 } });
+      const result = await model.generateContent({
+        contents,
+        tools: [{ functionDeclarations: toolDeclarations }],
+        toolConfig: { functionCallingConfig: { mode: "ANY" } },
+        generationConfig: { maxOutputTokens: 1500, temperature: 0.2 },
+      });
       const parts = result.response.candidates[0].content.parts;
 
       const functionCalls = parts.filter(p => p.functionCall);
+
+      // chat_response is a terminal tool — extract the message and stop
+      const chatResponse = functionCalls.find(fc => fc.functionCall.name === "chat_response");
+      if (chatResponse) {
+        finalText = chatResponse.functionCall.args.message || "";
+        // Also execute any action tools that came alongside it
+        for (const fc of functionCalls) {
+          if (fc.functionCall.name !== "chat_response") {
+            const toolResult = await executeTool(fc.functionCall.name, fc.functionCall.args, req.user.userId, ctx);
+            console.log(`[Chat] Tool ${fc.functionCall.name} result:`, toolResult);
+          }
+        }
+        break;
+      }
+
       if (functionCalls.length === 0) {
+        // Fallback: model returned text without tool call (shouldn't happen with ANY)
         finalText = parts.map(p => p.text || "").join("");
         break;
       }
@@ -324,7 +420,7 @@ router.post("/", async (req, res) => {
       // Add model's response to conversation history
       contents.push({ role: "model", parts });
 
-      // Execute tools and build responses
+      // Execute action tools and build responses
       const functionResponses = [];
       for (const fc of functionCalls) {
         const toolResult = await executeTool(

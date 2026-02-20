@@ -8,7 +8,7 @@ const {
 
 const vitalTypeEnum = pgEnum("vital_type", [
   "blood_pressure_systolic", "blood_pressure_diastolic", "heart_rate",
-  "blood_glucose", "weight", "oxygen_saturation", "temperature", "hydration", "steps", "sleep",
+  "blood_glucose", "weight", "oxygen_saturation", "temperature", "hydration", "steps", "sleep", "mood",
 ]);
 
 const medStatusEnum = pgEnum("med_status", ["taken", "missed", "late", "skipped"]);
@@ -146,6 +146,7 @@ const userProfiles = pgTable("user_profiles", {
   currentSideEffects: jsonb("current_side_effects").default([]),
   goals: jsonb("goals").default([]),
   ageBracket: varchar("age_bracket", { length: 10 }),
+  timezone: varchar("timezone", { length: 50 }).default("America/New_York"),
   createdAt: timestamp("created_at", { withTimezone: true }).defaultNow().notNull(),
   updatedAt: timestamp("updated_at", { withTimezone: true }).defaultNow().notNull(),
 });
@@ -302,9 +303,17 @@ const scheduledActions = pgTable("scheduled_actions", {
   createdAt: timestamp("created_at", { withTimezone: true }).defaultNow().notNull(),
 });
 
+const dailyTips = pgTable("daily_tips", {
+  id: uuid("id").defaultRandom().primaryKey(),
+  userId: uuid("user_id").references(() => users.id).notNull(),
+  tipDate: date("tip_date").notNull(),
+  content: text("content").notNull(),
+  createdAt: timestamp("created_at", { withTimezone: true }).defaultNow().notNull(),
+});
+
 module.exports = {
   providers, patients, vitals, medications, medicationLogs, alerts,
   users, userProfiles, careCoordinators, userCoordinator,
   aiActions, messages, pushTokens, voiceSessions, escalations, consents, engagementConfig,
-  userPreferences, scheduledActions,
+  userPreferences, scheduledActions, dailyTips,
 };

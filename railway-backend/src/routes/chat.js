@@ -404,8 +404,12 @@ router.post("/", async (req, res) => {
         // Also execute any action tools that came alongside it
         for (const fc of functionCalls) {
           if (fc.functionCall.name !== "chat_response") {
-            const toolResult = await executeTool(fc.functionCall.name, fc.functionCall.args, req.user.userId, ctx);
-            console.log(`[Chat] Tool ${fc.functionCall.name} result:`, toolResult);
+            try {
+              const toolResult = await executeTool(fc.functionCall.name, fc.functionCall.args, req.user.userId, ctx);
+              console.log(`[Chat] Tool ${fc.functionCall.name} result:`, toolResult);
+            } catch (toolErr) {
+              console.error(`[Chat] Tool ${fc.functionCall.name} failed:`, toolErr);
+            }
           }
         }
         break;

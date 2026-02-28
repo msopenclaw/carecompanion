@@ -438,15 +438,6 @@ async function executeTool(name, args, userId, ctx) {
       const pushPayload = { title: args.title, body: args.body, data: args.category ? { category: args.category } : undefined };
       console.log(`[Chat] send_push: title="${args.title}", body="${args.body}", category=${args.category || "none"}, delay=${delaySec}s, userId=${userId}`);
 
-      // Stash notification for client-side local scheduling (guaranteed delivery)
-      if (!ctx._pendingNotifications) ctx._pendingNotifications = [];
-      ctx._pendingNotifications.push({
-        title: args.title,
-        body: args.body,
-        category: args.category || null,
-        delaySec,
-      });
-
       if (delaySec === 0) {
         const result = await sendPush(userId, pushPayload);
         console.log(`[Chat] send_push immediate result:`, JSON.stringify(result));
@@ -544,15 +535,6 @@ async function executeTool(name, args, userId, ctx) {
         recurrence: "once",
         createdVia: "text",
         timezone: userTz,
-      });
-
-      // Also stash for client-side local notification (guaranteed delivery)
-      if (!ctx._pendingNotifications) ctx._pendingNotifications = [];
-      ctx._pendingNotifications.push({
-        title: args.title,
-        body: args.body,
-        category: args.category || null,
-        delaySec,
       });
 
       const delayDesc = delaySec >= 3600 ? `${Math.round(delaySec / 3600)} hour(s)` : `${Math.round(delaySec / 60)} minute(s)`;

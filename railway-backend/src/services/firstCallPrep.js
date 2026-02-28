@@ -101,7 +101,7 @@ async function prepareFirstCall(userId) {
 
   // ── Agent 1: Gemini — Script Generator ──
   const genAI = new GoogleGenerativeAI(GEMINI_API_KEY);
-  const gemini = genAI.getGenerativeModel({ model: "gemini-2.0-flash" });
+  const gemini = genAI.getGenerativeModel({ model: "gemini-3.1-flash-preview" });
 
   // ── Agent 2: Claude — Script Judge ──
   const ANTHROPIC_API_KEY = process.env.ANTHROPIC_API_KEY;
@@ -110,14 +110,14 @@ async function prepareFirstCall(userId) {
   if (hasJudge) {
     claude = new Anthropic({ apiKey: ANTHROPIC_API_KEY });
     await logEvent("agents_init", "completed", {
-      generator: "gemini-2.0-flash",
+      generator: "gemini-3.1-flash-preview",
       judge: "claude-sonnet-4-6",
       mode: "dual-agent adversarial",
       detail: "Judge is fully independent — uses the Hook Opener Rubric (8 dimensions, 0-5 each, /40). Generator never sees rubric scoring logic. Judge is instructed to be strict and find faults.",
     });
   } else {
     await logEvent("agents_init", "completed", {
-      generator: "gemini-2.0-flash",
+      generator: "gemini-3.1-flash-preview",
       judge: null,
       mode: "single-pass (no ANTHROPIC_API_KEY)",
     });

@@ -8,7 +8,7 @@ const { decrypt } = require("./encryption");
 const { emitPipelineEvent } = require("./pipelineEmitter");
 
 const MAX_ITERATIONS = 5;
-const MIN_SCORE = 36; // out of 40 (90% bar)
+const MIN_SCORE = 32; // out of 40 (80% bar)
 
 /**
  * prepareFirstCall — Dual-agent first-call script generation with pipeline logging.
@@ -20,7 +20,7 @@ const MIN_SCORE = 36; // out of 40 (90% bar)
  *   the judge is never told to be lenient, never sees generator instructions,
  *   and is explicitly instructed to find faults.
  *
- * The two agents negotiate: if the judge scores below 36/40 (90%), the generator
+ * The two agents negotiate: if the judge scores below 32/40 (80%), the generator
  * gets the judge's full critique and must rework. This continues up to 5 iterations
  * until the judge is satisfied.
  *
@@ -61,7 +61,7 @@ async function prepareFirstCall(userId) {
   await logEvent("load_context", "running", {
     detail: "Loading patient data and compacted memory",
     maxIterations: MAX_ITERATIONS,
-    minScore: `${MIN_SCORE}/40 (90%)`,
+    minScore: `${MIN_SCORE}/40 (80%)`,
   });
   const compactedCtx = await getCompactedContext(userId);
   const [mem] = await db.select().from(patientMemory).where(eq(patientMemory.userId, userId));
@@ -266,7 +266,7 @@ async function prepareFirstCall(userId) {
       totalScore: judgeResult.total_score,
       maxScore: 40,
       percentage: `${scorePercentage}%`,
-      threshold: `${MIN_SCORE}/40 (90%)`,
+      threshold: `${MIN_SCORE}/40 (80%)`,
       passed: judgeResult.total_score >= MIN_SCORE,
       dimensions: judgeResult.dimensions,
       qualityChecks: judgeResult.quality_checks || null,
@@ -290,7 +290,7 @@ async function prepareFirstCall(userId) {
         score: judgeResult.total_score,
         maxScore: 40,
         percentage: `${scorePercentage}%`,
-        reason: `Score ${judgeResult.total_score}/40 (${scorePercentage}%) >= threshold ${MIN_SCORE}/40 (90%)`,
+        reason: `Score ${judgeResult.total_score}/40 (${scorePercentage}%) >= threshold ${MIN_SCORE}/40 (80%)`,
         finalScript: bestPrep.opening_script,
         finalHookAnchor: bestPrep.hook_anchor,
         finalTalkingPoints: bestPrep.talking_points,
@@ -315,7 +315,7 @@ async function prepareFirstCall(userId) {
       score: judgeResult.total_score,
       maxScore: 40,
       percentage: `${scorePercentage}%`,
-      reason: `Score ${judgeResult.total_score}/40 (${scorePercentage}%) < threshold ${MIN_SCORE}/40 (90%) — judge rejected, sending critique back to generator`,
+      reason: `Score ${judgeResult.total_score}/40 (${scorePercentage}%) < threshold ${MIN_SCORE}/40 (80%) — judge rejected, sending critique back to generator`,
       weakDimensions: weakDims,
       overallFeedback: judgeResult.overall_feedback,
       specificImprovements: judgeResult.specific_improvements,
@@ -449,6 +449,17 @@ Template B (Win Frame + Two Doors):
 
 Template C (Surprise Reframe + Single Question):
 "Most people think [common belief]. Your record suggests [reframe]. What would make this feel easy to start this week?"
+
+## Scoring Rubric (your script will be judged on these 8 dimensions, each 0-5, total /40 — you need ${MIN_SCORE}/40 to pass)
+
+1. **Personal Relevance** — Cite ONE specific detail from the patient's actual health history tied to their daily life. The patient should think "they actually read my chart."
+2. **Curiosity / Tension** — Create a genuine "wait, what?" moment through contrast, surprise, or reframe. NOT alarm or anxiety.
+3. **Emotional Safety + Trust** — Fully collaborative, zero judgment, "we" language. Warm and human.
+4. **Speed to Client Talking** — Patient invited to speak within 1-2 sentences (10-15 seconds). Get out of the way fast.
+5. **Clarity of Today's Win** — One crisp, concrete goal with tangible payoff. "4-week experiment," "one lever."
+6. **Agency + Choice** — Present clear options (A/B/C, two doors). Patient genuinely chooses their path.
+7. **Energy + Voice** — Human, confident, lightly playful. Sounds like a real person, not a chatbot or doctor reading notes.
+8. **Brevity / Cognitive Load** — One idea, one hook, one question. Under 30 seconds read aloud.
 
 ## Quality Checks (your output must pass all of these)
 - ONE anchor detail only
@@ -676,7 +687,7 @@ Return JSON:
   "total_score": <sum of 8 dimension scores, 0-40>,
   "reasoning_summary": "3-5 sentences: your overall reasoning process and what drove your scores. Be specific.",
   "overall_feedback": "2-3 sentences: the biggest strengths and weaknesses",
-  "specific_improvements": "Exactly what to change to push above 36/40. Be concrete and actionable — don't just say 'be more specific', say exactly what to do differently."
+  "specific_improvements": "Exactly what to change to push above 32/40. Be concrete and actionable — don't just say 'be more specific', say exactly what to do differently."
 }`;
 
   // Use streaming — required for large thinking budgets (>10 min timeout)

@@ -297,9 +297,11 @@ export default function PipelineTabPage() {
     }
   };
 
+  const [callCooldown, setCallCooldown] = useState(false);
   const triggerCall = async (runIndex: number) => {
-    if (!selectedPatientId) return;
+    if (!selectedPatientId || callCooldown) return;
     setCallingRunIndex(runIndex);
+    setCallCooldown(true);
     try {
       const res = await fetch(`${RAILWAY_URL}/api/console/patients/${selectedPatientId}/trigger-call`, {
         method: "POST",
@@ -307,7 +309,9 @@ export default function PipelineTabPage() {
         body: JSON.stringify({ runIndex }),
       });
       const data = await res.json();
-      if (!data.success) {
+      if (data.success) {
+        alert("Call initiated — you should receive a phone call shortly.");
+      } else {
         alert(`Call failed: ${data.error || "Unknown error"}`);
       }
     } catch (e) {
@@ -315,6 +319,8 @@ export default function PipelineTabPage() {
       alert("Failed to trigger call");
     }
     setCallingRunIndex(null);
+    // 30s cooldown to prevent rapid-fire Twilio calls
+    setTimeout(() => setCallCooldown(false), 30000);
   };
 
   const toggleRun = (idx: number) => {

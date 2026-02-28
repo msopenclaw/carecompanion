@@ -43,11 +43,16 @@ async function processHealthRecord(recordId, userId) {
 
   // PDF and images — use Gemini Vision
   const genAI = new GoogleGenerativeAI(GEMINI_API_KEY);
-  const model = genAI.getGenerativeModel({ model: "gemini-2.5-flash" });
+  const model = genAI.getGenerativeModel({ model: "gemini-3.1-pro-preview" });
 
   const mimeType = record.contentType === "application/pdf" ? "application/pdf" : record.contentType;
 
-  const result = await model.generateContent({
+  console.log(`[HEALTH_RECORDS] Sending ${(fileData.length / 1024).toFixed(0)}KB ${mimeType} to Gemini Vision...`);
+  const startTime = Date.now();
+
+  // Wrap Gemini call with a 5-minute timeout
+  const timeoutMs = 5 * 60 * 1000;
+  const geminiPromise = model.generateContent({
     contents: [{
       role: "user",
       parts: [
@@ -85,17 +90,53 @@ Return ONLY valid JSON. Extract every piece of medical data you can find.`,
     },
   });
 
+  const timeoutPromise = new Promise((_, reject) =>
+    setTimeout(() => reject(new Error(`Gemini Vision timed out after ${timeoutMs / 1000}s`)), timeoutMs)
+  );
+
+  const result = await Promise.race([geminiPromise, timeoutPromise]);
+  const elapsed = ((Date.now() - startTime) / 1000).toFixed(1);
+  console.log(`[HEALTH_RECORDS] Gemini Vision responded in ${elapsed}s`);
+
+  // Capture response text ONCE — calling .text() multiple times may exhaust the stream
+  const rawResponseText = result.response.text();
+  console.log(`[HEALTH_RECORDS] Response length: ${rawResponseText?.length || 0} chars`);
+
   let extractedData;
   try {
-    extractedData = JSON.parse(result.response.text());
-  } catch {
-    extractedData = { raw_text: result.response.text(), parse_error: true };
+    let cleanText = rawResponseText || "";
+    // Strip markdown code fences if present (```json ... ```)
+    cleanText = cleanText.replace(/^```(?:json)?\s*\n?/i, "").replace(/\n?```\s*$/i, "").trim();
+    extractedData = JSON.parse(cleanText);
+    const condCount = extractedData.conditions?.length || 0;
+    const medCount = extractedData.medications?.length || 0;
+    const labCount = extractedData.lab_results?.length || 0;
+    console.log(`[HEALTH_RECORDS] Extracted: ${condCount} conditions, ${medCount} medications, ${labCount} labs, keys: ${Object.keys(extractedData).join(",")}`);
+  } catch (parseErr) {
+    console.error(`[HEALTH_RECORDS] JSON parse error: ${parseErr.message}`);
+    console.error(`[HEALTH_RECORDS] First 500 chars: ${rawResponseText?.substring(0, 500)}`);
+    console.error(`[HEALTH_RECORDS] Last 200 chars: ${rawResponseText?.substring(rawResponseText.length - 200)}`);
+    // Try regex fallback on the SAME captured text
+    const jsonMatch = rawResponseText?.match(/\{[\s\S]*\}/);
+    if (jsonMatch) {
+      try {
+        extractedData = JSON.parse(jsonMatch[0]);
+        console.log(`[HEALTH_RECORDS] Extracted via regex fallback: ${Object.keys(extractedData).join(",")}`);
+      } catch (e2) {
+        console.error(`[HEALTH_RECORDS] Regex fallback also failed: ${e2.message}`);
+        extractedData = { raw_text: rawResponseText?.substring(0, 5000), parse_error: true };
+      }
+    } else {
+      extractedData = { raw_text: rawResponseText?.substring(0, 5000), parse_error: true };
+    }
   }
 
   await db.update(healthRecords).set({
     extractedData,
     status: "processed",
   }).where(eq(healthRecords.id, recordId));
+
+  console.log(`[HEALTH_RECORDS] Record ${recordId} marked as processed`);
 
   // Trigger compaction after processing
   await compactMemory(userId);
@@ -108,7 +149,7 @@ Return ONLY valid JSON. Extract every piece of medical data you can find.`,
 
 async function extractFromText(xmlText, apiKey) {
   const genAI = new GoogleGenerativeAI(apiKey);
-  const model = genAI.getGenerativeModel({ model: "gemini-2.5-flash" });
+  const model = genAI.getGenerativeModel({ model: "gemini-3.1-pro-preview" });
 
   // Truncate to ~50K chars to avoid token limits
   const truncated = xmlText.length > 50000 ? xmlText.substring(0, 50000) : xmlText;
@@ -145,6 +186,20 @@ async function compactMemory(userId, logPipelineEvent = null) {
 
   console.log(`[EHR_COMPACTION] Starting compaction for user ${userId}`);
 
+  // Wait for any pending health records to finish processing (up to 3 min)
+  const maxWait = 180_000;
+  const pollInterval = 5_000;
+  let waited = 0;
+  while (waited < maxWait) {
+    const pendingRecords = await db.select({ id: healthRecords.id })
+      .from(healthRecords)
+      .where(and(eq(healthRecords.userId, userId), eq(healthRecords.status, "pending")));
+    if (pendingRecords.length === 0) break;
+    console.log(`[EHR_COMPACTION] Waiting for ${pendingRecords.length} pending health record(s) to finish processing...`);
+    await new Promise(r => setTimeout(r, pollInterval));
+    waited += pollInterval;
+  }
+
   // Gather all data sources
   const since90d = new Date(Date.now() - 90 * 24 * 60 * 60 * 1000);
 
@@ -157,14 +212,6 @@ async function compactMemory(userId, logPipelineEvent = null) {
     .where(and(eq(vitals.patientId, userId), ne(vitals.source, "manual")))
     .orderBy(desc(vitals.recordedAt))
     .limit(100);
-  const meds = await db.select().from(medications)
-    .where(eq(medications.patientId, userId));
-  const recentMedLogs = await db.select().from(medicationLogs)
-    .where(eq(medicationLogs.patientId, userId))
-    .orderBy(desc(medicationLogs.scheduledAt))
-    .limit(50);
-  const [prefs] = await db.select().from(userPreferences)
-    .where(eq(userPreferences.userId, userId));
 
   // Decrypt profile PII
   if (profile) {
@@ -182,78 +229,41 @@ async function compactMemory(userId, logPipelineEvent = null) {
 
   // Verbose: log data sources found
   await logEvent("ehr_data_scan", "completed", {
-    detail: "Scanned patient data sources (HIE records + Apple HealthKit vitals only, manual entries excluded)",
+    detail: "Scanned data sources: uploaded health records + Apple HealthKit device vitals only (no self-reported app data)",
     healthRecordsCount: records.length,
     processedRecordsCount: extractedRecords.length,
-    vitalsCount: recentVitals.length,
-    medicationsCount: meds.length,
-    medicationLogsCount: recentMedLogs.length,
-    hasProfile: !!profile,
-    profileSummary: profile ? {
-      name: `${profile.firstName} ${profile.lastName}`,
-      glp1: profile.glp1Medication || "none",
-      conditions: profile.conditions || [],
-      sideEffects: profile.currentSideEffects || [],
-    } : null,
+    appleHealthVitalsCount: recentVitals.length,
+    patientName: profile ? `${profile.firstName} ${profile.lastName}` : "unknown",
   });
 
-  // Build data bundle for Gemini
+  // Build data bundle for Gemini — ONLY health records + Apple HealthKit data
+  // Do NOT include self-reported profile data (GLP-1, conditions, goals, preferences)
+  // or app-entered medications. The agent should only work from clinical documents
+  // and device-sourced vitals.
   const dataBundle = {
-    profile: profile ? {
+    demographics: profile ? {
       name: `${profile.firstName} ${profile.lastName}`,
       dob: profile.dateOfBirth,
       gender: profile.gender,
-      conditions: profile.conditions,
-      sideEffects: profile.currentSideEffects,
-      allergies: profile.allergies,
-      goals: profile.goals,
-      glp1: profile.glp1Medication ? `${profile.glp1Medication} ${profile.glp1Dosage}` : null,
-      glp1StartDate: profile.glp1StartDate,
-      injectionDay: profile.injectionDay,
       ageBracket: profile.ageBracket,
     } : null,
     healthRecords: extractedRecords,
-    medications: meds.map(m => ({
-      name: m.name, dosage: m.dosage, frequency: m.frequency,
-      isGlp1: m.isGlp1, isActive: m.isActive,
-    })),
-    recentVitals: summarizeVitals(recentVitals),
-    adherence: computeAdherence(recentMedLogs),
-    preferences: prefs ? {
-      checkinFrequency: prefs.checkinFrequency,
-      preferredChannel: prefs.preferredChannel,
-      voiceCallFrequency: prefs.voiceCallFrequency,
-    } : null,
+    appleHealthVitals: summarizeVitals(recentVitals),
   };
-
-  // Verbose: log adherence (only if there are actual med logs)
-  const adherenceData = dataBundle.adherence;
-  if (adherenceData.total > 0) {
-    await logEvent("ehr_adherence", "completed", {
-      detail: "Medication adherence computed from recent logs",
-      adherenceRate: adherenceData.rate,
-      totalLogs: adherenceData.total,
-      takenCount: adherenceData.taken,
-      missedCount: adherenceData.total - adherenceData.taken,
-    });
-  }
 
   // Verbose: log what we're sending to Gemini
   await logEvent("ehr_gemini_analysis", "running", {
-    detail: "Sending patient data to Gemini for 3-tier memory compaction",
+    detail: "Sending health records + Apple HealthKit data to Gemini (no self-reported app data)",
     dataSummary: {
-      profileName: dataBundle.profile?.name || "unknown",
-      glp1: dataBundle.profile?.glp1 || "none",
-      conditions: dataBundle.profile?.conditions || [],
+      patientName: dataBundle.demographics?.name || "unknown",
       healthRecordsSent: extractedRecords.length,
-      medicationsSent: dataBundle.medications?.length || 0,
-      vitalsTypes: Object.keys(dataBundle.recentVitals || {}),
+      appleHealthVitalTypes: Object.keys(dataBundle.appleHealthVitals || {}),
     },
   });
 
   // Gemini compaction call — with heartbeat so UI shows progress
   const genAI = new GoogleGenerativeAI(GEMINI_API_KEY);
-  const model = genAI.getGenerativeModel({ model: "gemini-3.1-pro-preview" });
+  const model = genAI.getGenerativeModel({ model: "gemini-3-flash-preview" });
 
   const compactionStart = Date.now();
   const heartbeat = setInterval(async () => {
@@ -270,7 +280,11 @@ async function compactMemory(userId, logPipelineEvent = null) {
     contents: [{
       role: "user",
       parts: [{
-        text: `You are a clinical data compaction engine. Given this patient's health data from multiple sources, organize it into a 3-tier memory system.
+        text: `You are a clinical data compaction engine. You are given ONLY two data sources:
+1. Uploaded medical records (health records from HIE, doctor visits, lab reports, etc.)
+2. Apple HealthKit device data (steps, heart rate, blood pressure, etc. from wearables)
+
+IMPORTANT: Only reference information actually present in these data sources. Do NOT fabricate medications, conditions, or treatments that are not documented below. If the data is sparse, say so — do not fill gaps with assumptions.
 
 PATIENT DATA:
 ${JSON.stringify(dataBundle, null, 2)}
@@ -314,10 +328,12 @@ Produce a JSON response with this exact structure:
 }
 
 Rules:
-- Tag trust levels on conditions: "high" = from medical records, "medium" = self-reported, "low" = inferred
-- For insights, find NON-OBVIOUS connections (e.g., medication interactions, lifestyle impacts on conditions, timing patterns)
-- For care_gaps, identify overdue screenings, unfilled prescriptions, missing follow-ups based on guidelines
+- ONLY use data from the healthRecords and appleHealthVitals fields above. Do NOT reference medications, conditions, or goals that are not in these sources.
+- Tag trust levels: "high" = from medical records, "low" = inferred from device data patterns
+- For insights, find NON-OBVIOUS connections in the actual records (e.g., lab trends, vital patterns, medication interactions documented in records)
+- For care_gaps, identify overdue screenings, unfilled prescriptions, missing follow-ups based on what the records show
 - For hook_anchor, pick the detail that creates maximum curiosity without alarm (per Hook Opener Rubric: one anchor, curiosity/contrast, no fear)
+- If healthRecords is empty and only device vitals are available, base insights entirely on the device data patterns
 - Keep total output under 2000 tokens`,
       }],
     }],

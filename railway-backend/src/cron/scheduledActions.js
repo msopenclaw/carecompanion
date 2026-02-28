@@ -175,8 +175,8 @@ async function getSmartContent(action) {
     const prompt = `Generate a short, warm push notification body (max 120 chars) for this patient.
 
 TYPE: ${typeDescriptions[action.actionType] || action.actionType}
-PATIENT: ${ctx.firstName}, ${ctx.ageBracket || "adult"}, GLP-1 Week ${ctx.weekNumber || "?"}
-MEDICATION: ${ctx.glp1Med || "GLP-1"} ${ctx.glp1Dosage || ""}
+PATIENT: ${ctx.firstName}, ${ctx.ageBracket || "adult"}, Week ${ctx.weekNumber || "?"}
+MEDICATION: ${ctx.glp1Med || "medication"} ${ctx.glp1Dosage || ""}
 SIDE EFFECTS: ${ctx.sideEffects || "none reported"}
 GOALS: ${ctx.goals || "not set"}
 TODAY SO FAR: ${ctx.medsTakenToday}/${ctx.totalMeds} meds taken, ${ctx.waterToday || 0}oz water
@@ -185,7 +185,7 @@ MOOD: ${ctx.recentMood || "not logged"}
 Write as ${ctx.coordinatorName || "the care coordinator"}, conversational & encouraging.
 ${action.actionType === "med_reminder" ? `Mention the specific medication: ${action.label}.` : ""}
 ${action.actionType === "hydration_reminder" ? `Reference actual intake: ${ctx.waterToday || 0}oz of 64oz goal.` : ""}
-${action.actionType === "checkin_reminder" ? "Reference something relevant — their GLP-1 week, side effects, or a recent milestone." : ""}
+${action.actionType === "checkin_reminder" ? "Reference something relevant — their medication week, side effects, or a recent milestone." : ""}
 ${action.actionType === "daily_call" ? "Invite them to a quick voice check-in with their coordinator." : ""}
 
 Return ONLY the notification body text. No quotes, no prefix.`;

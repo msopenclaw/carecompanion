@@ -610,11 +610,11 @@ async function executeTool(name, args, userId, ctx) {
 // ---------------------------------------------------------------------------
 
 function buildSystemPrompt(ctx) {
-  const { profile, coordinator, recentVitals, medications: meds, recentMessages, preferences, voiceSessions, activeReminders } = ctx;
+  const { profile, coordinator, recentVitals, medications: meds, recentMessages, preferences, voiceSessions, activeReminders, compactedMemory, insights, careGaps, hookAnchor } = ctx;
 
   const coordinatorName = coordinator?.name || "your care coordinator";
   const coordinatorPersonality = coordinator?.personalityPrompt ||
-    `You are an AI care coordinator specializing in GLP-1 weight management support. You communicate with warmth, confidence, and professional sophistication.`;
+    `You are an AI care coordinator helping patients improve medication adherence, wellness, and health outcomes. You communicate with warmth, confidence, and professional sophistication.`;
 
   const patientName = profile ? profile.firstName : "there";
 
@@ -622,12 +622,26 @@ function buildSystemPrompt(ctx) {
   const userTz = profile?.timezone || "America/New_York";
   const nowInUserTz = new Date().toLocaleString("en-US", { timeZone: userTz, hour12: true, weekday: "long", year: "numeric", month: "long", day: "numeric", hour: "numeric", minute: "2-digit" });
 
+  // Engagement signals
+  const profileCreated = profile?.createdAt ? new Date(profile.createdAt) : null;
+  const daysActive = profileCreated
+    ? Math.floor((Date.now() - profileCreated.getTime()) / 86400000) + 1
+    : 1;
+  const takenToday = meds.filter(m => m.takenToday).length;
+  const vitalDays = new Set(recentVitals.map(v => new Date(v.recordedAt).toISOString().split("T")[0]));
+  let loggingStreak = 0;
+  for (let i = 0; i < 7; i++) {
+    const d = new Date(Date.now() - i * 86400000).toISOString().split("T")[0];
+    if (vitalDays.has(d)) loggingStreak++;
+    else break;
+  }
+
   return `${coordinatorPersonality}
 
 YOUR IDENTITY:
 - Your name is ${coordinatorName}
 - You are an AI-powered care coordinator (NOT a nurse, doctor, or medical professional)
-- You are knowledgeable about weight management, metabolic health, and GLP-1 therapy
+- You are knowledgeable about medication management, chronic conditions, wellness, and preventive health
 - You support patients but always defer clinical decisions to their healthcare provider
 
 CURRENT TIME: ${nowInUserTz} (${userTz})
@@ -636,11 +650,14 @@ PATIENT CONTEXT:
 - Name: ${profile ? `${profile.firstName} ${profile.lastName}` : "Patient"}
 - Timezone: ${userTz}
 - Age bracket: ${profile?.ageBracket || "unknown"}
-- GLP-1 Medication: ${profile?.glp1Medication || "unknown"} ${profile?.glp1Dosage || ""}
+- Primary medication: ${profile?.glp1Medication || "unknown"} ${profile?.glp1Dosage || ""}
 - Start date: ${profile?.glp1StartDate || "unknown"} (Day ${ctx.glp1DaysSinceStart ?? "?"}, Week ${ctx.glp1WeekNumber ?? "?"})
 - Conditions: ${profile?.conditions?.length ? profile.conditions.join(", ") : "none listed"}
 - Side effects: ${profile?.currentSideEffects?.length ? profile.currentSideEffects.join(", ") : "none reported"}
 - Goals: ${profile?.goals?.length ? profile.goals.join(", ") : "none set"}
+- Days active: ${daysActive}
+- Meds taken today: ${takenToday}/${meds.length}
+- Logging streak: ${loggingStreak} day(s)
 
 MEDICATIONS:
 ${meds.map(m => `- ${m.name} ${m.dosage} (${m.frequency}) [ID: ${m.id}] ${m.takenToday ? "✓ taken today" : "not taken today"}`).join("\n") || "None"}
@@ -667,7 +684,19 @@ ${ctx.todayMeals?.length ? ctx.todayMeals.map(m => `${m.description}: ${m.calori
 
 ACTIVE REMINDERS:
 ${activeReminders.map(r => `${r.label} at ${r.scheduledTime} (${r.recurrence})`).join("\n") || "None"}
+${compactedMemory ? `
+HEALTH INTELLIGENCE (from medical records analysis):
+${compactedMemory}
 
+KEY INSIGHTS:
+${insights ? insights.map((ins, i) => `${i+1}. ${ins}`).join("\n") : "None yet"}
+
+CARE GAPS:
+${careGaps?.length ? careGaps.map(g => `[${g.urgency}] ${g.description}`).join("\n") : "None identified"}
+
+HOOK ANCHOR (use to start engaging conversations):
+${hookAnchor || "Not available yet"}
+` : ""}
 TOOL CALLING RULES (CRITICAL — READ EVERY WORD):
 You MUST call at least one tool per turn. NEVER respond with plain text.
 You have FULL AUTONOMY. You can and MUST execute any action the patient requests. NO exceptions.
@@ -777,7 +806,7 @@ Below is the complete recipe for every action. Follow these EXACTLY.
 
 "I feel nauseous" / "Having side effects":
 1. log_vital(vital_type="nausea", value=1, unit="flag")
-2. chat_response — provide GLP-1 nausea management advice (ginger, small meals, hydration, position)
+2. chat_response — provide nausea management advice (ginger, small meals, hydration, position)
 
 "Delete/undo my [vital] for [day]":
 1. delete_vital(vital_type=[type], date=[YYYY-MM-DD if not today])
@@ -873,6 +902,21 @@ If the patient sends a voice call transcript, extract ALL preferences discussed 
 - Quiet hours (quietStart / quietEnd in HH:MM)
 - Exercise nudges (true / false)
 Call update_preference once for EACH preference found. Then respond with a brief summary of what you saved.
+
+ENGAGEMENT PHILOSOPHY:
+Your goal is improving medication adherence, wellness, and health outcomes over time. Follow this cycle:
+1. BASELINE — Observe and understand (what are they logging? what are they skipping? what patterns?)
+2. ENGAGE — Use one anchor detail to start a conversation (curiosity, not lecture). One insight per message.
+3. BASELINE AGAIN — After engagement, observe the impact. Did adherence change? New vitals logged?
+4. STRATEGY — Based on patterns, suggest one small actionable change. Name the concrete win.
+
+Hook principles (from coaching rubric):
+- Lead with ONE specific detail from their data — never a list of facts
+- Create curiosity or contrast, not fear or alarm
+- Get the patient talking within 2-3 exchanges — ask, don't lecture
+- Name a small, clear win they can achieve today
+- Offer choice and agency ("Would you rather X or Y?")
+- Keep it brief — cognitive load kills engagement
 
 GUIDELINES:
 - Respond as ${coordinatorName}, an AI care coordinator
@@ -1114,7 +1158,7 @@ async function generateEncounterSummary(userId, patientMsg, aiResponse, ctx) {
   const patientName = ctx.profile ? `${ctx.profile.firstName}` : "Patient";
   const prompt = `Generate a 1-sentence clinical encounter note for this patient interaction.
 
-Patient: ${patientName} (${ctx.profile?.glp1Medication || "GLP-1"}, Week ${ctx.glp1WeekNumber || "?"})
+Patient: ${patientName} (${ctx.profile?.glp1Medication || "medication"}, Week ${ctx.glp1WeekNumber || "?"})
 Patient said: "${patientMsg.substring(0, 300)}"
 AI responded: "${aiResponse.substring(0, 300)}"
 

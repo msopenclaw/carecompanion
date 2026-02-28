@@ -14,7 +14,7 @@ const AGENT_ID_MAP = {
   james: () => process.env.ELEVENLABS_AGENT_ID_JAMES,
 };
 
-// GET /api/voice/signed-url — get ElevenLabs conversation token (JWT for LiveKit)
+// GET /api/voice/signed-url — get ElevenLabs conversation token + dynamic variables
 router.get("/signed-url", async (req, res) => {
   try {
     const ELEVENLABS_API_KEY = process.env.ELEVENLABS_API_KEY;
@@ -64,55 +64,107 @@ router.get("/signed-url", async (req, res) => {
 
     const data = await response.json();
 
-    // Build patient context for the voice agent
-    let patientContext = "";
+    // Build dynamic variables for the ElevenLabs agent prompt template
+    // These populate {{variable_name}} placeholders in the agent's system prompt
+    let dynamicVariables = {};
     try {
+      const { getCompactedContext } = require("../services/ehrCompaction");
+      const { patientMemory: patientMemoryTable } = require("../db/schema");
+
       const [profile] = await db.select().from(userProfiles)
         .where(eq(userProfiles.userId, req.user.userId));
-      const meds = await db.select().from(medications)
-        .where(eq(medications.patientId, req.user.userId));
-      const [prefs] = await db.select().from(userPreferences)
-        .where(eq(userPreferences.userId, req.user.userId));
-      const recentVitals = await db.select().from(vitals)
-        .where(eq(vitals.patientId, req.user.userId))
-        .orderBy(desc(vitals.recordedAt))
-        .limit(10);
+      const firstName = profile ? decrypt(profile.firstName) : "there";
 
-      // Decrypt encrypted PII fields
-      if (profile) {
-        profile.firstName = decrypt(profile.firstName);
-        profile.lastName = decrypt(profile.lastName);
-        if (profile.conditions) profile.conditions = decryptJson(profile.conditions);
-        if (profile.currentSideEffects) profile.currentSideEffects = decryptJson(profile.currentSideEffects);
+      // Get compacted 3-tier memory
+      const compacted = await getCompactedContext(req.user.userId) || "";
+
+      // Get first-call prep from patient memory
+      const [mem] = await db.select().from(patientMemoryTable)
+        .where(eq(patientMemoryTable.userId, req.user.userId));
+      const prep = mem?.tier2?.first_call_prep || null;
+
+      const fallbackOpening = `Hey ${firstName}, this is ${coordinatorName} from TodyAI. How are you doing today?`;
+
+      // Format conversation flow as a readable script
+      let conversationGuide = "";
+      if (prep?.conversation_flow?.length) {
+        conversationGuide = prep.conversation_flow.map((phase, i) => {
+          let s = `Phase ${i + 1}: ${phase.phase || phase.name || ""}`;
+          if (phase.purpose) s += `\nPurpose: ${phase.purpose}`;
+          if (phase.script) s += `\nScript: ${phase.script}`;
+          if (phase.patient_signals_to_listen_for) s += `\nListen for: ${phase.patient_signals_to_listen_for}`;
+          if (phase.pivot_if) s += `\nPivot if: ${phase.pivot_if}`;
+          return s;
+        }).join("\n\n");
       }
 
-      const parts = [];
-      if (profile) {
-        parts.push(`Patient: ${profile.firstName || ""} ${profile.lastName || ""}`.trim());
-        if (profile.glp1Medication) parts.push(`GLP-1: ${profile.glp1Medication} ${profile.glp1Dosage || ""}`);
-        if (profile.injectionDay) parts.push(`Injection day: ${profile.injectionDay}`);
-        if (profile.conditions?.length) parts.push(`Conditions: ${profile.conditions.join(", ")}`);
-        if (profile.currentSideEffects?.length) parts.push(`Side effects: ${profile.currentSideEffects.join(", ")}`);
+      // Format hook candidates
+      let hookOptions = "";
+      if (prep?.hook_candidates?.length) {
+        hookOptions = prep.hook_candidates
+          .filter(h => h.type !== "negative")
+          .map(h => `- ${h.hook} (strength: ${h.strength || "medium"}, use when: ${h.when_to_use || "anytime"})`)
+          .join("\n");
+      }
+
+      // Format anticipated responses
+      let anticipatedResponses = "";
+      if (prep?.anticipated_responses?.length) {
+        anticipatedResponses = prep.anticipated_responses.map(r =>
+          `If patient says: "${r.patient_says || r.response || r}" → Respond: ${r.agent_responds || r.suggestion || ""}`
+        ).join("\n");
+      }
+
+      // Build patient context (compacted memory + basic profile fallback)
+      let patientContext = compacted;
+      if (!compacted && profile) {
+        const parts = [];
+        parts.push(`Patient: ${firstName}.`);
+        if (profile.glp1Medication) parts.push(`Medication: ${profile.glp1Medication} ${profile.glp1Dosage || ""}`);
+        if (profile.conditions) {
+          const conditions = decryptJson(profile.conditions);
+          if (conditions?.length) parts.push(`Conditions: ${conditions.join(", ")}`);
+        }
         if (profile.goals?.length) parts.push(`Goals: ${profile.goals.join(", ")}`);
+        const meds = await db.select().from(medications)
+          .where(eq(medications.patientId, req.user.userId));
+        if (meds.length) {
+          parts.push(`Medications: ${meds.filter(m => m.isActive).map(m => `${m.name} ${m.dosage}`).join(", ")}`);
+        }
+        patientContext = parts.join("\n");
       }
-      if (meds.length) {
-        const medList = meds.filter(m => m.isActive).map(m => `${m.name} ${m.dosage} (${m.frequency})`);
-        if (medList.length) parts.push(`Medications: ${medList.join(", ")}`);
-      }
-      if (prefs) {
-        parts.push(`Check-in: ${prefs.checkinFrequency}, ${prefs.checkinTimePreference}`);
-        if (prefs.preferredChannel) parts.push(`Preferred channel: ${prefs.preferredChannel}`);
-      }
-      if (recentVitals.length) {
-        const vitalSummary = recentVitals.map(v => `${v.vitalType}: ${v.value}${v.unit}`).join(", ");
-        parts.push(`Recent vitals: ${vitalSummary}`);
-      }
-      patientContext = parts.join(". ") + ".";
+
+      dynamicVariables = {
+        patient_name: firstName,
+        coordinator_name: coordinatorName,
+        opening_script: prep?.opening_script || fallbackOpening,
+        hook_anchor: prep?.hook_anchor || "medication management",
+        talking_points: prep?.talking_points?.join("; ") || "",
+        follow_up_question: prep?.follow_up_question || "",
+        conversation_guide: conversationGuide,
+        hook_options: hookOptions,
+        anticipated_responses: anticipatedResponses,
+        notes_for_this_call: prep?.notes_for_next_call || "",
+        patient_context: patientContext,
+        care_gaps: mem?.rawRecords?.care_gaps?.map(g => `[${g.urgency}] ${g.description}`).join("; ") || "",
+        top_insights: mem?.rawRecords?.top_3_insights?.join("; ") || "",
+      };
     } catch (ctxErr) {
-      console.error("[Voice] Failed to build patient context:", ctxErr.message);
+      console.error("[Voice] Failed to build dynamic variables:", ctxErr.message);
+      dynamicVariables = {
+        patient_name: "there",
+        coordinator_name: coordinatorName,
+        opening_script: `Hey, this is ${coordinatorName} from TodyAI. How are you doing today?`,
+      };
     }
 
-    res.json({ signedUrl: data.token, userId: req.user.userId, patientContext });
+    res.json({
+      signedUrl: data.token,
+      userId: req.user.userId,
+      dynamicVariables,
+      // Keep patientContext for backward compat
+      patientContext: dynamicVariables.patient_context || "",
+    });
   } catch (err) {
     console.error("Voice token error:", err);
     res.status(500).json({ error: "Voice service error" });

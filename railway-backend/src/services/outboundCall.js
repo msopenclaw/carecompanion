@@ -2,6 +2,7 @@ const { eq } = require("drizzle-orm");
 const { db } = require("../db");
 const { userProfiles, patientMemory, voiceSessions, aiActions, userCoordinator, careCoordinators } = require("../db/schema");
 const { decrypt } = require("./encryption");
+const { getCompactedContext } = require("./ehrCompaction");
 
 /**
  * initiateOutboundCall — Call a patient via ElevenLabs Twilio integration.
@@ -53,13 +54,62 @@ async function initiateOutboundCall(userId) {
     }
   }
 
-  // Build dynamic variables for the agent
+  // Build dynamic variables — pass the full conversation guide to the agent
+  const prep = firstCallPrep;
+  const fallbackOpening = `Hey ${firstName}, this is ${coordinatorName} from TodyAI. Thanks for signing up — I wanted to check in and see how things are going. How are you feeling today?`;
+
+  // Format conversation flow as a readable script the agent can follow
+  let conversationGuide = "";
+  if (prep?.conversation_flow?.length) {
+    conversationGuide = prep.conversation_flow.map((phase, i) => {
+      let s = `Phase ${i + 1}: ${phase.phase || phase.name || ""}`;
+      if (phase.purpose) s += `\nPurpose: ${phase.purpose}`;
+      if (phase.script) s += `\nScript: ${phase.script}`;
+      if (phase.patient_signals_to_listen_for) s += `\nListen for: ${phase.patient_signals_to_listen_for}`;
+      if (phase.pivot_if) s += `\nPivot if: ${phase.pivot_if}`;
+      return s;
+    }).join("\n\n");
+  }
+
+  // Format hook candidates the agent can use if the opening doesn't land
+  let hookOptions = "";
+  if (prep?.hook_candidates?.length) {
+    hookOptions = prep.hook_candidates
+      .filter(h => h.type !== "negative")
+      .map(h => `- ${h.hook} (strength: ${h.strength || "medium"}, use when: ${h.when_to_use || "anytime"})`)
+      .join("\n");
+  }
+
+  // Format anticipated responses so the agent knows how to react
+  let anticipatedResponses = "";
+  if (prep?.anticipated_responses?.length) {
+    anticipatedResponses = prep.anticipated_responses.map(r =>
+      `If patient says: "${r.patient_says || r.response || r}" → Respond: ${r.agent_responds || r.suggestion || ""}`
+    ).join("\n");
+  }
+
+  // Get compacted patient context (3-tier memory)
+  let patientContext = "";
+  try {
+    patientContext = await getCompactedContext(userId) || "";
+  } catch (e) {
+    console.error("[OUTBOUND_CALL] Failed to get compacted context:", e.message);
+  }
+
   const dynamicVariables = {
     patient_name: firstName,
-    opening_script: firstCallPrep?.opening_script || `Hey ${firstName}, this is ${coordinatorName} from TodyAI. Thanks for signing up — I wanted to check in and see how things are going. How are you feeling today?`,
-    hook_anchor: firstCallPrep?.hook_anchor || "medication management",
-    talking_points: firstCallPrep?.talking_points?.join("; ") || "medication adherence, side effects, daily routine",
-    follow_up_question: firstCallPrep?.follow_up_question || "What's been the biggest challenge so far — remembering to take it, dealing with side effects, or fitting it into your routine?",
+    coordinator_name: coordinatorName,
+    opening_script: prep?.opening_script || fallbackOpening,
+    hook_anchor: prep?.hook_anchor || "medication management",
+    talking_points: prep?.talking_points?.join("; ") || "medication adherence, side effects, daily routine",
+    follow_up_question: prep?.follow_up_question || "What's been the biggest challenge so far — remembering to take it, dealing with side effects, or fitting it into your routine?",
+    conversation_guide: conversationGuide,
+    hook_options: hookOptions,
+    anticipated_responses: anticipatedResponses,
+    notes_for_this_call: prep?.notes_for_next_call || "",
+    patient_context: patientContext,
+    care_gaps: mem?.rawRecords?.care_gaps?.map(g => `[${g.urgency}] ${g.description}`).join("; ") || "",
+    top_insights: mem?.rawRecords?.top_3_insights?.join("; ") || "",
   };
 
   // Call ElevenLabs outbound API

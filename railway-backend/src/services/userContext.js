@@ -3,9 +3,10 @@ const { db } = require("../db");
 const {
   userProfiles, careCoordinators, userCoordinator, vitals,
   medications, medicationLogs, messages, userPreferences,
-  voiceSessions, scheduledActions, mealLogs,
+  voiceSessions, scheduledActions, mealLogs, patientMemory,
 } = require("../db/schema");
 const { decrypt, decryptJson } = require("./encryption");
+const { getCompactedContext } = require("./ehrCompaction");
 
 /**
  * Fetch comprehensive user context for agent consumption.
@@ -82,6 +83,24 @@ async function getUserContext(userId) {
     ? Math.floor((Date.now() - glp1Start.getTime()) / (24 * 60 * 60 * 1000))
     : null;
 
+  // Fetch compacted patient memory (from pipeline EHR analysis)
+  let compactedMemory = null;
+  let insights = null;
+  let careGaps = null;
+  let hookAnchor = null;
+  try {
+    compactedMemory = await getCompactedContext(userId);
+    const [memRecord] = await db.select().from(patientMemory)
+      .where(eq(patientMemory.userId, userId));
+    if (memRecord?.rawRecords) {
+      insights = memRecord.rawRecords.top_3_insights || null;
+      careGaps = memRecord.rawRecords.care_gaps || null;
+      hookAnchor = memRecord.rawRecords.hook_anchor || null;
+    }
+  } catch (err) {
+    // Patient memory may not exist yet — that's fine
+  }
+
   return {
     profile,
     coordinator,
@@ -94,6 +113,10 @@ async function getUserContext(userId) {
     glp1DaysSinceStart: daysSinceStart,
     glp1WeekNumber: daysSinceStart !== null ? Math.ceil(daysSinceStart / 7) : null,
     todayMeals,
+    compactedMemory,
+    insights,
+    careGaps,
+    hookAnchor,
   };
 }
 

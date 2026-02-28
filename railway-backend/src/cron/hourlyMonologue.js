@@ -161,8 +161,8 @@ async function processPatient(patient, model) {
 PATIENT PROFILE:
 - Name: ${profile.firstName} ${profile.lastName}
 - Age bracket: ${profile.ageBracket}
-- GLP-1 Medication: ${profile.glp1Medication || "not set"} ${profile.glp1Dosage || ""}
-- Week ${weekNumber || "?"} of GLP-1 journey (Day ${daysSinceStart || "?"})
+- Primary medication: ${profile.glp1Medication || "not set"} ${profile.glp1Dosage || ""}
+- Week ${weekNumber || "?"} of care journey (Day ${daysSinceStart || "?"})
 - Injection day: ${profile.injectionDay || "not set"}
 - Conditions: ${JSON.stringify(profile.conditions || [])}
 - Current side effects: ${JSON.stringify(profile.currentSideEffects || [])}
@@ -210,13 +210,11 @@ ${recentTriggers.length > 0 ? recentTriggers.map(t => `[${t.status}] ${t.type}: 
 
 COORDINATOR PERSONA: ${coordinator ? coordinator.name : "Not assigned"}
 
-GLP-1 CLINICAL KNOWLEDGE:
-- Week 1 nausea peaks Days 3-5
+CLINICAL KNOWLEDGE:
+- Week 1 nausea peaks Days 3-5 for injectable medications
 - Dehydration cycle: nausea → reduced intake → dehydration → more nausea
 - 64oz+ daily fluid target
 - Nausea tips: ginger, small frequent meals, injection timing, hydration
-- 47% discontinue within 12 months
-- 65+ patients are 20-30% more likely to quit
 - Muscle mass preservation critical for 65+
 
 HOOK MODEL ENGAGEMENT:

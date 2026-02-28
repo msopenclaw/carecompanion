@@ -678,6 +678,55 @@ router.post("/patients/:id/cancel-pipeline", async (req, res) => {
   }
 });
 
+// POST /api/console/patients/:id/trigger-call — trigger outbound call (optionally using a specific run's script)
+router.post("/patients/:id/trigger-call", async (req, res) => {
+  try {
+    const userId = req.params.id;
+    const { runIndex } = req.body || {};
+    const { initiateOutboundCall } = require("../services/outboundCall");
+
+    let prepOverride = null;
+
+    // If runIndex specified, extract the accepted script from that run
+    if (runIndex !== undefined) {
+      const [mem] = await db.select().from(patientMemory).where(eq(patientMemory.userId, userId));
+      if (!mem) return res.status(404).json({ error: "No patient memory" });
+
+      const runs = (mem.tier2 || {}).pipeline_runs || [];
+      if (runIndex < 0 || runIndex >= runs.length) {
+        return res.status(400).json({ error: `Run index ${runIndex} out of range (${runs.length} runs)` });
+      }
+
+      const run = runs[runIndex];
+      const accepted = run.events?.find(e => e.step === "script_accepted" && e.status === "completed");
+      if (!accepted) {
+        return res.status(400).json({ error: `Run #${runIndex + 1} has no accepted script` });
+      }
+
+      // Reconstruct prep from the accepted event
+      prepOverride = {
+        opening_script: accepted.finalScript,
+        hook_anchor: accepted.finalHookAnchor,
+        talking_points: accepted.finalTalkingPoints || [],
+        follow_up_question: accepted.finalFollowUp,
+        hook_candidates: accepted.hookCandidates || [],
+        conversation_flow: accepted.conversationFlow || [],
+        anticipated_responses: accepted.anticipatedResponses || [],
+        notes_for_next_call: accepted.notesForNextCall || null,
+      };
+      console.log(`[CONSOLE] Triggering call for ${userId} using Run #${runIndex + 1} script`);
+    } else {
+      console.log(`[CONSOLE] Triggering call for ${userId} using latest first_call_prep`);
+    }
+
+    const result = await initiateOutboundCall(userId, prepOverride);
+    res.json(result);
+  } catch (err) {
+    console.error("Console trigger-call error:", err);
+    res.status(500).json({ error: "Failed to trigger call" });
+  }
+});
+
 // DELETE /api/console/patients/:id/pipeline-runs — delete pipeline runs
 // Body: { runIndex: number } to delete one, or omit to delete all
 router.delete("/patients/:id/pipeline-runs", async (req, res) => {

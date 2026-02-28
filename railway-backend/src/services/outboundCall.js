@@ -11,9 +11,10 @@ const { getCompactedContext } = require("./ehrCompaction");
  * Falls back to a generic opening if no prep exists.
  *
  * @param {string} userId
+ * @param {object} [prepOverride] — optional first-call prep to use instead of stored one (for per-run demos)
  * @returns {object} { success, callId?, error? }
  */
-async function initiateOutboundCall(userId) {
+async function initiateOutboundCall(userId, prepOverride) {
   const ELEVENLABS_API_KEY = process.env.ELEVENLABS_API_KEY;
   if (!ELEVENLABS_API_KEY) throw new Error("No ELEVENLABS_API_KEY");
 
@@ -31,9 +32,16 @@ async function initiateOutboundCall(userId) {
     return { success: false, error: "no_phone_number" };
   }
 
-  // Load first-call prep from patient memory
-  const [mem] = await db.select().from(patientMemory).where(eq(patientMemory.userId, userId));
-  const firstCallPrep = mem?.tier2?.first_call_prep || null;
+  // Log masked phone for debugging
+  const masked = phone.length > 4 ? phone.slice(0, -4).replace(/\d/g, '*') + phone.slice(-4) : '****';
+  console.log(`[OUTBOUND_CALL] Calling ${masked} for user ${userId}`);
+
+  // Load first-call prep — use override if provided (per-run demo), otherwise from patient memory
+  let firstCallPrep = prepOverride || null;
+  if (!firstCallPrep) {
+    const [mem] = await db.select().from(patientMemory).where(eq(patientMemory.userId, userId));
+    firstCallPrep = mem?.tier2?.first_call_prep || null;
+  }
 
   // Get coordinator agent ID
   const [uc] = await db.select().from(userCoordinator).where(eq(userCoordinator.userId, userId));

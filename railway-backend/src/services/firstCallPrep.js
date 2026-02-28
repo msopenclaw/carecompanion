@@ -82,7 +82,7 @@ async function prepareFirstCall(userId) {
     })[0];
     currentFocus = topGap.description;
   } else if (profile.glp1Medication) {
-    currentFocus = `${profile.glp1Medication} therapy management`;
+    currentFocus = `medication adherence and wellness (currently on ${profile.glp1Medication})`;
   }
 
   await logEvent("load_context", "completed", {
@@ -101,7 +101,7 @@ async function prepareFirstCall(userId) {
 
   // ── Agent 1: Gemini — Script Generator ──
   const genAI = new GoogleGenerativeAI(GEMINI_API_KEY);
-  const gemini = genAI.getGenerativeModel({ model: "gemini-3.1-pro-preview" });
+  const gemini = genAI.getGenerativeModel({ model: "gemini-3.0-flash" });
 
   // ── Agent 2: Claude — Script Judge ──
   const ANTHROPIC_API_KEY = process.env.ANTHROPIC_API_KEY;
@@ -110,14 +110,14 @@ async function prepareFirstCall(userId) {
   if (hasJudge) {
     claude = new Anthropic({ apiKey: ANTHROPIC_API_KEY });
     await logEvent("agents_init", "completed", {
-      generator: "gemini-3.1-pro-preview",
+      generator: "gemini-3.0-flash",
       judge: "claude-sonnet-4-6",
       mode: "dual-agent adversarial",
       detail: "Judge is fully independent — uses the Hook Opener Rubric (8 dimensions, 0-5 each, /40). Generator never sees rubric scoring logic. Judge is instructed to be strict and find faults.",
     });
   } else {
     await logEvent("agents_init", "completed", {
-      generator: "gemini-3.1-pro-preview",
+      generator: "gemini-3.0-flash",
       judge: null,
       mode: "single-pass (no ANTHROPIC_API_KEY)",
     });
@@ -680,7 +680,7 @@ Return JSON:
   const stream = claude.messages.stream({
     model: "claude-sonnet-4-6",
     max_tokens: 128000,
-    thinking: { type: "enabled", budget_tokens: 8000 },
+    thinking: { type: "enabled", budget_tokens: 4000 },
     messages: [{ role: "user", content: judgePrompt }],
   });
 

@@ -407,67 +407,61 @@ function buildGeneratorPrompt(patientContext, judgeFeedback, iteration) {
 
 ## Skill: Health Coach Call Openings That Hook
 
-Generate an engaging 30-second opening script for a health coaching call that:
-- Feels personalized to the patient's health history
-- Quickly invites the patient to talk
-- Creates curiosity without fear
-- Sets up a small, winnable focus for the call
+Generate a SHORT opening script (2-3 sentences, under 20 seconds read aloud) for a health coaching call.
 
 ## Patient Context
 ${patientContext}
 
-## Core Principles (from the Hook skill doc)
+## HARD CONSTRAINTS — violating ANY of these means automatic failure
 
-### Use ONE "anchor detail"
-Pick one highly relevant, non-scary detail from the record. Examples:
-- a specific imaging result, a recurring symptom pattern, a lifestyle constraint, a prior clinician recommendation.
-Avoid dumping multiple labs/conditions upfront.
+1. **MAX 2-3 SENTENCES for the opening_script.** Count them. If you wrote more than 3 sentences, delete until you have 3.
+2. **EXACTLY ONE health detail from the patient's record.** Not two. Not three. ONE. Pick the most surprising or personally relevant one. Save everything else for talking_points.
+3. **The question MUST appear in sentence 2 or 3.** The patient must be invited to speak within 15 seconds.
+4. **MAX 50 WORDS total for the opening_script.** Count them. If you're over 50, cut ruthlessly.
+5. **Name a concrete win with a timeframe.** Not "let's explore" or "get a next step." Say "4-week experiment" or "one change this week" or "a 2-week test."
+6. **No medical jargon in the opener.** No "transaminases," "ALT," "Fibroscan," "radiculopathy." Use plain words the patient would use. Save clinical terms for talking_points.
 
-### Convert the anchor into a story-worthy contrast
-Examples: "Your spine is fine, your hips are the laggard." / "It's not a crisis—it's a 'respond now and win' signal."
+## How to write it
 
-### Ask an easy question fast
-Prefer multiple-choice, A/B/C, "pick one lever."
+Step 1: Pick ONE anchor detail — the single most interesting thing in their record.
+Step 2: Reframe it as a contrast or surprise (not scary).
+Step 3: Ask a simple A or B question immediately.
+Step 4: Count your words. If over 50, cut. Count your sentences. If over 3, cut.
 
-### Provide a small win frame
-"4-week experiment," "one lever," "frictionless change."
+## Example (notice: 2 sentences, 38 words, question in sentence 2)
 
-### Avoid fear and medical lecturing
-No catastrophizing. No shaming. Use "we" language.
+"Hey [name], I noticed something cool in your labs — [one surprise detail]. If we ran a quick 4-week experiment on that, would you rather focus on [option A] or [option B]?"
 
-### Use plain language
+## What NOT to do (these patterns have failed every time)
+
+- DON'T mention 2-3 health topics in the opener (e.g., A1c AND liver AND knee). Pick ONE.
+- DON'T write compound sentences with em-dashes and sub-clauses. Keep it simple.
+- DON'T frame scheduling an appointment as a "win." A win is a health outcome or personal experiment.
+- DON'T add filler like "I've been looking at your latest labs and..." — get to the point.
+- DON'T explain the anchor's medical significance in the opener. Create curiosity, don't resolve it.
+
+## Use plain language
 - Use the medication's brand name (e.g., "Wegovy") or say "your medication" — never use drug class terms like "GLP-1" or "semaglutide".
-- This is a general health care coordinator, not a medication-specific agent. Frame the call around the patient's overall health, not around a single drug.
-
-## Templates (pick the best fit or blend)
-
-Template A (Contrast + Game + Choice):
-"I re-opened your [test/record]. [One contrast]. Let's do a quick game: [3 options]. If you had to bet on one lever for the next month, which one — and why?"
-
-Template B (Win Frame + Two Doors):
-"For the next 4 weeks, we can aim for either [Door 1] or [Door 2]. Based on [anchor detail], which door feels most valuable right now?"
-
-Template C (Surprise Reframe + Single Question):
-"Most people think [common belief]. Your record suggests [reframe]. What would make this feel easy to start this week?"
+- This is a general health care coordinator, not a medication-specific agent.
 
 ## Scoring Rubric (your script will be judged on these 8 dimensions, each 0-5, total /40 — you need ${MIN_SCORE}/40 to pass)
 
-1. **Personal Relevance** — Cite ONE specific detail from the patient's actual health history tied to their daily life. The patient should think "they actually read my chart."
-2. **Curiosity / Tension** — Create a genuine "wait, what?" moment through contrast, surprise, or reframe. NOT alarm or anxiety.
-3. **Emotional Safety + Trust** — Fully collaborative, zero judgment, "we" language. Warm and human.
-4. **Speed to Client Talking** — Patient invited to speak within 1-2 sentences (10-15 seconds). Get out of the way fast.
-5. **Clarity of Today's Win** — One crisp, concrete goal with tangible payoff. "4-week experiment," "one lever."
-6. **Agency + Choice** — Present clear options (A/B/C, two doors). Patient genuinely chooses their path.
-7. **Energy + Voice** — Human, confident, lightly playful. Sounds like a real person, not a chatbot or doctor reading notes.
-8. **Brevity / Cognitive Load** — One idea, one hook, one question. Under 30 seconds read aloud.
+1. **Personal Relevance** — ONE specific detail from the patient's actual health history. The patient thinks "they read my chart."
+2. **Curiosity / Tension** — A genuine "wait, what?" moment. NOT alarm or anxiety. Leave the mystery open — don't explain it.
+3. **Emotional Safety + Trust** — Collaborative, zero judgment, "we" language.
+4. **Speed to Client Talking** — Patient speaks within 1-2 sentences (10-15 seconds). THIS IS CRITICAL. Scripts that make the patient wait longer than 15 seconds FAIL.
+5. **Clarity of Today's Win** — One concrete goal with a timeframe. "4-week experiment," "one lever this week." NOT "get a next step" or "schedule something."
+6. **Agency + Choice** — Clear A/B/C options. Patient chooses.
+7. **Energy + Voice** — Human, confident, lightly playful. Not a chatbot or doctor.
+8. **Brevity / Cognitive Load** — One idea, one hook, one question. Under 20 seconds. THIS IS CRITICAL. Scripts over 50 words FAIL.
 
-## Quality Checks (your output must pass all of these)
-- ONE anchor detail only
-- Question appears within first 2-3 sentences
-- No long lab lists
-- No alarm language ("risk of fracture soon!")
-- Clear agency and a small win
-- Under 40 seconds when read aloud`;
+## Quality Checks (your output must pass ALL)
+- EXACTLY one anchor detail (not two, not three — ONE)
+- Question appears in sentence 2 or 3
+- Opening script is 50 words or fewer
+- No alarm language
+- A concrete win with a timeframe is named
+- Under 20 seconds when read aloud`;
 
   if (judgeFeedback && iteration > 0) {
     prompt += `

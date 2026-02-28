@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useState } from "react";
+import { useConsole } from "../console-context";
 
 const RAILWAY_URL =
   process.env.NEXT_PUBLIC_RAILWAY_URL ||
@@ -29,26 +30,47 @@ interface AiAction {
 }
 
 export default function MonologuePage() {
+  const { selectedPatientId, selectedPatient } = useConsole();
   const [actions, setActions] = useState<AiAction[]>([]);
   const [filter, setFilter] = useState("all");
   const [loading, setLoading] = useState(true);
   const [expanded, setExpanded] = useState<string | null>(null);
 
   useEffect(() => {
-    const params = filter !== "all" ? `?urgency=${filter}` : "";
-    fetch(`${RAILWAY_URL}/api/console/monologue${params}`, {
-      headers: { Authorization: `Bearer ${getToken()}` },
-    })
+    const params = new URLSearchParams();
+    if (filter !== "all") params.set("urgency", filter);
+
+    // If a patient is selected, use the patient-specific endpoint
+    const url = selectedPatientId
+      ? `${RAILWAY_URL}/api/console/patients/${selectedPatientId}/monologue?limit=50${filter !== "all" ? `&urgency=${filter}` : ""}`
+      : `${RAILWAY_URL}/api/console/monologue${params.toString() ? `?${params}` : ""}`;
+
+    setLoading(true);
+    fetch(url, { headers: { Authorization: `Bearer ${getToken()}` } })
       .then((r) => r.json())
       .then(setActions)
       .catch(console.error)
       .finally(() => setLoading(false));
-  }, [filter]);
+  }, [filter, selectedPatientId]);
+
+  const patientName = selectedPatient?.profile
+    ? `${selectedPatient.profile.firstName} ${selectedPatient.profile.lastName}`
+    : null;
 
   return (
     <div>
       <div className="flex items-center justify-between mb-6">
-        <h1 className="text-2xl font-bold text-slate-900">AI Monologue Feed</h1>
+        <div className="flex items-center gap-3">
+          <h1 className="text-2xl font-bold text-slate-900">AI Monologue Feed</h1>
+          {patientName && (
+            <span className="text-sm bg-blue-50 text-blue-700 px-2.5 py-1 rounded-lg border border-blue-200">
+              {patientName}
+            </span>
+          )}
+          {!selectedPatientId && (
+            <span className="text-xs text-slate-400">All patients</span>
+          )}
+        </div>
         <div className="flex gap-2">
           {["all", "critical", "high", "medium", "low"].map((level) => (
             <button
@@ -75,10 +97,7 @@ export default function MonologuePage() {
       ) : (
         <div className="space-y-3">
           {actions.map((action) => (
-            <div
-              key={action.id}
-              className="bg-white rounded-xl shadow-sm border border-slate-200 p-4"
-            >
+            <div key={action.id} className="bg-white rounded-xl shadow-sm border border-slate-200 p-4">
               <div className="flex items-center justify-between mb-2">
                 <div className="flex items-center gap-2">
                   <span className={`text-xs px-2 py-0.5 rounded-full ${
@@ -89,32 +108,18 @@ export default function MonologuePage() {
                   }`}>
                     {action.urgency}
                   </span>
-                  <span className="text-xs bg-slate-100 text-slate-600 px-2 py-0.5 rounded-full">
-                    {action.action}
-                  </span>
-                  <span className="text-xs text-slate-400">
-                    {action.source}
-                  </span>
+                  <span className="text-xs bg-slate-100 text-slate-600 px-2 py-0.5 rounded-full">{action.action}</span>
+                  <span className="text-xs text-slate-400">{action.source}</span>
                 </div>
-                <span className="text-xs text-slate-400">
-                  {new Date(action.createdAt).toLocaleString()}
-                </span>
+                <span className="text-xs text-slate-400">{new Date(action.createdAt).toLocaleString()}</span>
               </div>
 
-              <div className="text-sm font-medium text-slate-900">
-                {action.assessment}
-              </div>
+              <div className="text-sm font-medium text-slate-900">{action.assessment}</div>
 
               <div className="flex gap-3 mt-1 text-xs text-slate-500">
-                {action.coordinatorPersona && (
-                  <span>Persona: {action.coordinatorPersona}</span>
-                )}
-                {action.engagementProfile && (
-                  <span>Age: {action.engagementProfile}</span>
-                )}
-                {action.glp1Context && (
-                  <span>{action.glp1Context}</span>
-                )}
+                {action.coordinatorPersona && <span>Persona: {action.coordinatorPersona}</span>}
+                {action.engagementProfile && <span>Age: {action.engagementProfile}</span>}
+                {action.glp1Context && <span>{action.glp1Context}</span>}
               </div>
 
               <button

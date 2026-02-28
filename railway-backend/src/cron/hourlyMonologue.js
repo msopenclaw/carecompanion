@@ -4,18 +4,20 @@ const { db } = require("../db");
 const {
   users, userProfiles, vitals, medications, medicationLogs,
   messages, aiActions, engagementConfig, userCoordinator, careCoordinators,
-  userPreferences,
+  userPreferences, triggers,
 } = require("../db/schema");
 const { sendPush } = require("../services/pushService");
 const { decrypt, decryptJson } = require("../services/encryption");
+const { getCompactedContext } = require("../services/ehrCompaction");
+const { generateDailyTriggers } = require("../services/triggerEngine");
 
 /**
  * Hourly Monologue — The Autonomous AI Brain
  *
  * For each active patient:
- * 1. OBSERVE: Gather all relevant data
- * 2. THINK: Call Gemini with structured prompt
- * 3. ACT: Execute the decision
+ * 1. OBSERVE: Gather all relevant data + compacted memory
+ * 2. THINK: Call Gemini with structured prompt (Hook Model aware)
+ * 3. ACT: Execute the decision (message, trigger, or call)
  * 4. LOG: Write full reasoning to ai_actions
  *
  * @param {string} [singleUserId] - If provided, run for just this user (manual trigger)
@@ -28,7 +30,7 @@ async function runHourlyMonologue(singleUserId) {
   }
 
   const genAI = new GoogleGenerativeAI(GEMINI_API_KEY);
-  const model = genAI.getGenerativeModel({ model: "gemini-3-flash-preview" });
+  const model = genAI.getGenerativeModel({ model: "gemini-2.0-flash" });
 
   // Get patients to process
   let patientUsers;
@@ -97,6 +99,24 @@ async function processPatient(patient, model) {
     .where(and(eq(aiActions.userId, userId), gte(aiActions.createdAt, since48h)))
     .orderBy(desc(aiActions.createdAt));
 
+  // Load compacted memory (falls back to null if not available)
+  let compactedCtx = null;
+  try {
+    compactedCtx = await getCompactedContext(userId);
+  } catch (e) {
+    // No compacted memory yet — use raw data
+  }
+
+  // Load recent triggers
+  let recentTriggers = [];
+  try {
+    recentTriggers = await db.select().from(triggers)
+      .where(and(eq(triggers.userId, userId), gte(triggers.createdAt, since48h)))
+      .orderBy(desc(triggers.createdAt));
+  } catch (e) {
+    // triggers table might not exist yet
+  }
+
   // Engagement config for age bracket
   let engConfig = null;
   if (profile.ageBracket) {
@@ -148,6 +168,9 @@ PATIENT PROFILE:
 - Current side effects: ${JSON.stringify(profile.currentSideEffects || [])}
 - Goals: ${JSON.stringify(profile.goals || [])}
 
+${compactedCtx ? `PATIENT MEMORY (compacted — use this as your primary knowledge source):
+${compactedCtx}
+` : ""}
 ENGAGEMENT RULES (${profile.ageBracket} age group):
 - Primary channel: ${engConfig?.primaryChannel || "text"}
 - Max daily messages: ${engConfig?.maxDailyMessages || 3}
@@ -173,14 +196,17 @@ MEDICATION ADHERENCE (last 7 days):
 - Total scheduled: ${totalScheduled}, taken: ${totalTaken}
 - Missed: ${recentMeds.filter((l) => l.status === "missed").length}
 
-RECENT VITALS (last 7 days, most recent first):
+${!compactedCtx ? `RECENT VITALS (last 7 days, most recent first):
 ${formatVitals(recentVitals)}
-
+` : ""}
 RECENT MESSAGES (last 48h):
 ${recentMessages.map((m) => `[${m.sender} ${m.createdAt}]: ${m.content}`).join("\n") || "No messages"}
 
 PREVIOUS AI ACTIONS (last 48h):
 ${recentActions.map((a) => `[${a.createdAt}] ${a.urgency} - ${a.action}: ${a.assessment}`).join("\n") || "No prior actions"}
+
+RECENT TRIGGERS (last 48h):
+${recentTriggers.length > 0 ? recentTriggers.map(t => `[${t.status}] ${t.type}: ${t.title}`).join("\n") : "No triggers"}
 
 COORDINATOR PERSONA: ${coordinator ? coordinator.name : "Not assigned"}
 
@@ -193,16 +219,31 @@ GLP-1 CLINICAL KNOWLEDGE:
 - 65+ patients are 20-30% more likely to quit
 - Muscle mass preservation critical for 65+
 
+HOOK MODEL ENGAGEMENT:
+When recommending an action, classify it as one of:
+- External Trigger: reminder, alert, or notification prompted by external data
+- Reward of Hunt: curiosity-driven insight, "did you know" finding from their data
+- Reward of Self: personal progress, score change, achievement
+- Investment: patient contributes data or sets goals (makes the system smarter)
+
+Prefer creating a TRIGGER (scheduled insight) over a direct message when the content is an insight or non-urgent finding. Triggers are tracked and deliver at optimal times.
+
 CURRENT TIME: ${new Date().toISOString()}
 
 Respond in valid JSON with this exact format:
 {
   "observation": "Brief summary of what you observed in the data",
-  "reasoning": "Your detailed internal reasoning process — think through risk factors, trends, timing, and what action would be most helpful",
+  "reasoning": "Your detailed internal reasoning process",
   "assessment": "One-sentence summary assessment",
   "urgency": "low|medium|high|critical",
-  "action": "none|send_message|call|escalate",
-  "message": "The exact message to send if action is send_message or call (in the coordinator's voice/style). null if action is none.",
+  "action": "none|send_message|call|escalate|create_trigger",
+  "hook_element": "external|hunt|self|investment|null",
+  "message": "The exact message to send if action is send_message or call. null if action is none.",
+  "trigger": {
+    "type": "health_insight|trend_alert|medication_connection|overdue_care|null",
+    "title": "Trigger title if action is create_trigger, null otherwise",
+    "body": "Trigger body if action is create_trigger, null otherwise"
+  },
   "escalation_target": "provider|emergency|null"
 }`;
 
@@ -240,7 +281,7 @@ Respond in valid JSON with this exact format:
     reasoning: decision.reasoning || "No notable changes",
     assessment: decision.assessment || "Stable",
     urgency: decision.urgency || "low",
-    action: decision.action || "none",
+    action: decision.action === "create_trigger" ? "none" : (decision.action || "none"),
     messageContent: decision.message,
     escalationTarget: decision.escalation_target,
     coordinatorPersona: coordinator?.name || null,
@@ -248,6 +289,26 @@ Respond in valid JSON with this exact format:
     glp1Context: `${profile.glp1Medication || "Unknown"} ${profile.glp1Dosage || ""}, Week ${weekNumber || "?"}, Day ${daysSinceStart || "?"}`,
     source: "cron",
   }).returning();
+
+  // Handle create_trigger action — queue a trigger instead of sending directly
+  if (decision.action === "create_trigger" && decision.trigger?.title && decision.trigger?.body) {
+    try {
+      await db.insert(triggers).values({
+        userId,
+        type: decision.trigger.type || "health_insight",
+        hookElement: decision.hook_element || "hunt",
+        title: decision.trigger.title,
+        body: decision.trigger.body,
+        priority: decision.urgency === "high" ? "high" : "medium",
+        scheduledFor: new Date(Date.now() + 30 * 60 * 1000), // 30 min from now
+        expiresAt: new Date(Date.now() + 24 * 60 * 60 * 1000),
+        status: "pending",
+      });
+      console.log(`[MONOLOGUE] Created trigger for ${userId}: ${decision.trigger.title}`);
+    } catch (e) {
+      console.error("[MONOLOGUE] Failed to create trigger:", e);
+    }
+  }
 
   // If action is send_message, create the message
   if (decision.action === "send_message" && decision.message) {
@@ -281,11 +342,21 @@ Respond in valid JSON with this exact format:
     });
   }
 
+  // Generate daily triggers if compacted memory available
+  if (compactedCtx) {
+    try {
+      await generateDailyTriggers(userId, compactedCtx);
+    } catch (e) {
+      // Non-critical — don't fail the monologue
+    }
+  }
+
   return {
     userId,
     action: decision.action,
     urgency: decision.urgency,
     assessment: decision.assessment,
+    hookElement: decision.hook_element || null,
   };
 }
 

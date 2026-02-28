@@ -1,13 +1,35 @@
 const express = require("express");
 const { eq, desc, and, gte, sql, count, inArray } = require("drizzle-orm");
 const { db } = require("../db");
+const multer = require("multer");
+const path = require("path");
+const fs = require("fs");
+const crypto = require("crypto");
 const {
   users, userProfiles, messages, aiActions, voiceSessions,
   escalations, vitals, medications, medicationLogs, engagementConfig,
-  userCoordinator, careCoordinators, userPreferences,
+  userCoordinator, careCoordinators, userPreferences, patientMemory,
+  healthRecords,
 } = require("../db/schema");
 const { decrypt, decryptJson } = require("../services/encryption");
 const { sendPush } = require("../services/pushService");
+const { processHealthRecord } = require("../services/ehrCompaction");
+
+// Multer for health record uploads
+const uploadsDir = path.join(__dirname, "../../uploads");
+if (!fs.existsSync(uploadsDir)) fs.mkdirSync(uploadsDir, { recursive: true });
+const uploadStorage = multer.diskStorage({
+  destination: (req, file, cb) => cb(null, uploadsDir),
+  filename: (req, file, cb) => cb(null, crypto.randomUUID() + path.extname(file.originalname)),
+});
+const upload = multer({
+  storage: uploadStorage,
+  limits: { fileSize: 20 * 1024 * 1024 },
+  fileFilter: (req, file, cb) => {
+    const allowed = ["application/pdf", "image/jpeg", "image/png", "image/heic", "application/xml", "text/xml"];
+    cb(null, allowed.includes(file.mimetype));
+  },
+});
 
 const router = express.Router();
 
@@ -234,10 +256,13 @@ router.get("/monologue", async (req, res) => {
 router.get("/calls", async (req, res) => {
   try {
     const limit = parseInt(req.query.limit) || 50;
+    const userId = req.query.userId;
 
-    const calls = await db.select().from(voiceSessions)
-      .orderBy(desc(voiceSessions.startedAt))
-      .limit(limit);
+    let query = db.select().from(voiceSessions);
+    if (userId) {
+      query = query.where(eq(voiceSessions.userId, userId));
+    }
+    const calls = await query.orderBy(desc(voiceSessions.startedAt)).limit(limit);
 
     res.json(calls);
   } catch (err) {
@@ -501,6 +526,102 @@ router.post("/call-request", async (req, res) => {
   } catch (err) {
     console.error("Console call-request error:", err);
     res.status(500).json({ error: "Failed to send call request" });
+  }
+});
+
+// GET /api/console/patients/:id/pipeline — pipeline log + first-call prep data
+router.get("/patients/:id/pipeline", async (req, res) => {
+  try {
+    const userId = req.params.id;
+    const [mem] = await db.select().from(patientMemory)
+      .where(eq(patientMemory.userId, userId));
+
+    if (!mem) {
+      return res.json({ pipelineLog: [], firstCallPrep: null, compactedAt: null });
+    }
+
+    const tier2 = mem.tier2 || {};
+    res.json({
+      pipelineLog: tier2.pipeline_log || [],
+      pipelineRuns: tier2.pipeline_runs || [],
+      firstCallPrep: tier2.first_call_prep || null,
+      compactedAt: mem.compactedAt,
+      hasTier1: !!mem.tier1,
+      hasTier2: !!mem.tier2,
+      hasTier3: !!mem.tier3,
+    });
+  } catch (err) {
+    console.error("Console pipeline error:", err);
+    res.status(500).json({ error: "Failed to fetch pipeline data" });
+  }
+});
+
+// POST /api/console/patients/:id/run-pipeline — trigger pipeline for a patient
+router.post("/patients/:id/run-pipeline", async (req, res) => {
+  try {
+    const userId = req.params.id;
+    const { runOnboardingPipeline } = require("../services/onboardingPipeline");
+    // Run async — respond immediately
+    runOnboardingPipeline(userId).catch(err => {
+      console.error(`[CONSOLE] Pipeline failed for ${userId}:`, err);
+    });
+    res.json({ status: "pipeline_started", userId });
+  } catch (err) {
+    console.error("Console run-pipeline error:", err);
+    res.status(500).json({ error: "Failed to start pipeline" });
+  }
+});
+
+// ---------------------------------------------------------------------------
+// Health Records — upload on behalf of patient + list
+// ---------------------------------------------------------------------------
+
+// GET /api/console/patients/:id/health-records — list uploaded records
+router.get("/patients/:id/health-records", async (req, res) => {
+  try {
+    const userId = req.params.id;
+    const records = await db.select({
+      id: healthRecords.id,
+      filename: healthRecords.filename,
+      contentType: healthRecords.contentType,
+      sizeBytes: healthRecords.sizeBytes,
+      status: healthRecords.status,
+      createdAt: healthRecords.createdAt,
+    }).from(healthRecords)
+      .where(eq(healthRecords.userId, userId))
+      .orderBy(desc(healthRecords.createdAt));
+    res.json(records);
+  } catch (err) {
+    console.error("Console health-records list error:", err);
+    res.status(500).json({ error: "Failed to list records" });
+  }
+});
+
+// POST /api/console/patients/:id/health-records/upload — upload on behalf of patient
+router.post("/patients/:id/health-records/upload", upload.single("file"), async (req, res) => {
+  try {
+    const userId = req.params.id;
+    const file = req.file;
+    if (!file) return res.status(400).json({ error: "No file uploaded" });
+
+    const [record] = await db.insert(healthRecords).values({
+      userId,
+      filename: file.originalname,
+      contentType: file.mimetype,
+      sizeBytes: file.size,
+      storageKey: file.filename,
+      status: "pending",
+    }).returning();
+
+    // Process async
+    processHealthRecord(record.id, userId).catch(err => {
+      console.error(`[CONSOLE] Health record processing failed for ${record.id}:`, err);
+    });
+
+    res.json({ id: record.id, filename: record.filename, status: "processing" });
+  } catch (err) {
+    console.error("Console health-records upload error:", err);
+    res.status(500).json({ error: "Upload failed" });
   }
 });
 

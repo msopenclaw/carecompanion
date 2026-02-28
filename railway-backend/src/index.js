@@ -28,8 +28,10 @@ const voiceApiRoutes = require("./routes/voiceApi");
 const agentToolsRoutes = require("./routes/agentTools");
 const tipsRoutes = require("./routes/tips");
 const nutritionRoutes = require("./routes/nutrition");
+const healthRecordsRoutes = require("./routes/healthRecords");
 const { runHourlyMonologue } = require("./cron/hourlyMonologue");
 const { runScheduledActions } = require("./cron/scheduledActions");
+const { deliverDueTriggers } = require("./services/triggerEngine");
 
 const app = express();
 app.set("trust proxy", 1);
@@ -84,6 +86,7 @@ app.use("/api/voice", authMiddleware, voiceApiRoutes);
 app.use("/api/agent-tools", agentToolsRoutes);
 app.use("/api/tips", authMiddleware, tipsRoutes);
 app.use("/api/nutrition", authMiddleware, nutritionRoutes);
+app.use("/api/health-records", authMiddleware, healthRecordsRoutes);
 
 // ---------------------------------------------------------------------------
 // Admin Routes (JWT + admin role required)
@@ -140,7 +143,16 @@ cron.schedule("* * * * *", async () => {
   }
 });
 
-console.log(`[CRON] Registered: monologue (${monologueCron}), scheduled actions (every minute)`);
+// Trigger delivery — every minute (alongside scheduled actions)
+cron.schedule("* * * * *", async () => {
+  try {
+    await deliverDueTriggers();
+  } catch (err) {
+    console.error("[CRON] Trigger delivery failed:", err);
+  }
+});
+
+console.log(`[CRON] Registered: monologue (${monologueCron}), scheduled actions (every minute), trigger delivery (every minute)`);
 
 // ---------------------------------------------------------------------------
 // Start Server
@@ -236,7 +248,47 @@ async function runStartupMigrations() {
     // Apple user ID for Apple Sign In duplicate prevention
     await sql`ALTER TABLE users ADD COLUMN IF NOT EXISTS apple_user_id VARCHAR(255) UNIQUE`;
 
-    console.log("[MIGRATION] scheduled_actions table + vital_type enum + goals + is_glp1 + patients backfill + meal_logs updated");
+    // Engagement agent pipeline tables
+    await sql`CREATE TABLE IF NOT EXISTS patient_memory (
+      id UUID DEFAULT gen_random_uuid() PRIMARY KEY,
+      user_id UUID NOT NULL UNIQUE REFERENCES users(id),
+      tier1 JSONB,
+      tier2 JSONB,
+      tier3 JSONB,
+      raw_records JSONB,
+      compacted_at TIMESTAMPTZ,
+      created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+      updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+    )`;
+
+    await sql`CREATE TABLE IF NOT EXISTS health_records (
+      id UUID DEFAULT gen_random_uuid() PRIMARY KEY,
+      user_id UUID NOT NULL REFERENCES users(id),
+      filename VARCHAR(255) NOT NULL,
+      content_type VARCHAR(100) NOT NULL,
+      size_bytes INTEGER,
+      storage_key VARCHAR(500) NOT NULL,
+      extracted_data JSONB,
+      status VARCHAR(20) NOT NULL DEFAULT 'pending',
+      created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+    )`;
+
+    await sql`CREATE TABLE IF NOT EXISTS triggers (
+      id UUID DEFAULT gen_random_uuid() PRIMARY KEY,
+      user_id UUID NOT NULL REFERENCES users(id),
+      type VARCHAR(50) NOT NULL,
+      hook_element VARCHAR(20),
+      title VARCHAR(200) NOT NULL,
+      body TEXT NOT NULL,
+      evidence JSONB,
+      priority VARCHAR(10) DEFAULT 'medium',
+      scheduled_for TIMESTAMPTZ,
+      expires_at TIMESTAMPTZ,
+      status VARCHAR(20) NOT NULL DEFAULT 'pending',
+      created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+    )`;
+
+    console.log("[MIGRATION] All tables migrated (including engagement pipeline)");
   } catch (err) {
     // IF NOT EXISTS not supported on older PG, enum value may already exist
     if (err.message && err.message.includes("already exists")) {

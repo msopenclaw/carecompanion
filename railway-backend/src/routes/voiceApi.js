@@ -119,4 +119,37 @@ router.get("/signed-url", async (req, res) => {
   }
 });
 
+// POST /api/voice/outbound-call — Initiate an outbound call to the patient
+router.post("/outbound-call", async (req, res) => {
+  try {
+    const { initiateOutboundCall } = require("../services/outboundCall");
+    const userId = req.user.userId;
+    const result = await initiateOutboundCall(userId);
+
+    // Auto-trigger engagement pipeline if it hasn't been run yet
+    try {
+      const { runOnboardingPipeline } = require("../services/onboardingPipeline");
+      const { patientMemory } = require("../db/schema");
+      const { eq } = require("drizzle-orm");
+      const { db } = require("../db");
+      const [mem] = await db.select().from(patientMemory).where(eq(patientMemory.userId, userId));
+      const pipelineLog = mem?.tier2?.pipeline_log;
+      const hasRun = pipelineLog && pipelineLog.length > 0;
+      if (!hasRun) {
+        console.log(`[VOICE_API] Auto-triggering pipeline for ${userId}`);
+        runOnboardingPipeline(userId, { skipOutboundCall: true }).catch(err => {
+          console.error(`[VOICE_API] Pipeline auto-trigger failed:`, err.message);
+        });
+      }
+    } catch (pipeErr) {
+      console.error(`[VOICE_API] Pipeline check failed:`, pipeErr.message);
+    }
+
+    res.json(result);
+  } catch (err) {
+    console.error("Outbound call error:", err);
+    res.status(500).json({ error: "Outbound call failed" });
+  }
+});
+
 module.exports = router;

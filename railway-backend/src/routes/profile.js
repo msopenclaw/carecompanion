@@ -23,6 +23,7 @@ router.get("/", async (req, res) => {
     if (profile.phone) profile.phone = decrypt(profile.phone);
     if (profile.conditions) profile.conditions = decryptJson(profile.conditions);
     if (profile.currentSideEffects) profile.currentSideEffects = decryptJson(profile.currentSideEffects);
+    if (profile.allergies) profile.allergies = decryptJson(profile.allergies);
 
     // Get coordinator
     const [uc] = await db.select().from(userCoordinator)
@@ -75,7 +76,7 @@ router.put("/", async (req, res) => {
       firstName, lastName, dateOfBirth, gender, phone, heightInches,
       startingWeight, conditions, activityLevel, glp1Medication,
       glp1Dosage, glp1StartDate, injectionDay, otherMedications,
-      currentSideEffects, goals,
+      currentSideEffects, allergies, goals,
     } = req.body;
 
     const updates = {};
@@ -103,6 +104,7 @@ router.put("/", async (req, res) => {
     if (injectionDay !== undefined) updates.injectionDay = injectionDay;
     if (otherMedications !== undefined) updates.otherMedications = otherMedications;
     if (currentSideEffects !== undefined) updates.currentSideEffects = currentSideEffects;
+    if (allergies !== undefined) updates.allergies = allergies;
     if (goals !== undefined) updates.goals = goals;
 
     // Encrypt PII fields before writing to DB
@@ -111,6 +113,7 @@ router.put("/", async (req, res) => {
     if (updates.phone) updates.phone = encrypt(updates.phone);
     if (updates.conditions) updates.conditions = encryptJson(updates.conditions);
     if (updates.currentSideEffects) updates.currentSideEffects = encryptJson(updates.currentSideEffects);
+    if (updates.allergies) updates.allergies = encryptJson(updates.allergies);
 
     updates.updatedAt = new Date();
 

@@ -1,8 +1,12 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useEffect, useState, useCallback } from "react";
 import { useParams } from "next/navigation";
 import Link from "next/link";
+import {
+  PipelineStep,
+  type PipelineData,
+} from "@/components/console/pipeline-components";
 
 const RAILWAY_URL =
   process.env.NEXT_PUBLIC_RAILWAY_URL ||
@@ -14,25 +18,59 @@ function getToken() {
     : "";
 }
 
+// ---------------------------------------------------------------------------
+// Main Page
+// ---------------------------------------------------------------------------
+
 export default function PatientDetailPage() {
   const { id } = useParams();
   const [patient, setPatient] = useState<Record<string, unknown> | null>(null);
   const [monologue, setMonologue] = useState<Record<string, unknown>[]>([]);
+  const [pipeline, setPipeline] = useState<PipelineData | null>(null);
   const [loading, setLoading] = useState(true);
+  const [runningPipeline, setRunningPipeline] = useState(false);
+
+  const headers = { Authorization: `Bearer ${getToken()}` };
+
+  const fetchPipeline = useCallback(() => {
+    fetch(`${RAILWAY_URL}/api/console/patients/${id}/pipeline`, { headers })
+      .then((r) => r.json())
+      .then(setPipeline)
+      .catch(console.error);
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [id]);
 
   useEffect(() => {
-    const headers = { Authorization: `Bearer ${getToken()}` };
     Promise.all([
       fetch(`${RAILWAY_URL}/api/console/patients/${id}`, { headers }).then((r) => r.json()),
       fetch(`${RAILWAY_URL}/api/console/patients/${id}/monologue?limit=20`, { headers }).then((r) => r.json()),
+      fetch(`${RAILWAY_URL}/api/console/patients/${id}/pipeline`, { headers }).then((r) => r.json()),
     ])
-      .then(([p, m]) => {
+      .then(([p, m, pl]) => {
         setPatient(p);
         setMonologue(m);
+        setPipeline(pl);
       })
       .catch(console.error)
       .finally(() => setLoading(false));
+  // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [id]);
+
+  const runPipeline = async () => {
+    setRunningPipeline(true);
+    try {
+      await fetch(`${RAILWAY_URL}/api/console/patients/${id}/run-pipeline`, {
+        method: "POST",
+        headers: { ...headers, "Content-Type": "application/json" },
+      });
+      // Poll for updates every 3 seconds
+      const interval = setInterval(() => fetchPipeline(), 3000);
+      setTimeout(() => clearInterval(interval), 120000); // Stop after 2 min
+    } catch (e) {
+      console.error("Run pipeline error:", e);
+    }
+    setRunningPipeline(false);
+  };
 
   if (loading) return <div className="text-slate-500">Loading...</div>;
   if (!patient) return <div className="text-red-500">Patient not found</div>;
@@ -40,6 +78,8 @@ export default function PatientDetailPage() {
   const profile = patient.profile as Record<string, unknown> | null;
   const coordinator = patient.coordinator as Record<string, unknown> | null;
   const engConfig = patient.engagementConfig as Record<string, unknown> | null;
+  const pipelineLog = pipeline?.pipelineLog || [];
+  const firstCallPrep = pipeline?.firstCallPrep;
 
   return (
     <div className="space-y-6">
@@ -114,6 +154,94 @@ export default function PatientDetailPage() {
             <div className="text-sm text-slate-400">No vitals recorded</div>
           )}
         </div>
+      </div>
+
+      {/* Engagement Pipeline */}
+      <div className="bg-white rounded-xl shadow-sm border border-slate-200 p-5">
+        <div className="flex items-center justify-between mb-4">
+          <div className="flex items-center gap-3">
+            <h2 className="font-semibold text-slate-900">Engagement Pipeline</h2>
+            {firstCallPrep && (
+              <span className={`text-xs font-mono font-bold px-2 py-0.5 rounded ${
+                (firstCallPrep.judge_score as number) >= 90 ? "bg-green-100 text-green-700" :
+                (firstCallPrep.judge_score as number) >= 70 ? "bg-amber-100 text-amber-700" :
+                "bg-slate-100 text-slate-600"
+              }`}>
+                Score: {firstCallPrep.judge_score as number}/100
+              </span>
+            )}
+            {firstCallPrep && (
+              <span className="text-xs text-slate-400">
+                {firstCallPrep.iterations as number} iteration{(firstCallPrep.iterations as number) !== 1 ? "s" : ""}
+              </span>
+            )}
+          </div>
+          <div className="flex items-center gap-2">
+            <Link
+              href={`/console/patients/${id}/pipeline`}
+              className="text-xs text-violet-600 hover:text-violet-800 px-2 py-1 rounded border border-violet-200 hover:bg-violet-50 font-medium"
+            >
+              View Full Pipeline &rarr;
+            </Link>
+            {pipelineLog.length > 0 && (
+              <button
+                onClick={fetchPipeline}
+                className="text-xs text-blue-600 hover:text-blue-800 px-2 py-1 rounded border border-blue-200 hover:bg-blue-50"
+              >
+                Refresh
+              </button>
+            )}
+            <button
+              onClick={runPipeline}
+              disabled={runningPipeline}
+              className="text-xs text-white bg-violet-600 hover:bg-violet-700 disabled:opacity-50 px-3 py-1.5 rounded-lg"
+            >
+              {runningPipeline ? "Starting..." : "Run Pipeline"}
+            </button>
+          </div>
+        </div>
+
+        {pipelineLog.length === 0 ? (
+          <div className="text-slate-400 text-sm py-8 text-center">
+            No pipeline has been run for this patient yet. Click &ldquo;Run Pipeline&rdquo; to start.
+          </div>
+        ) : (
+          <div className="space-y-0">
+            {pipelineLog.map((event, i) => (
+              <PipelineStep key={i} event={event} isLast={i === pipelineLog.length - 1} />
+            ))}
+          </div>
+        )}
+
+        {/* Final Script Preview */}
+        {firstCallPrep && (
+          <div className="mt-4 border-t border-slate-100 pt-4">
+            <h3 className="text-sm font-semibold text-slate-900 mb-2">Final Opening Script</h3>
+            <div className="bg-gradient-to-br from-violet-50 to-blue-50 rounded-lg p-4 border border-violet-100">
+              <p className="text-sm text-slate-800 italic leading-relaxed">
+                &ldquo;{firstCallPrep.opening_script as string}&rdquo;
+              </p>
+              <div className="mt-3 flex flex-wrap gap-2 text-xs">
+                <span className="bg-white/60 text-violet-700 px-2 py-0.5 rounded border border-violet-200">
+                  Anchor: {firstCallPrep.hook_anchor as string}
+                </span>
+              </div>
+              {!!firstCallPrep.follow_up_question && (
+                <div className="mt-2 text-xs text-slate-600">
+                  <span className="font-medium">Follow-up:</span> {firstCallPrep.follow_up_question as string}
+                </div>
+              )}
+              {Array.isArray(firstCallPrep.talking_points) && (
+                <div className="mt-2 text-xs text-slate-600">
+                  <span className="font-medium">Talking Points:</span>
+                  <ul className="list-disc list-inside mt-1">
+                    {(firstCallPrep.talking_points as string[]).map((tp, i) => <li key={i}>{tp}</li>)}
+                  </ul>
+                </div>
+              )}
+            </div>
+          </div>
+        )}
       </div>
 
       {/* AI Monologue History */}

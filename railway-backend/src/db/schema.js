@@ -146,6 +146,7 @@ const userProfiles = pgTable("user_profiles", {
   injectionDay: varchar("injection_day", { length: 10 }),
   otherMedications: jsonb("other_medications").default([]),
   currentSideEffects: jsonb("current_side_effects").default([]),
+  allergies: jsonb("allergies").default([]),
   goals: jsonb("goals").default([]),
   ageBracket: varchar("age_bracket", { length: 10 }),
   timezone: varchar("timezone", { length: 50 }).default("America/New_York"),
@@ -328,9 +329,53 @@ const mealLogs = pgTable("meal_logs", {
   createdAt: timestamp("created_at", { withTimezone: true }).defaultNow().notNull(),
 });
 
+// ---------------------------------------------------------------------------
+// Engagement Agent Pipeline Tables
+// ---------------------------------------------------------------------------
+
+const patientMemory = pgTable("patient_memory", {
+  id: uuid("id").defaultRandom().primaryKey(),
+  userId: uuid("user_id").references(() => users.id).notNull().unique(),
+  tier1: jsonb("tier1"),
+  tier2: jsonb("tier2"),
+  tier3: jsonb("tier3"),
+  rawRecords: jsonb("raw_records"),
+  compactedAt: timestamp("compacted_at", { withTimezone: true }),
+  createdAt: timestamp("created_at", { withTimezone: true }).defaultNow().notNull(),
+  updatedAt: timestamp("updated_at", { withTimezone: true }).defaultNow().notNull(),
+});
+
+const healthRecords = pgTable("health_records", {
+  id: uuid("id").defaultRandom().primaryKey(),
+  userId: uuid("user_id").references(() => users.id).notNull(),
+  filename: varchar("filename", { length: 255 }).notNull(),
+  contentType: varchar("content_type", { length: 100 }).notNull(),
+  sizeBytes: integer("size_bytes"),
+  storageKey: varchar("storage_key", { length: 500 }).notNull(),
+  extractedData: jsonb("extracted_data"),
+  status: varchar("status", { length: 20 }).default("pending").notNull(),
+  createdAt: timestamp("created_at", { withTimezone: true }).defaultNow().notNull(),
+});
+
+const triggers = pgTable("triggers", {
+  id: uuid("id").defaultRandom().primaryKey(),
+  userId: uuid("user_id").references(() => users.id).notNull(),
+  type: varchar("type", { length: 50 }).notNull(),
+  hookElement: varchar("hook_element", { length: 20 }),
+  title: varchar("title", { length: 200 }).notNull(),
+  body: text("body").notNull(),
+  evidence: jsonb("evidence"),
+  priority: varchar("priority", { length: 10 }).default("medium"),
+  scheduledFor: timestamp("scheduled_for", { withTimezone: true }),
+  expiresAt: timestamp("expires_at", { withTimezone: true }),
+  status: varchar("status", { length: 20 }).default("pending").notNull(),
+  createdAt: timestamp("created_at", { withTimezone: true }).defaultNow().notNull(),
+});
+
 module.exports = {
   providers, patients, vitals, medications, medicationLogs, alerts,
   users, userProfiles, careCoordinators, userCoordinator,
   aiActions, messages, pushTokens, voiceSessions, escalations, consents, engagementConfig,
   userPreferences, scheduledActions, dailyTips, mealLogs,
+  patientMemory, healthRecords, triggers,
 };

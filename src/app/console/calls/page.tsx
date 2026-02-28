@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useState } from "react";
+import { useConsole } from "../console-context";
 
 const RAILWAY_URL =
   process.env.NEXT_PUBLIC_RAILWAY_URL ||
@@ -25,23 +26,41 @@ interface VoiceCall {
 }
 
 export default function CallsPage() {
+  const { selectedPatientId, selectedPatient } = useConsole();
   const [calls, setCalls] = useState<VoiceCall[]>([]);
   const [loading, setLoading] = useState(true);
   const [expandedCall, setExpandedCall] = useState<string | null>(null);
 
   useEffect(() => {
-    fetch(`${RAILWAY_URL}/api/console/calls`, {
-      headers: { Authorization: `Bearer ${getToken()}` },
-    })
+    const url = selectedPatientId
+      ? `${RAILWAY_URL}/api/console/calls?userId=${selectedPatientId}`
+      : `${RAILWAY_URL}/api/console/calls`;
+
+    setLoading(true);
+    fetch(url, { headers: { Authorization: `Bearer ${getToken()}` } })
       .then((r) => r.json())
       .then(setCalls)
       .catch(console.error)
       .finally(() => setLoading(false));
-  }, []);
+  }, [selectedPatientId]);
+
+  const patientName = selectedPatient?.profile
+    ? `${selectedPatient.profile.firstName} ${selectedPatient.profile.lastName}`
+    : null;
 
   return (
     <div>
-      <h1 className="text-2xl font-bold text-slate-900 mb-6">Voice Call Log</h1>
+      <div className="flex items-center gap-3 mb-6">
+        <h1 className="text-2xl font-bold text-slate-900">Voice Call Log</h1>
+        {patientName && (
+          <span className="text-sm bg-blue-50 text-blue-700 px-2.5 py-1 rounded-lg border border-blue-200">
+            {patientName}
+          </span>
+        )}
+        {!selectedPatientId && (
+          <span className="text-xs text-slate-400">All patients</span>
+        )}
+      </div>
 
       {loading ? (
         <div className="text-slate-500">Loading...</div>
@@ -65,9 +84,7 @@ export default function CallsPage() {
             <tbody className="divide-y divide-slate-100">
               {calls.map((call) => (
                 <tr key={call.id} className="hover:bg-slate-50">
-                  <td className="px-4 py-3 text-slate-600">
-                    {new Date(call.startedAt).toLocaleString()}
-                  </td>
+                  <td className="px-4 py-3 text-slate-600">{new Date(call.startedAt).toLocaleString()}</td>
                   <td className="px-4 py-3">
                     <span className={`text-xs px-2 py-0.5 rounded-full ${
                       call.initiatedBy === "ai" ? "bg-blue-100 text-blue-700" :
@@ -78,24 +95,14 @@ export default function CallsPage() {
                     </span>
                   </td>
                   <td className="px-4 py-3 text-slate-600">
-                    {call.durationSeconds
-                      ? `${Math.floor(call.durationSeconds / 60)}m ${call.durationSeconds % 60}s`
-                      : "—"}
+                    {call.durationSeconds ? `${Math.floor(call.durationSeconds / 60)}m ${call.durationSeconds % 60}s` : "\u2014"}
                   </td>
-                  <td className="px-4 py-3 text-slate-600">
-                    {call.coordinatorPersona || "—"}
-                  </td>
-                  <td className="px-4 py-3 text-slate-600 max-w-xs truncate">
-                    {call.summary || "—"}
-                  </td>
+                  <td className="px-4 py-3 text-slate-600">{call.coordinatorPersona || "\u2014"}</td>
+                  <td className="px-4 py-3 text-slate-600 max-w-xs truncate">{call.summary || "\u2014"}</td>
                   <td className="px-4 py-3">
                     {call.transcript && call.transcript.length > 0 ? (
                       <button
-                        onClick={() =>
-                          setExpandedCall(
-                            expandedCall === call.id ? null : call.id,
-                          )
-                        }
+                        onClick={() => setExpandedCall(expandedCall === call.id ? null : call.id)}
                         className="text-blue-600 hover:underline text-xs"
                       >
                         {expandedCall === call.id ? "Hide" : "View"}

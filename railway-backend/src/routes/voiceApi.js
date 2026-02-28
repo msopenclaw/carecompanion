@@ -83,7 +83,7 @@ router.get("/signed-url", async (req, res) => {
         .where(eq(patientMemoryTable.userId, req.user.userId));
       const prep = mem?.tier2?.first_call_prep || null;
 
-      const fallbackOpening = `Hey ${firstName}, this is ${coordinatorName} from TodyAI. How are you doing today?`;
+      const fallbackOpening = `Hey ${firstName}, this is ${coordinatorName} from your care team. How are you doing today?`;
 
       // Format conversation flow as a readable script
       let conversationGuide = "";
@@ -154,7 +154,7 @@ router.get("/signed-url", async (req, res) => {
       dynamicVariables = {
         patient_name: "there",
         coordinator_name: coordinatorName,
-        opening_script: `Hey, this is ${coordinatorName} from TodyAI. How are you doing today?`,
+        opening_script: `Hey, this is ${coordinatorName} from your care team. How are you doing today?`,
       };
     }
 

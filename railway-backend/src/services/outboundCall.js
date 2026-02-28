@@ -56,7 +56,7 @@ async function initiateOutboundCall(userId) {
 
   // Build dynamic variables — pass the full conversation guide to the agent
   const prep = firstCallPrep;
-  const fallbackOpening = `Hey ${firstName}, this is ${coordinatorName} from TodyAI. Thanks for signing up — I wanted to check in and see how things are going. How are you feeling today?`;
+  const fallbackOpening = `Hey ${firstName}, this is ${coordinatorName} from your care team. Thanks for signing up — I wanted to check in and see how things are going. How are you feeling today?`;
 
   // Format conversation flow as a readable script the agent can follow
   let conversationGuide = "";

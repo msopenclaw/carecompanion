@@ -131,6 +131,7 @@ async function prepareFirstCall(userId) {
   for (let i = 0; i < MAX_ITERATIONS; i++) {
     iterations = i + 1;
 
+    try {
     // ── Step 1: Gemini generates the script ──
     await logEvent("script_generation", "running", {
       iteration: iterations,
@@ -327,6 +328,16 @@ async function prepareFirstCall(userId) {
         ? `Generator will receive this critique and attempt revision #${iterations}. ${MAX_ITERATIONS - iterations} attempts remaining.`
         : "Final attempt reached — will use best score so far.",
     });
+
+    } catch (iterErr) {
+      console.error(`[FIRST_CALL_PREP] Iteration ${iterations} error:`, iterErr.message);
+      await logEvent("iteration_error", "error", {
+        iteration: iterations,
+        error: iterErr.message,
+        detail: `Iteration ${iterations} failed — continuing with best score so far (${bestScore}/40)`,
+      });
+      // Continue to next iteration or fall through to fallback
+    }
   }
 
   // Fallback if nothing worked
@@ -669,7 +680,7 @@ Return JSON:
   const stream = claude.messages.stream({
     model: "claude-sonnet-4-6",
     max_tokens: 128000,
-    thinking: { type: "enabled", budget_tokens: 25000 },
+    thinking: { type: "enabled", budget_tokens: 8000 },
     messages: [{ role: "user", content: judgePrompt }],
   });
 
@@ -678,14 +689,14 @@ Return JSON:
   let claudeThinking = "";
   let isThinking = true;
 
-  let judgeTextAccum = "";
+  const judgeTextChunks = [];
 
   stream.on("contentBlockStart", () => {});
   stream.on("contentBlockDelta", (event) => {
     if (event.delta?.type === "thinking_delta") {
       claudeThinking += event.delta.thinking || "";
       thinkingTokens += (event.delta.thinking || "").length;
-      // Emit thinking progress every ~1.5s for near-real-time streaming
+      // Emit thinking progress every ~1.5s — fire-and-forget (non-blocking)
       const now = Date.now();
       if (now - lastProgressLog > 1500 && thinkingTokens > 200) {
         lastProgressLog = now;
@@ -697,18 +708,21 @@ Return JSON:
           logEvent("judge_thinking", "running", {
             detail: `Judge is analyzing the script (${Math.round(thinkingTokens / 100)}k chars of reasoning so far)`,
             thinkingPreview: preview,
-          });
+          }).catch(() => {});
         }
       }
     } else if (event.delta?.type === "text_delta") {
-      judgeTextAccum += event.delta.text || "";
-      // Emit text deltas for live streaming of judge output
-      emitPipelineEvent(userId, {
-        step: "judge_evaluation",
-        status: "streaming",
-        timestamp: new Date().toISOString(),
-        partial_text: judgeTextAccum,
-        type: "token_delta",
+      judgeTextChunks.push(event.delta.text || "");
+      // Emit text deltas non-blocking via setImmediate
+      const accumulated = judgeTextChunks.join("");
+      setImmediate(() => {
+        emitPipelineEvent(userId, {
+          step: "judge_evaluation",
+          status: "streaming",
+          timestamp: new Date().toISOString(),
+          partial_text: accumulated,
+          type: "token_delta",
+        });
       });
       if (isThinking) {
         isThinking = false;
@@ -716,13 +730,20 @@ Return JSON:
           logEvent("judge_thinking", "completed", {
             detail: `Judge finished reasoning (${Math.round(thinkingTokens / 100)}k chars), now writing evaluation`,
             totalThinkingChars: thinkingTokens,
-          });
+          }).catch(() => {});
         }
       }
     }
   });
 
-  const response = await stream.finalMessage();
+  // Timeout the Claude call — if it takes >5 minutes, abort and use best score so far
+  const JUDGE_TIMEOUT_MS = 300_000;
+  const response = await Promise.race([
+    stream.finalMessage(),
+    new Promise((_, reject) =>
+      setTimeout(() => reject(new Error("Claude judge timed out after 5 minutes")), JUDGE_TIMEOUT_MS)
+    ),
+  ]);
 
   // Capture Claude's extended thinking from final message if stream capture missed it
   try {

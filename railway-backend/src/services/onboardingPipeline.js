@@ -7,6 +7,7 @@ const { db } = require("../db");
 const { userProfiles, messages, patientMemory } = require("../db/schema");
 const { decrypt } = require("./encryption");
 const { sendPush } = require("./pushService");
+const { emitPipelineEvent } = require("./pipelineEmitter");
 
 /**
  * runOnboardingPipeline — Full engagement pipeline for a new patient.
@@ -25,6 +26,8 @@ async function runOnboardingPipeline(userId, options = {}) {
   async function appendPipelineEvent(step, status, detail) {
     const event = { step, status, timestamp: new Date().toISOString(), ...detail };
     console.log(`[PIPELINE] [${step}] ${status}: ${JSON.stringify(detail)}`);
+    // Emit to SSE listeners instantly
+    emitPipelineEvent(userId, event);
     try {
       const [mem] = await db.select().from(patientMemory).where(eq(patientMemory.userId, userId));
       if (mem) {

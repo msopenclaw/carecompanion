@@ -5,6 +5,7 @@ const { db } = require("../db");
 const { patientMemory, userProfiles } = require("../db/schema");
 const { getCompactedContext } = require("./ehrCompaction");
 const { decrypt } = require("./encryption");
+const { emitPipelineEvent } = require("./pipelineEmitter");
 
 const MAX_ITERATIONS = 5;
 const MIN_SCORE = 36; // out of 40 (90% bar)
@@ -34,6 +35,8 @@ async function prepareFirstCall(userId) {
     const event = { step, status, timestamp: new Date().toISOString(), ...detail };
     pipelineLog.push(event);
     console.log(`[FIRST_CALL_PREP] [${step}] ${status}: ${JSON.stringify(detail)}`);
+    // Emit to SSE listeners instantly (before DB write)
+    emitPipelineEvent(userId, event);
     // Immediately persist to DB so the console UI can poll and display progress
     try {
       const [mem] = await db.select().from(patientMemory).where(eq(patientMemory.userId, userId));
@@ -151,10 +154,33 @@ async function prepareFirstCall(userId) {
 
     let genResult;
     try {
-      genResult = await gemini.generateContent({
+      const streamResult = await gemini.generateContentStream({
         contents: [{ role: "user", parts: [{ text: generatorPrompt }] }],
         generationConfig: { maxOutputTokens: 65536, responseMimeType: "application/json" },
       });
+
+      // Stream token deltas to SSE listeners, buffered at ~500ms intervals
+      let fullText = "";
+      let lastDeltaEmit = Date.now();
+      for await (const chunk of streamResult.stream) {
+        const chunkText = chunk.text();
+        if (chunkText) {
+          fullText += chunkText;
+          const now = Date.now();
+          if (now - lastDeltaEmit > 500) {
+            emitPipelineEvent(userId, {
+              step: "script_generation",
+              status: "streaming",
+              timestamp: new Date().toISOString(),
+              iteration: iterations,
+              partial_text: fullText,
+              type: "token_delta",
+            });
+            lastDeltaEmit = now;
+          }
+        }
+      }
+      genResult = await streamResult.response;
     } finally {
       clearInterval(genHeartbeat);
     }
@@ -163,7 +189,7 @@ async function prepareFirstCall(userId) {
     // Capture Gemini thinking if available
     let geminiThinking = null;
     try {
-      const parts = genResult.response.candidates?.[0]?.content?.parts || [];
+      const parts = genResult.candidates?.[0]?.content?.parts || [];
       const thoughtParts = parts.filter(p => p.thought);
       if (thoughtParts.length > 0) {
         geminiThinking = thoughtParts.map(p => p.text).join("\n");
@@ -172,7 +198,7 @@ async function prepareFirstCall(userId) {
 
     let prep;
     try {
-      prep = JSON.parse(genResult.response.text());
+      prep = JSON.parse(genResult.text());
     } catch {
       await logEvent("script_generation", "error", {
         iteration: iterations,
@@ -229,7 +255,7 @@ async function prepareFirstCall(userId) {
     });
 
     const judgeStart = Date.now();
-    const judgeResult = await judgeScript(claude, prep, patientContext, logEvent);
+    const judgeResult = await judgeScript(claude, prep, patientContext, logEvent, userId);
     const judgeDuration = Date.now() - judgeStart;
 
     const scorePercentage = Math.round((judgeResult.total_score / 40) * 100);
@@ -515,7 +541,7 @@ IMPORTANT: Generate at least 4-5 hook candidates (mix of positive and negative).
 // - Its thinking budget is large so its reasoning is thorough and visible
 // ---------------------------------------------------------------------------
 
-async function judgeScript(claude, prep, patientContext, logEvent) {
+async function judgeScript(claude, prep, patientContext, logEvent, userId) {
   const judgePrompt = `You are an independent quality assurance judge for health coaching call scripts. You have deep expertise in patient engagement, motivational interviewing, behavioral psychology, and the Hook Model.
 
 Your job is to rigorously evaluate a script and FIND ITS WEAKNESSES. You are NOT trying to help it pass. You are trying to ensure only genuinely excellent scripts get through. Be skeptical. Be thorough. Think like a discerning patient who has heard too many generic health pitches.
@@ -643,7 +669,7 @@ Return JSON:
   const stream = claude.messages.stream({
     model: "claude-sonnet-4-6",
     max_tokens: 128000,
-    thinking: { type: "enabled", budget_tokens: 100000 },
+    thinking: { type: "enabled", budget_tokens: 25000 },
     messages: [{ role: "user", content: judgePrompt }],
   });
 
@@ -652,16 +678,17 @@ Return JSON:
   let claudeThinking = "";
   let isThinking = true;
 
+  let judgeTextAccum = "";
+
   stream.on("contentBlockStart", () => {});
   stream.on("contentBlockDelta", (event) => {
     if (event.delta?.type === "thinking_delta") {
       claudeThinking += event.delta.thinking || "";
       thinkingTokens += (event.delta.thinking || "").length;
-      // Log progress every ~2000 chars of thinking
+      // Emit thinking progress every ~1.5s for near-real-time streaming
       const now = Date.now();
-      if (now - lastProgressLog > 5000 && thinkingTokens > 500) {
+      if (now - lastProgressLog > 1500 && thinkingTokens > 200) {
         lastProgressLog = now;
-        // Extract a brief preview of what the judge is considering
         const recentThinking = claudeThinking.slice(-300).trim();
         const preview = recentThinking.length > 200
           ? "..." + recentThinking.slice(-200)
@@ -673,13 +700,24 @@ Return JSON:
           });
         }
       }
-    } else if (event.delta?.type === "text_delta" && isThinking) {
-      isThinking = false;
-      if (logEvent) {
-        logEvent("judge_thinking", "completed", {
-          detail: `Judge finished reasoning (${Math.round(thinkingTokens / 100)}k chars), now writing evaluation`,
-          totalThinkingChars: thinkingTokens,
-        });
+    } else if (event.delta?.type === "text_delta") {
+      judgeTextAccum += event.delta.text || "";
+      // Emit text deltas for live streaming of judge output
+      emitPipelineEvent(userId, {
+        step: "judge_evaluation",
+        status: "streaming",
+        timestamp: new Date().toISOString(),
+        partial_text: judgeTextAccum,
+        type: "token_delta",
+      });
+      if (isThinking) {
+        isThinking = false;
+        if (logEvent) {
+          logEvent("judge_thinking", "completed", {
+            detail: `Judge finished reasoning (${Math.round(thinkingTokens / 100)}k chars), now writing evaluation`,
+            totalThinkingChars: thinkingTokens,
+          });
+        }
       }
     }
   });

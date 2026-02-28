@@ -556,6 +556,79 @@ router.get("/patients/:id/pipeline", async (req, res) => {
   }
 });
 
+// GET /api/console/patients/:id/pipeline/stream — SSE stream for live pipeline events
+router.get("/patients/:id/pipeline/stream", async (req, res) => {
+  const userId = req.params.id;
+  const { onPipelineEvent } = require("../services/pipelineEmitter");
+
+  // SSE headers
+  res.writeHead(200, {
+    "Content-Type": "text/event-stream",
+    "Cache-Control": "no-cache",
+    "Connection": "keep-alive",
+  });
+
+  // Replay: send events from the current (latest incomplete) run
+  try {
+    const [mem] = await db.select().from(patientMemory)
+      .where(eq(patientMemory.userId, userId));
+    if (mem) {
+      const tier2 = mem.tier2 || {};
+      const runs = tier2.pipeline_runs || [];
+      const latestRun = runs[runs.length - 1];
+      if (latestRun && !latestRun.events?.some(e => e.step === "pipeline_complete")) {
+        for (const event of (latestRun.events || [])) {
+          res.write(`event: replay\ndata: ${JSON.stringify(event)}\n\n`);
+        }
+      }
+    }
+  } catch (e) {
+    console.error("[SSE] Replay failed:", e.message);
+  }
+
+  res.write(`event: connected\ndata: ${JSON.stringify({ userId })}\n\n`);
+
+  let closed = false;
+
+  function cleanup() {
+    if (closed) return;
+    closed = true;
+    unsubscribe();
+    clearInterval(heartbeat);
+    clearTimeout(timeout);
+    try { res.end(); } catch {}
+  }
+
+  // Subscribe to live events
+  const unsubscribe = onPipelineEvent(userId, (event) => {
+    if (closed) return;
+    try {
+      res.write(`data: ${JSON.stringify(event)}\n\n`);
+      if (event.step === "pipeline_complete") {
+        res.write(`event: done\ndata: {}\n\n`);
+        cleanup();
+      }
+    } catch {
+      cleanup();
+    }
+  });
+
+  // Heartbeat every 15s to prevent proxy timeout
+  const heartbeat = setInterval(() => {
+    if (closed) return;
+    try { res.write(`:keepalive\n\n`); } catch { cleanup(); }
+  }, 15000);
+
+  // Safety timeout: 10 minutes
+  const timeout = setTimeout(() => {
+    if (closed) return;
+    try { res.write(`event: timeout\ndata: {}\n\n`); } catch {}
+    cleanup();
+  }, 600000);
+
+  req.on("close", cleanup);
+});
+
 // POST /api/console/patients/:id/run-pipeline — trigger pipeline for a patient
 router.post("/patients/:id/run-pipeline", async (req, res) => {
   try {
@@ -625,6 +698,10 @@ router.delete("/patients/:id/pipeline-runs", async (req, res) => {
 
     tier2.pipeline_runs = runs;
     tier2.pipeline_log = runs.length > 0 ? runs[runs.length - 1].events || [] : [];
+    // Also clear legacy first_call_prep if wiping all
+    if (runs.length === 0 && runIndex === undefined) {
+      delete tier2.first_call_prep;
+    }
     await db.update(patientMemory).set({ tier2, updatedAt: new Date() })
       .where(eq(patientMemory.userId, userId));
 
@@ -657,6 +734,19 @@ router.get("/patients/:id/health-records", async (req, res) => {
   } catch (err) {
     console.error("Console health-records list error:", err);
     res.status(500).json({ error: "Failed to list records" });
+  }
+});
+
+// DELETE /api/console/patients/:id/health-records — delete all health records for patient
+router.delete("/patients/:id/health-records", async (req, res) => {
+  try {
+    const userId = req.params.id;
+    await db.delete(healthRecords).where(eq(healthRecords.userId, userId));
+    console.log(`[CONSOLE] Deleted all health records for patient ${userId}`);
+    res.json({ success: true });
+  } catch (err) {
+    console.error("Console health-records delete error:", err);
+    res.status(500).json({ error: "Failed to delete records" });
   }
 });
 

@@ -573,12 +573,14 @@ Return JSON:
   "specific_improvements": "Exactly what to change to push above 36/40. Be concrete and actionable — don't just say 'be more specific', say exactly what to do differently."
 }`;
 
-  const response = await claude.messages.create({
+  // Use streaming — required for large thinking budgets (>10 min timeout)
+  const stream = claude.messages.stream({
     model: "claude-sonnet-4-6",
     max_tokens: 128000,
     thinking: { type: "enabled", budget_tokens: 100000 },
     messages: [{ role: "user", content: judgePrompt }],
   });
+  const response = await stream.finalMessage();
 
   // Capture Claude's extended thinking
   let claudeThinking = null;

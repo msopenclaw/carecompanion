@@ -66,6 +66,14 @@ export default function PipelineTabPage() {
       .then((data: PipelineData) => {
         setPipeline(data);
         const runs = data.pipelineRuns || [];
+        // Always keep latest run expanded during auto-refresh
+        if (runs.length > 0) {
+          setExpandedRuns(prev => {
+            const next = new Set(prev);
+            next.add(runs.length - 1);
+            return next;
+          });
+        }
         const latestRun = runs[runs.length - 1];
         if (latestRun && isRunComplete(latestRun.events) && autoRefresh) {
           setAutoRefresh(false);

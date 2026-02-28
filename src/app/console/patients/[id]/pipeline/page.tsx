@@ -109,7 +109,7 @@ export default function PipelinePage() {
             &larr; {patientName}
           </Link>
           <span className="text-slate-300">|</span>
-          <h1 className="text-xl font-bold text-slate-900">Engagement Pipeline</h1>
+          <h1 className="text-xl font-bold text-slate-900">Engagement Agent&apos;s Workshop</h1>
         </div>
 
         <div className="flex items-center gap-3">
@@ -142,7 +142,7 @@ export default function PipelinePage() {
           disabled={runningPipeline}
           className="text-sm text-white bg-violet-600 hover:bg-violet-700 disabled:opacity-50 px-4 py-2 rounded-lg font-medium"
         >
-          {runningPipeline ? "Starting..." : "Run Pipeline"}
+          {runningPipeline ? "Starting..." : "Run Agents"}
         </button>
         <button
           onClick={fetchPipeline}
@@ -159,11 +159,11 @@ export default function PipelinePage() {
 
       {/* Pipeline Timeline */}
       <div className="bg-white rounded-xl shadow-sm border border-slate-200 p-6">
-        <h2 className="font-semibold text-slate-900 mb-4">Pipeline Timeline</h2>
+        <h2 className="font-semibold text-slate-900 mb-4">Agent Timeline</h2>
 
         {pipelineLog.length === 0 ? (
           <div className="text-slate-400 text-sm py-12 text-center">
-            No pipeline has been run for this patient yet. Click &ldquo;Run Pipeline&rdquo; to start.
+            No agents have been run for this patient yet. Click &ldquo;Run Agents&rdquo; to start.
           </div>
         ) : (
           <div className="space-y-0">

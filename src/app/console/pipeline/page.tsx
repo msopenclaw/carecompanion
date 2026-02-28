@@ -55,6 +55,7 @@ export default function PipelineTabPage() {
   const [autoRefresh, setAutoRefresh] = useState(false);
   const [expandedRuns, setExpandedRuns] = useState<Set<number>>(new Set());
   const [sseFailed, setSseFailed] = useState(false);
+  const [autoScroll, setAutoScroll] = useState(true);
   const intervalRef = useRef<ReturnType<typeof setInterval> | null>(null);
   const sseAbortRef = useRef<AbortController | null>(null);
   const timelineEndRef = useRef<HTMLDivElement | null>(null);
@@ -231,16 +232,16 @@ export default function PipelineTabPage() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [autoRefresh, selectedPatientId, pipeline?.pipelineRuns?.length]);
 
-  // Auto-scroll when new events arrive during active run
+  // Auto-scroll when new events arrive during active run (only if enabled)
   useEffect(() => {
     const runs = pipeline?.pipelineRuns || [];
     const latestRun = runs[runs.length - 1];
     const currentCount = latestRun?.events?.length || 0;
-    if (autoRefresh && currentCount > prevEventCount.current && timelineEndRef.current) {
+    if (autoScroll && autoRefresh && currentCount > prevEventCount.current && timelineEndRef.current) {
       timelineEndRef.current.scrollIntoView({ behavior: "smooth", block: "nearest" });
     }
     prevEventCount.current = currentCount;
-  }, [pipeline, autoRefresh]);
+  }, [pipeline, autoRefresh, autoScroll]);
 
   const runPipeline = async () => {
     if (!selectedPatientId) return;
@@ -310,7 +311,7 @@ export default function PipelineTabPage() {
         <div className="text-center">
           <div className="text-4xl mb-3 opacity-30">&#x26A1;</div>
           <h2 className="text-lg font-semibold text-slate-700">Select a Patient</h2>
-          <p className="text-sm text-slate-400 mt-1">Choose a patient from the sidebar to view their engagement pipeline</p>
+          <p className="text-sm text-slate-400 mt-1">Choose a patient from the sidebar to view their engagement workshop</p>
         </div>
       </div>
     );
@@ -350,7 +351,7 @@ export default function PipelineTabPage() {
       {/* Header */}
       <div className="flex items-center justify-between">
         <div className="flex items-center gap-3">
-          <h1 className="text-xl font-bold text-slate-900">Engagement Pipeline</h1>
+          <h1 className="text-xl font-bold text-slate-900">Engagement Agent&apos;s Workshop</h1>
           <span className="text-sm text-slate-400">{patientName}</span>
         </div>
 
@@ -398,7 +399,7 @@ export default function PipelineTabPage() {
                 <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"/>
               </svg>
             )}
-            {runningPipeline ? "Pipeline Running..." : "Run Pipeline"}
+            {runningPipeline ? "Agents Working..." : "Run Agents"}
           </span>
         </button>
 
@@ -441,7 +442,7 @@ export default function PipelineTabPage() {
       {/* Live Status Line — sticky so it stays visible while scrolling */}
       {autoRefresh && lastRunningEvent && (
         <div className="sticky top-0 z-30">
-          <LiveStatusLine event={lastRunningEvent} />
+          <LiveStatusLine event={lastRunningEvent} autoScroll={autoScroll} onToggleAutoScroll={() => setAutoScroll(s => !s)} />
         </div>
       )}
 
@@ -449,8 +450,8 @@ export default function PipelineTabPage() {
       {!hasRuns && legacyLog.length === 0 ? (
         <div className="bg-white rounded-xl shadow-sm border border-slate-200 p-12 text-center">
           <div className="text-3xl mb-3 opacity-20">&#x26A1;</div>
-          <p className="text-slate-500 text-sm">No pipeline has been run for this patient yet.</p>
-          <p className="text-slate-400 text-xs mt-1">Click &ldquo;Run Pipeline&rdquo; above to start the engagement pipeline.</p>
+          <p className="text-slate-500 text-sm">No agents have been run for this patient yet.</p>
+          <p className="text-slate-400 text-xs mt-1">Click &ldquo;Run Agents&rdquo; above to start.</p>
         </div>
       ) : hasRuns ? (
         <div className="space-y-3">
@@ -546,7 +547,7 @@ export default function PipelineTabPage() {
       ) : (
         /* Legacy flat log (no runs array) */
         <div className="bg-white rounded-xl shadow-sm border border-slate-200 p-6">
-          <h2 className="font-semibold text-slate-900 mb-4">Pipeline Timeline (Legacy)</h2>
+          <h2 className="font-semibold text-slate-900 mb-4">Agent Timeline (Legacy)</h2>
           <div className="space-y-0">
             {legacyLog.map((event, i) => (
               <PipelineStep key={i} event={event} isLast={i === legacyLog.length - 1} defaultExpanded={true} />
@@ -762,7 +763,7 @@ export default function PipelineTabPage() {
 // Live Status Line — Claude Code-style animated indicator
 // ---------------------------------------------------------------------------
 
-function LiveStatusLine({ event }: { event: PipelineEvent }) {
+function LiveStatusLine({ event, autoScroll, onToggleAutoScroll }: { event: PipelineEvent; autoScroll: boolean; onToggleAutoScroll: () => void }) {
   const [elapsed, setElapsed] = useState(0);
 
   useEffect(() => {
@@ -816,6 +817,25 @@ function LiveStatusLine({ event }: { event: PipelineEvent }) {
             <span className="text-xs font-mono text-violet-500 tabular-nums">({timeStr}{elapsedInfo})</span>
           </div>
         </div>
+
+        {/* Auto-scroll toggle */}
+        <button
+          onClick={onToggleAutoScroll}
+          className={`flex-shrink-0 flex items-center gap-1.5 text-xs px-2.5 py-1 rounded-lg border transition-colors ${
+            autoScroll
+              ? "bg-violet-100 text-violet-700 border-violet-300"
+              : "bg-white/60 text-slate-500 border-slate-200 hover:border-slate-300"
+          }`}
+          title={autoScroll ? "Auto-scroll is on — click to stop" : "Auto-scroll is off — click to follow"}
+        >
+          <svg className="w-3.5 h-3.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+            {autoScroll
+              ? <path d="M12 5v14M5 12l7 7 7-7" />
+              : <path d="M18 15l-6-6-6 6" />
+            }
+          </svg>
+          {autoScroll ? "Following" : "Paused"}
+        </button>
 
         {/* Pulsing dot */}
         <div className="flex-shrink-0 flex items-center gap-1.5">

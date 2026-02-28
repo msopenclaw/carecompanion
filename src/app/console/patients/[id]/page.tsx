@@ -160,7 +160,7 @@ export default function PatientDetailPage() {
       <div className="bg-white rounded-xl shadow-sm border border-slate-200 p-5">
         <div className="flex items-center justify-between mb-4">
           <div className="flex items-center gap-3">
-            <h2 className="font-semibold text-slate-900">Engagement Pipeline</h2>
+            <h2 className="font-semibold text-slate-900">Engagement Agent&apos;s Workshop</h2>
             {firstCallPrep && (
               <span className={`text-xs font-mono font-bold px-2 py-0.5 rounded ${
                 (firstCallPrep.judge_score as number) >= 90 ? "bg-green-100 text-green-700" :
@@ -181,7 +181,7 @@ export default function PatientDetailPage() {
               href={`/console/patients/${id}/pipeline`}
               className="text-xs text-violet-600 hover:text-violet-800 px-2 py-1 rounded border border-violet-200 hover:bg-violet-50 font-medium"
             >
-              View Full Pipeline &rarr;
+              View Full Workshop &rarr;
             </Link>
             {pipelineLog.length > 0 && (
               <button
@@ -196,14 +196,14 @@ export default function PatientDetailPage() {
               disabled={runningPipeline}
               className="text-xs text-white bg-violet-600 hover:bg-violet-700 disabled:opacity-50 px-3 py-1.5 rounded-lg"
             >
-              {runningPipeline ? "Starting..." : "Run Pipeline"}
+              {runningPipeline ? "Starting..." : "Run Agents"}
             </button>
           </div>
         </div>
 
         {pipelineLog.length === 0 ? (
           <div className="text-slate-400 text-sm py-8 text-center">
-            No pipeline has been run for this patient yet. Click &ldquo;Run Pipeline&rdquo; to start.
+            No agents have been run for this patient yet. Click &ldquo;Run Agents&rdquo; to start.
           </div>
         ) : (
           <div className="space-y-0">

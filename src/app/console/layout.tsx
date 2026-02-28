@@ -8,7 +8,7 @@ import { ConsoleProvider, useConsole, type PatientSummary } from "./console-cont
 const NAV_ITEMS = [
   { href: "/console", label: "Dashboard", icon: "grid" },
   { href: "/console/ehr", label: "EHR / Health Record", icon: "heart" },
-  { href: "/console/pipeline", label: "Pipeline", icon: "zap" },
+  { href: "/console/pipeline", label: "Agent's Workshop", icon: "zap" },
   { href: "/console/monologue", label: "AI Monologue", icon: "brain" },
   { href: "/console/calls", label: "Voice Calls", icon: "phone" },
   { href: "/console/analytics", label: "Analytics", icon: "chart" },

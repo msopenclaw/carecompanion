@@ -136,8 +136,14 @@ async function initiateOutboundCall(userId, prepOverride) {
       agent_id: agentId,
       agent_phone_number_id: phoneNumberId,
       to_number: phone,
-      dynamic_variables: dynamicVariables,
-      first_message: dynamicVariables.opening_script,
+      conversation_initiation_client_data: {
+        dynamic_variables: dynamicVariables,
+        conversation_config_override: {
+          agent: {
+            first_message: dynamicVariables.opening_script,
+          },
+        },
+      },
     }),
   });
 
@@ -169,7 +175,7 @@ async function initiateOutboundCall(userId, prepOverride) {
     source: "cron",
   });
 
-  console.log(`[OUTBOUND_CALL] Call initiated for ${userId} via ${coordinatorName}`);
+  console.log(`[OUTBOUND_CALL] Call initiated for ${userId} via ${coordinatorName}, first_message: "${dynamicVariables.opening_script?.slice(0, 80)}..."`);
   return { success: true, callId: callData.call_id || session.id };
 }
 

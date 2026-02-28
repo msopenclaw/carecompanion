@@ -382,8 +382,9 @@ export default function PipelineTabPage() {
 
           <div className="space-y-6">
             {Array.from(iterations.entries()).map(([iter, events]) => {
-              const genEvent = events.find(e => e.step === "script_generation");
-              const judgeEvent = events.find(e => e.step === "judge_evaluation");
+              // Find completed events (not running) so we get the actual data
+              const genEvent = events.find(e => e.step === "script_generation" && e.status === "completed");
+              const judgeEvent = events.find(e => e.step === "judge_evaluation" && e.status === "completed");
               const revisionEvent = events.find(e => e.step === "revision_requested");
               const acceptedEvent = events.find(e => e.step === "script_accepted");
 
@@ -420,7 +421,18 @@ export default function PipelineTabPage() {
                         </div>
                       )}
                       {!!genEvent?.hookAnchor && (
-                        <div className="text-xs"><span className="font-medium text-slate-700">Anchor:</span> {genEvent.hookAnchor as string}</div>
+                        <div className="text-xs"><span className="font-medium text-slate-700">Anchor:</span> <span className="bg-violet-50 text-violet-700 px-1 py-0.5 rounded">{genEvent.hookAnchor as string}</span></div>
+                      )}
+                      {!!genEvent?.followUpQuestion && (
+                        <div className="text-xs"><span className="font-medium text-slate-700">Follow-up:</span> {genEvent.followUpQuestion as string}</div>
+                      )}
+                      {Array.isArray(genEvent?.talkingPoints) && (
+                        <div className="text-xs">
+                          <span className="font-medium text-slate-700">Talking Points:</span>
+                          <ul className="list-disc list-inside mt-1 text-slate-600 space-y-0.5">
+                            {(genEvent!.talkingPoints as string[]).map((tp, i) => <li key={i}>{tp}</li>)}
+                          </ul>
+                        </div>
                       )}
                     </div>
 
@@ -443,18 +455,25 @@ export default function PipelineTabPage() {
                       )}
                       {judgeEvent && (
                         <div className="space-y-2">
-                          <div className="flex items-center gap-2">
-                            <span className={`text-lg font-mono font-bold ${
-                              (judgeEvent.totalScore as number) >= 36 ? "text-green-600" :
-                              (judgeEvent.totalScore as number) >= 28 ? "text-amber-600" : "text-red-600"
-                            }`}>
-                              {judgeEvent.totalScore as number}/{judgeEvent.maxScore as number || 40}
-                            </span>
-                            <span className="text-xs text-slate-400">(threshold: {judgeEvent.threshold as string || "36/40"})</span>
-                            {judgeEvent.percentage != null && (
-                              <span className="text-xs text-slate-400">({judgeEvent.percentage as string})</span>
-                            )}
-                          </div>
+                          {(() => {
+                            const score = judgeEvent.totalScore as number;
+                            const max = (judgeEvent.maxScore as number) || 40;
+                            const pct = score != null ? Math.round((score / max) * 100) : null;
+                            const passed = score != null && score >= 36;
+                            const colorClass = passed ? "text-green-600" : score != null && score >= 28 ? "text-amber-600" : "text-red-600";
+                            const bgClass = passed ? "bg-green-50 border-green-200" : score != null && score >= 28 ? "bg-amber-50 border-amber-200" : "bg-red-50 border-red-200";
+                            return score != null ? (
+                              <div className={`flex items-center gap-3 px-3 py-2 rounded-lg border ${bgClass}`}>
+                                <span className={`text-2xl font-mono font-bold ${colorClass}`}>{score}</span>
+                                <div>
+                                  <div className="text-xs text-slate-500">out of {max}{pct != null && <span className="ml-1 font-semibold">({pct}%)</span>}</div>
+                                  <div className="text-[10px] text-slate-400">threshold: 36/40 (90%)</div>
+                                </div>
+                                {passed && <span className="ml-auto text-xs font-bold text-green-700 bg-green-100 px-2 py-0.5 rounded">PASS</span>}
+                                {!passed && <span className="ml-auto text-xs font-bold text-red-700 bg-red-100 px-2 py-0.5 rounded">FAIL</span>}
+                              </div>
+                            ) : null;
+                          })()}
                           {Array.isArray(judgeEvent.dimensions) && (
                             <div className="space-y-1">
                               {(judgeEvent.dimensions as Dimension[]).map((d, i) => (

@@ -140,10 +140,24 @@ async function prepareFirstCall(userId) {
 
     const generatorPrompt = buildGeneratorPrompt(patientContext, judgeFeedback, i);
     const genStart = Date.now();
-    const genResult = await gemini.generateContent({
-      contents: [{ role: "user", parts: [{ text: generatorPrompt }] }],
-      generationConfig: { maxOutputTokens: 65536, responseMimeType: "application/json" },
-    });
+    const genHeartbeat = setInterval(async () => {
+      const elapsed = Math.round((Date.now() - genStart) / 1000);
+      await logEvent("script_generation", "running", {
+        detail: `Gemini generating${i > 0 ? ` revision #${i}` : " initial script"}... (${elapsed}s elapsed)`,
+        iteration: iterations,
+        elapsedSeconds: elapsed,
+      });
+    }, 8000);
+
+    let genResult;
+    try {
+      genResult = await gemini.generateContent({
+        contents: [{ role: "user", parts: [{ text: generatorPrompt }] }],
+        generationConfig: { maxOutputTokens: 65536, responseMimeType: "application/json" },
+      });
+    } finally {
+      clearInterval(genHeartbeat);
+    }
     const genDuration = Date.now() - genStart;
 
     // Capture Gemini thinking if available
@@ -176,6 +190,10 @@ async function prepareFirstCall(userId) {
       scriptPreview: prep.opening_script?.substring(0, 120) + "...",
       talkingPoints: prep.talking_points,
       followUpQuestion: prep.follow_up_question,
+      hookCandidatesCount: prep.hook_candidates?.length || 0,
+      conversationPhases: prep.conversation_flow?.length || 0,
+      anticipatedResponses: prep.anticipated_responses?.length || 0,
+      futureHooksCount: prep.hooks_for_future_calls?.length || 0,
       geminiThinking,
       durationMs: genDuration,
     });
@@ -250,6 +268,11 @@ async function prepareFirstCall(userId) {
         finalHookAnchor: bestPrep.hook_anchor,
         finalTalkingPoints: bestPrep.talking_points,
         finalFollowUp: bestPrep.follow_up_question,
+        hookCandidates: bestPrep.hook_candidates || [],
+        conversationFlow: bestPrep.conversation_flow || [],
+        anticipatedResponses: bestPrep.anticipated_responses || [],
+        hooksForFutureCalls: bestPrep.hooks_for_future_calls || [],
+        notesForNextCall: bestPrep.notes_for_next_call || null,
       });
       break;
     }
@@ -435,13 +458,48 @@ Generate a substantially DIFFERENT and BETTER version. Don't just tweak words �
 
   prompt += `
 
-Return JSON:
+Return JSON with this EXPANDED structure — we need a full conversation plan, not just an opener:
 {
-  "opening_script": "The exact script to read (address patient by first name)",
-  "hook_anchor": "The one detail you anchored on",
-  "talking_points": ["3 follow-up insights to weave into the call"],
-  "follow_up_question": "The easy question at the end (preferably multiple choice A/B/C)"
-}`;
+  "opening_script": "The exact 30-second opening script to read (address patient by first name). This is the hook.",
+  "hook_anchor": "The one detail you anchored on for the opening",
+  "hook_candidates": [
+    {
+      "hook": "A specific hook angle or detail from their records",
+      "type": "positive|negative",
+      "strength": "strong|medium|weak",
+      "why": "Why this hook works (or doesn't) for this patient",
+      "when_to_use": "When in the conversation or in future calls to deploy this hook"
+    }
+  ],
+  "conversation_flow": [
+    {
+      "phase": "opening|discovery|deepening|action_planning|close",
+      "script": "What to say in this phase",
+      "purpose": "Why this phase matters",
+      "patient_signals_to_listen_for": ["What the patient might say that tells you to proceed or pivot"],
+      "pivot_if": "What to do if the patient isn't responding well to this phase"
+    }
+  ],
+  "talking_points": ["5-8 follow-up insights to weave naturally into the conversation"],
+  "follow_up_question": "The easy question at the end of the opener (preferably multiple choice A/B/C)",
+  "anticipated_responses": [
+    {
+      "patient_says": "What the patient might say",
+      "coach_responds": "How to respond",
+      "emotional_tone": "What emotion to match"
+    }
+  ],
+  "hooks_for_future_calls": [
+    {
+      "hook": "A hook to save for call #2 or later",
+      "why_not_now": "Why this is better saved for later",
+      "ideal_timing": "When to use this (e.g., 'after rapport is built', 'once they mention side effects')"
+    }
+  ],
+  "notes_for_next_call": "What to remember, observe, and follow up on in the next call. What worked, what to avoid. Key patient cues to track."
+}
+
+IMPORTANT: Generate at least 4-5 hook candidates (mix of positive and negative). Positive hooks create curiosity, empowerment, or surprise. Negative hooks use fear, guilt, or shame — label these as negative so we know to avoid them. The conversation_flow should have 4-5 phases that guide the full call, not just the opening.`;
 
   return prompt;
 }

@@ -420,6 +420,96 @@ export function PipelineStep({ event, isLast, defaultExpanded = false }: { event
               </div>
             )}
 
+            {/* Hook candidates */}
+            {Array.isArray(event.hookCandidates) && (event.hookCandidates as Array<Record<string, unknown>>).length > 0 && (
+              <div>
+                <span className="font-medium text-slate-700">Hook Candidates ({(event.hookCandidates as Array<Record<string, unknown>>).length}):</span>
+                <div className="space-y-2 mt-1">
+                  {(event.hookCandidates as Array<Record<string, unknown>>).map((h, i) => (
+                    <div key={i} className={`px-3 py-2 rounded border ${
+                      h.type === "positive" ? "bg-green-50 border-green-200" : "bg-red-50 border-red-200"
+                    }`}>
+                      <div className="flex items-center gap-2 mb-1">
+                        <span className={`text-[10px] font-bold uppercase px-1.5 py-0.5 rounded ${
+                          h.type === "positive" ? "bg-green-200 text-green-800" : "bg-red-200 text-red-800"
+                        }`}>{h.type as string}</span>
+                        <span className={`text-[10px] px-1.5 py-0.5 rounded ${
+                          h.strength === "strong" ? "bg-violet-100 text-violet-700" :
+                          h.strength === "medium" ? "bg-slate-100 text-slate-600" :
+                          "bg-slate-50 text-slate-400"
+                        }`}>{h.strength as string}</span>
+                      </div>
+                      <div className="text-slate-800 font-medium">{h.hook as string}</div>
+                      <div className="text-slate-500 mt-0.5">{h.why as string}</div>
+                      {has(h.when_to_use) && <div className="text-slate-400 italic mt-0.5">Use: {h.when_to_use as string}</div>}
+                    </div>
+                  ))}
+                </div>
+              </div>
+            )}
+
+            {/* Conversation flow */}
+            {Array.isArray(event.conversationFlow) && (event.conversationFlow as Array<Record<string, unknown>>).length > 0 && (
+              <div>
+                <span className="font-medium text-slate-700">Conversation Flow:</span>
+                <div className="space-y-2 mt-1">
+                  {(event.conversationFlow as Array<Record<string, unknown>>).map((phase, i) => (
+                    <div key={i} className="bg-white p-3 rounded border border-slate-200">
+                      <div className="flex items-center gap-2 mb-1">
+                        <span className="text-[10px] font-bold uppercase bg-blue-100 text-blue-700 px-1.5 py-0.5 rounded">{phase.phase as string}</span>
+                        {has(phase.purpose) && <span className="text-slate-400">{phase.purpose as string}</span>}
+                      </div>
+                      <div className="text-slate-800 italic">&ldquo;{phase.script as string}&rdquo;</div>
+                      {Array.isArray(phase.patient_signals_to_listen_for) && (
+                        <div className="mt-1 text-slate-500">Listen for: {(phase.patient_signals_to_listen_for as string[]).join(", ")}</div>
+                      )}
+                      {has(phase.pivot_if) && <div className="mt-1 text-amber-600">Pivot if: {phase.pivot_if as string}</div>}
+                    </div>
+                  ))}
+                </div>
+              </div>
+            )}
+
+            {/* Anticipated responses */}
+            {Array.isArray(event.anticipatedResponses) && (event.anticipatedResponses as Array<Record<string, unknown>>).length > 0 && (
+              <div>
+                <span className="font-medium text-slate-700">Anticipated Patient Responses:</span>
+                <div className="space-y-1.5 mt-1">
+                  {(event.anticipatedResponses as Array<Record<string, unknown>>).map((r, i) => (
+                    <div key={i} className="bg-white p-2 rounded border border-slate-200">
+                      <div className="text-green-700">Patient: &ldquo;{r.patient_says as string}&rdquo;</div>
+                      <div className="text-blue-700 mt-0.5">Coach: &ldquo;{r.coach_responds as string}&rdquo;</div>
+                      {has(r.emotional_tone) && <div className="text-slate-400 mt-0.5">Tone: {r.emotional_tone as string}</div>}
+                    </div>
+                  ))}
+                </div>
+              </div>
+            )}
+
+            {/* Hooks for future calls */}
+            {Array.isArray(event.hooksForFutureCalls) && (event.hooksForFutureCalls as Array<Record<string, unknown>>).length > 0 && (
+              <div>
+                <span className="font-medium text-slate-700">Saved for Future Calls:</span>
+                <div className="space-y-1.5 mt-1">
+                  {(event.hooksForFutureCalls as Array<Record<string, unknown>>).map((h, i) => (
+                    <div key={i} className="bg-violet-50 p-2 rounded border border-violet-200">
+                      <div className="text-violet-800 font-medium">{h.hook as string}</div>
+                      <div className="text-violet-600 mt-0.5">{h.why_not_now as string}</div>
+                      {has(h.ideal_timing) && <div className="text-violet-400 italic mt-0.5">Timing: {h.ideal_timing as string}</div>}
+                    </div>
+                  ))}
+                </div>
+              </div>
+            )}
+
+            {/* Notes for next call */}
+            {has(event.notesForNextCall) && (
+              <div className="bg-amber-50 p-3 rounded border border-amber-200">
+                <span className="font-medium text-amber-800">Notes for Next Call:</span>
+                <p className="mt-1 text-amber-700 whitespace-pre-wrap">{event.notesForNextCall as string}</p>
+              </div>
+            )}
+
             {/* Gemini thinking */}
             {has(event.geminiThinking) && (
               <ThinkingBlock

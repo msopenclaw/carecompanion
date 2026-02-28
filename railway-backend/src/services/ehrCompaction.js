@@ -251,12 +251,22 @@ async function compactMemory(userId, logPipelineEvent = null) {
     },
   });
 
-  // Gemini compaction call
+  // Gemini compaction call — with heartbeat so UI shows progress
   const genAI = new GoogleGenerativeAI(GEMINI_API_KEY);
   const model = genAI.getGenerativeModel({ model: "gemini-3.1-pro-preview" });
 
   const compactionStart = Date.now();
-  const result = await model.generateContent({
+  const heartbeat = setInterval(async () => {
+    const elapsed = Math.round((Date.now() - compactionStart) / 1000);
+    await logEvent("ehr_gemini_analysis", "running", {
+      detail: `Gemini analyzing patient records... (${elapsed}s elapsed)`,
+      elapsedSeconds: elapsed,
+    });
+  }, 8000);
+
+  let result;
+  try {
+    result = await model.generateContent({
     contents: [{
       role: "user",
       parts: [{
@@ -316,6 +326,9 @@ Rules:
       responseMimeType: "application/json",
     },
   });
+  } finally {
+    clearInterval(heartbeat);
+  }
 
   const compactionDuration = Date.now() - compactionStart;
 

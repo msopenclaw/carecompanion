@@ -5,6 +5,7 @@ import { useConsole } from "../console-context";
 import {
   PipelineStep,
   ScoreBar,
+  STEP_LABELS,
   type PipelineData,
   type PipelineEvent,
   type Dimension,
@@ -168,6 +169,10 @@ export default function PipelineTabPage() {
 
   if (loading) return <div className="flex items-center justify-center h-64 text-slate-500">Loading pipeline...</div>;
 
+  // Find the last "running" event to show live status
+  const allCurrentEvents = (pipeline?.pipelineRuns || []).at(-1)?.events || pipeline?.pipelineLog || [];
+  const lastRunningEvent = [...allCurrentEvents].reverse().find(e => e.status === "running");
+
   const runs = pipeline?.pipelineRuns || [];
   const firstCallPrep = pipeline?.firstCallPrep;
   const patientName = selectedPatient?.profile
@@ -267,6 +272,11 @@ export default function PipelineTabPage() {
           </span>
         )}
       </div>
+
+      {/* Live Status Line */}
+      {autoRefresh && lastRunningEvent && (
+        <LiveStatusLine event={lastRunningEvent} />
+      )}
 
       {/* Pipeline Runs */}
       {!hasRuns && legacyLog.length === 0 ? (
@@ -538,7 +548,82 @@ export default function PipelineTabPage() {
         .animate-shimmer {
           animation: shimmer 1.5s ease-in-out infinite;
         }
+        @keyframes spin-slow {
+          100% { transform: rotate(360deg); }
+        }
       `}</style>
+    </div>
+  );
+}
+
+// ---------------------------------------------------------------------------
+// Live Status Line — Claude Code-style animated indicator
+// ---------------------------------------------------------------------------
+
+function LiveStatusLine({ event }: { event: PipelineEvent }) {
+  const [elapsed, setElapsed] = useState(0);
+
+  useEffect(() => {
+    const startTime = new Date(event.timestamp).getTime();
+    const tick = () => setElapsed(Math.round((Date.now() - startTime) / 1000));
+    tick();
+    const interval = setInterval(tick, 1000);
+    return () => clearInterval(interval);
+  }, [event.timestamp]);
+
+  const stepLabel = STEP_LABELS[event.step] || event.step;
+  const mins = Math.floor(elapsed / 60);
+  const secs = elapsed % 60;
+  const timeStr = mins > 0 ? `${mins}m ${secs}s` : `${secs}s`;
+
+  // Verbs for each step
+  const STEP_VERBS: Record<string, string> = {
+    ehr_compaction: "Compacting health records",
+    ehr_gemini_analysis: "Analyzing with Gemini",
+    first_call_prep: "Preparing call script",
+    script_generation: "Generating script",
+    judge_evaluation: "Judging script quality",
+    judge_thinking: "Judge reasoning deeply",
+    trigger_generation: "Generating triggers",
+    outbound_call: "Initiating call",
+    pipeline_start: "Starting pipeline",
+    load_context: "Loading patient context",
+    agents_init: "Initializing agents",
+    ehr_data_scan: "Scanning data sources",
+  };
+
+  const verb = STEP_VERBS[event.step] || stepLabel;
+  const detail = event.detail ? String(event.detail) : null;
+  const elapsedInfo = event.elapsedSeconds ? ` (server: ${event.elapsedSeconds}s)` : "";
+
+  return (
+    <div className="bg-gradient-to-r from-violet-50 via-indigo-50 to-violet-50 rounded-xl border border-violet-200 px-5 py-3 flex items-center gap-3 shadow-sm">
+      {/* Animated spinner */}
+      <div className="relative flex-shrink-0">
+        <svg className="w-5 h-5 text-violet-500 animate-spin" viewBox="0 0 24 24" fill="none">
+          <circle className="opacity-20" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="3"/>
+          <path className="opacity-80" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z"/>
+        </svg>
+      </div>
+
+      {/* Status text */}
+      <div className="flex-1 min-w-0">
+        <div className="flex items-center gap-2">
+          <span className="text-sm font-semibold text-violet-900">{verb}...</span>
+          <span className="text-xs font-mono text-violet-500 tabular-nums">({timeStr}{elapsedInfo})</span>
+        </div>
+        {detail && (
+          <div className="text-xs text-violet-600/70 truncate mt-0.5">{detail}</div>
+        )}
+      </div>
+
+      {/* Pulsing dot */}
+      <div className="flex-shrink-0 flex items-center gap-1.5">
+        <span className="relative flex h-2.5 w-2.5">
+          <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-violet-400 opacity-75" />
+          <span className="relative inline-flex rounded-full h-2.5 w-2.5 bg-violet-500" />
+        </span>
+      </div>
     </div>
   );
 }

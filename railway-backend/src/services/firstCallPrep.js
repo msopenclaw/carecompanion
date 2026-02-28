@@ -575,8 +575,8 @@ Return JSON:
 
   const response = await claude.messages.create({
     model: "claude-sonnet-4-6",
-    max_tokens: 24000,
-    thinking: { type: "enabled", budget_tokens: 16000 },
+    max_tokens: 128000,
+    thinking: { type: "enabled", budget_tokens: 100000 },
     messages: [{ role: "user", content: judgePrompt }],
   });
 

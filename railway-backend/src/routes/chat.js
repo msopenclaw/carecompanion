@@ -81,7 +81,7 @@ const toolDeclarations = [
   },
   {
     name: "update_medication",
-    description: "Update an existing medication's properties. Use when patient says to change dosage, frequency, injection day, or scheduled times. Examples: 'Move my Wegovy to Sunday', 'Change Metformin to twice daily', 'Update my Wegovy dose to 0.5mg'.",
+    description: "REQUIRED for ANY medication change. Use when patient says to change dosage, frequency, injection day, move a med day, or reschedule a medication. This updates the medication record AND re-syncs all reminders automatically. Examples: 'Move my Wegovy to Sunday', 'Move my med to today', 'Move it to tomorrow', 'Change Metformin to twice daily', 'Update my Wegovy dose to 0.5mg'. ALWAYS use this instead of set_reminder for medication-related changes.",
     parameters: {
       type: "OBJECT",
       properties: {
@@ -144,7 +144,7 @@ const toolDeclarations = [
   },
   {
     name: "set_reminder",
-    description: "Schedule a daily reminder for the patient",
+    description: "Schedule a NEW custom daily reminder (e.g. hydration, checkin, custom). Do NOT use this for medication day changes — use update_medication instead. Do NOT use this for one-time notifications — use schedule_push instead.",
     parameters: {
       type: "OBJECT",
       properties: {
@@ -679,9 +679,10 @@ Available tools:
 - confirm_medication: Confirm a med as taken for ANY date
 - unconfirm_medication: Undo a medication confirmation for ANY date
 - add_medication: Add a new medication to tracking
-- update_medication: Change dosage, frequency, or injection day of an existing medication
+- update_medication: REQUIRED for ANY medication change (move day, change dose, change frequency). This also re-syncs reminders automatically.
 - remove_medication: Remove/deactivate a medication from tracking
 - update_preference: Update preferences (also syncs notification schedules)
+- set_reminder: ONLY for new custom non-medication reminders. NEVER use for medication day changes — use update_medication instead.
 - add_goal / remove_goal: Add or remove daily goals
 - set_reminder: Schedule recurring reminders
 - remove_reminder: Remove a scheduled reminder

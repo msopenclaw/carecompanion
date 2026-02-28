@@ -38,8 +38,14 @@ export default function PipelinePage() {
       .then((data: PipelineData) => {
         setPipeline(data);
         const log = data.pipelineLog || [];
-        const lastEvent = log[log.length - 1];
-        if (lastEvent?.step === "pipeline_complete" && autoRefresh) {
+        const hasStarted = log.some((e: PipelineEvent) => e.step === "pipeline_start" || e.step === "ehr_compaction");
+        const hasCompleted = log.some((e: PipelineEvent) => e.step === "pipeline_complete");
+        // Upgrade to fast polling if pipeline is running
+        if (hasStarted && !hasCompleted && !autoRefresh) {
+          setAutoRefresh(true);
+        }
+        // Stop fast polling when pipeline completes
+        if (hasCompleted && autoRefresh) {
           setAutoRefresh(false);
         }
       })
@@ -56,12 +62,28 @@ export default function PipelinePage() {
         const profile = p.profile as Record<string, unknown> | null;
         if (profile) setPatientName(`${profile.firstName} ${profile.lastName}`);
         setPipeline(pl);
+        // Auto-enable polling if a pipeline is currently running (triggered externally)
+        const log = (pl as PipelineData)?.pipelineLog || [];
+        const hasStarted = log.some((e: PipelineEvent) => e.step === "pipeline_start" || e.step === "ehr_compaction");
+        const hasCompleted = log.some((e: PipelineEvent) => e.step === "pipeline_complete");
+        if (hasStarted && !hasCompleted) {
+          setAutoRefresh(true);
+        }
       })
       .catch(console.error)
       .finally(() => setLoading(false));
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [id]);
 
+  // Slow background poll (10s) — detects externally-triggered pipelines
+  useEffect(() => {
+    const bgInterval = setInterval(() => {
+      if (!autoRefresh) fetchPipeline();
+    }, 10000);
+    return () => clearInterval(bgInterval);
+  }, [autoRefresh, fetchPipeline]);
+
+  // Fast poll (3s) when pipeline is actively running
   useEffect(() => {
     if (autoRefresh) {
       intervalRef.current = setInterval(fetchPipeline, 3000);

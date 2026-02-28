@@ -49,7 +49,7 @@ Goals: ${JSON.stringify(mem.tier2?.treatment_goals || [])}
 Make it personal, positive, and forward-looking. No medical jargon. End with an encouraging note about what their care coordinator will help with. Return just the narrative text, no JSON.`,
           }],
         }],
-        generationConfig: { maxOutputTokens: 300 },
+        generationConfig: { maxOutputTokens: 8192 },
       });
 
       triggerQueue.push({
@@ -121,7 +121,7 @@ Return a JSON array of 3 strings. Each question should be specific to THEIR data
           }],
         }],
         generationConfig: {
-          maxOutputTokens: 500,
+          maxOutputTokens: 8192,
           responseMimeType: "application/json",
         },
       });
@@ -271,7 +271,7 @@ If nothing worth triggering, return: { "triggers": [] }`,
       }],
     }],
     generationConfig: {
-      maxOutputTokens: 500,
+      maxOutputTokens: 8192,
       responseMimeType: "application/json",
     },
   });

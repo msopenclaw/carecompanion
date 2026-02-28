@@ -80,7 +80,7 @@ Return ONLY valid JSON. Extract every piece of medical data you can find.`,
       ],
     }],
     generationConfig: {
-      maxOutputTokens: 4000,
+      maxOutputTokens: 65536,
       responseMimeType: "application/json",
     },
   });
@@ -121,7 +121,7 @@ async function extractFromText(xmlText, apiKey) {
       }],
     }],
     generationConfig: {
-      maxOutputTokens: 4000,
+      maxOutputTokens: 65536,
       responseMimeType: "application/json",
     },
   });
@@ -312,7 +312,7 @@ Rules:
       }],
     }],
     generationConfig: {
-      maxOutputTokens: 3000,
+      maxOutputTokens: 65536,
       responseMimeType: "application/json",
     },
   });

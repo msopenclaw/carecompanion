@@ -124,7 +124,7 @@ async function prepareFirstCall(userId) {
     const genStart = Date.now();
     const genResult = await gemini.generateContent({
       contents: [{ role: "user", parts: [{ text: generatorPrompt }] }],
-      generationConfig: { maxOutputTokens: 2000, responseMimeType: "application/json" },
+      generationConfig: { maxOutputTokens: 65536, responseMimeType: "application/json" },
     });
     const genDuration = Date.now() - genStart;
 

@@ -533,40 +533,40 @@ export default function PipelineTabPage() {
                         : run.events?.some((e: PipelineEvent) => e.status === "cancelled") ? "Cancelled"
                         : complete ? "Complete" : "Incomplete"}
                     </span>
+
+                    {/* Call button — only for runs with an accepted script */}
+                    {run.events?.some((e: PipelineEvent) => e.step === "script_accepted" && e.status === "completed") && (
+                      <span
+                        role="button"
+                        onClick={(e) => { e.stopPropagation(); triggerCall(idx); }}
+                        className={`p-1.5 rounded-lg transition-colors ${
+                          callingRunIndex === idx
+                            ? "bg-green-100 text-green-600 animate-pulse"
+                            : "text-slate-400 hover:text-green-600 hover:bg-green-50"
+                        } ${callingRunIndex !== null && callingRunIndex !== idx ? "opacity-40 pointer-events-none" : ""}`}
+                        title={`Call patient using Run #${idx + 1} script`}
+                      >
+                        <svg className="w-4 h-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                          <path d="M22 16.92v3a2 2 0 0 1-2.18 2 19.79 19.79 0 0 1-8.63-3.07 19.5 19.5 0 0 1-6-6 19.79 19.79 0 0 1-3.07-8.67A2 2 0 0 1 4.11 2h3a2 2 0 0 1 2 1.72 12.84 12.84 0 0 0 .7 2.81 2 2 0 0 1-.45 2.11L8.09 9.91a16 16 0 0 0 6 6l1.27-1.27a2 2 0 0 1 2.11-.45 12.84 12.84 0 0 0 2.81.7A2 2 0 0 1 22 16.92z" />
+                        </svg>
+                      </span>
+                    )}
+
+                    {/* Delete button */}
+                    {!runningPipeline && (
+                      <span
+                        role="button"
+                        onClick={(e) => { e.stopPropagation(); deleteRuns(idx); }}
+                        className="text-slate-300 hover:text-red-500 transition-colors p-1"
+                        title="Delete this run"
+                      >
+                        <svg className="w-4 h-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                          <path d="M6 18L18 6M6 6l12 12" />
+                        </svg>
+                      </span>
+                    )}
                   </div>
                 </button>
-                {/* Per-run actions */}
-                <div className="absolute top-3 right-3 flex items-center gap-1">
-                  {/* Call button — only for runs with an accepted script */}
-                  {run.events?.some((e: PipelineEvent) => e.step === "script_accepted" && e.status === "completed") && (
-                    <button
-                      onClick={(e) => { e.stopPropagation(); triggerCall(idx); }}
-                      disabled={callingRunIndex !== null}
-                      className={`p-1.5 rounded-lg transition-colors ${
-                        callingRunIndex === idx
-                          ? "bg-green-100 text-green-600 animate-pulse"
-                          : "text-slate-300 hover:text-green-600 hover:bg-green-50"
-                      }`}
-                      title={`Call patient using Run #${idx + 1} script`}
-                    >
-                      <svg className="w-4 h-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-                        <path d="M22 16.92v3a2 2 0 0 1-2.18 2 19.79 19.79 0 0 1-8.63-3.07 19.5 19.5 0 0 1-6-6 19.79 19.79 0 0 1-3.07-8.67A2 2 0 0 1 4.11 2h3a2 2 0 0 1 2 1.72 12.84 12.84 0 0 0 .7 2.81 2 2 0 0 1-.45 2.11L8.09 9.91a16 16 0 0 0 6 6l1.27-1.27a2 2 0 0 1 2.11-.45 12.84 12.84 0 0 0 2.81.7A2 2 0 0 1 22 16.92z" />
-                      </svg>
-                    </button>
-                  )}
-                  {/* Delete button */}
-                  {!runningPipeline && (
-                    <button
-                      onClick={(e) => { e.stopPropagation(); deleteRuns(idx); }}
-                      className="text-slate-300 hover:text-red-500 transition-colors p-1"
-                      title="Delete this run"
-                    >
-                      <svg className="w-4 h-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
-                        <path d="M6 18L18 6M6 6l12 12" />
-                      </svg>
-                    </button>
-                  )}
-                </div>
 
                 {/* Expanded run events */}
                 {isExpanded && (

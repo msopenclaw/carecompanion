@@ -36,12 +36,11 @@ async function initiateOutboundCall(userId, prepOverride) {
   const masked = phone.length > 4 ? phone.slice(0, -4).replace(/\d/g, '*') + phone.slice(-4) : '****';
   console.log(`[OUTBOUND_CALL] Calling ${masked} for user ${userId}`);
 
-  // Load first-call prep — use override if provided (per-run demo), otherwise from patient memory
-  let firstCallPrep = prepOverride || null;
-  if (!firstCallPrep) {
-    const [mem] = await db.select().from(patientMemory).where(eq(patientMemory.userId, userId));
-    firstCallPrep = mem?.tier2?.first_call_prep || null;
-  }
+  // Load patient memory (needed for first_call_prep and rawRecords context)
+  const [mem] = await db.select().from(patientMemory).where(eq(patientMemory.userId, userId));
+
+  // Use override if provided (per-run demo), otherwise from patient memory
+  const firstCallPrep = prepOverride || mem?.tier2?.first_call_prep || null;
 
   // Get coordinator agent ID
   const [uc] = await db.select().from(userCoordinator).where(eq(userCoordinator.userId, userId));

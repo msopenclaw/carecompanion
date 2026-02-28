@@ -49,7 +49,7 @@ const upload = multer({
 
 router.post("/upload", upload.single("file"), async (req, res) => {
   try {
-    const userId = req.userId;
+    const userId = req.user.userId;
     const file = req.file;
     if (!file) return res.status(400).json({ error: "No file uploaded" });
 
@@ -84,7 +84,7 @@ router.post("/upload", upload.single("file"), async (req, res) => {
 
 router.get("/", async (req, res) => {
   try {
-    const userId = req.userId;
+    const userId = req.user.userId;
     const records = await db.select({
       id: healthRecords.id,
       filename: healthRecords.filename,
@@ -109,7 +109,7 @@ router.get("/", async (req, res) => {
 
 router.post("/run-pipeline", async (req, res) => {
   try {
-    const userId = req.userId;
+    const userId = req.user.userId;
     // Run async — respond immediately
     runOnboardingPipeline(userId).catch(err => {
       console.error(`[HEALTH_RECORDS] Pipeline failed for ${userId}:`, err);

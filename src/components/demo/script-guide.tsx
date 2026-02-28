@@ -16,7 +16,7 @@ const INCIDENT_STEPS: ScriptStep[] = [
   {
     step: 1,
     aiLine:
-      '"Hi Margaret, I noticed you missed your check-in and your nausea has been increasing. How are you feeling?"',
+      '"Hi Margaret, I noticed you didn\'t reply to my text today and your nausea has been increasing. How are you feeling?"',
     patientLine:
       '"The nausea has been terrible. I almost stopped taking the Wegovy altogether."',
   },

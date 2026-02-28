@@ -2,6 +2,7 @@ const express = require("express");
 const { eq, and, gte } = require("drizzle-orm");
 const { db } = require("../db");
 const { scheduledActions, vitals, userPreferences, userProfiles, medications, medicationLogs } = require("../db/schema");
+const { syncScheduledActions } = require("../services/preferenceScheduler");
 
 const router = express.Router();
 
@@ -79,18 +80,19 @@ router.post("/set-reminder", async (req, res) => {
 // POST /api/agent-tools/log-vital
 router.post("/log-vital", async (req, res) => {
   try {
-    const { user_id, vital_type, value, unit } = req.body;
+    const { user_id, vital_type, value, unit, date } = req.body;
     if (!user_id || !vital_type || value === undefined || !unit) {
       return res.json({ success: true, message: "Vital noted" });
     }
 
+    const recordDate = date ? new Date(date + "T12:00:00Z") : new Date();
     const [inserted] = await db.insert(vitals).values({
       patientId: user_id,
       vitalType: vital_type,
       value: parseFloat(value),
       unit,
       source: "voice",
-      recordedAt: new Date(),
+      recordedAt: recordDate,
     }).returning();
 
     console.log(`[AgentTools] Logged ${vital_type}: ${value} ${unit} for ${user_id}`);
@@ -136,6 +138,18 @@ router.post("/update-preference", async (req, res) => {
     }
 
     console.log(`[AgentTools] Updated preference ${preference}=${value} for ${user_id}`);
+
+    // Sync scheduled actions with updated preferences
+    const [updatedPrefs] = await db.select().from(userPreferences)
+      .where(eq(userPreferences.userId, user_id));
+    if (updatedPrefs) {
+      try {
+        await syncScheduledActions(user_id, updatedPrefs);
+      } catch (syncErr) {
+        console.error("[AgentTools] Sync scheduled actions failed:", syncErr.message);
+      }
+    }
+
     res.json({ success: true, message: `Preference updated: ${preference}` });
   } catch (err) {
     console.error("Update preference error:", err);
@@ -165,11 +179,12 @@ router.post("/confirm-medication", async (req, res) => {
       return res.json({ success: true, message: "Medication confirmation noted" });
     }
 
+    const confirmDate = req.body.date ? new Date(req.body.date + "T12:00:00Z") : new Date();
     const [log] = await db.insert(medicationLogs).values({
       medicationId: med.id,
       patientId: user_id,
-      scheduledAt: new Date(),
-      takenAt: new Date(),
+      scheduledAt: confirmDate,
+      takenAt: confirmDate,
       status: "taken",
     }).returning();
 
@@ -178,6 +193,47 @@ router.post("/confirm-medication", async (req, res) => {
   } catch (err) {
     console.error("Confirm medication error:", err);
     res.json({ success: true, message: "Medication confirmation noted" });
+  }
+});
+
+// POST /api/agent-tools/unconfirm-medication
+router.post("/unconfirm-medication", async (req, res) => {
+  try {
+    const { user_id, medication_name } = req.body;
+    if (!user_id) {
+      return res.json({ success: true, message: "Medication unconfirm noted" });
+    }
+
+    const meds = await db.select().from(medications)
+      .where(and(eq(medications.patientId, user_id), eq(medications.isActive, true)));
+
+    let med = meds[0];
+    if (medication_name) {
+      const match = meds.find(m => m.name.toLowerCase().includes(medication_name.toLowerCase()));
+      if (match) med = match;
+    }
+
+    if (!med) {
+      return res.json({ success: true, message: "No medications found" });
+    }
+
+    const todayStart = new Date();
+    todayStart.setUTCHours(0, 0, 0, 0);
+
+    const deleted = await db.delete(medicationLogs)
+      .where(and(
+        eq(medicationLogs.medicationId, med.id),
+        eq(medicationLogs.patientId, user_id),
+        gte(medicationLogs.scheduledAt, todayStart),
+        eq(medicationLogs.status, "taken"),
+      ))
+      .returning();
+
+    console.log(`[AgentTools] Unconfirmed ${med.name} for ${user_id}, removed ${deleted.length} logs`);
+    res.json({ success: true, message: `${med.name} unconfirmed for today`, removed: deleted.length });
+  } catch (err) {
+    console.error("Unconfirm medication error:", err);
+    res.json({ success: true, message: "Medication unconfirm noted" });
   }
 });
 

@@ -1,7 +1,7 @@
 "use client";
 
 import { useState, useEffect, useRef, useMemo } from "react";
-import { useDemo, DAILY_THINKING_STEPS, CALL_REASONING_STEPS, DAY_DATA } from "./demo-context";
+import { useDemo, DAILY_THINKING_STEPS, CALL_REASONING_STEPS, DAY_DATA, SYNC_CONFIG } from "./demo-context";
 
 // ---------------------------------------------------------------------------
 // Types
@@ -50,7 +50,7 @@ function riskDotColor(score: number): string {
 }
 
 function vitalColor(vital: string): string {
-  if (vital.includes("MISSED")) return "text-red-600";
+  if (vital.includes("NO REPLY")) return "text-red-600";
   if (vital.includes("\u2191\u2191")) return "text-red-600";
   if (vital.includes("\u2191")) return "text-amber-600";
   if (vital.includes("\u2713")) return "text-emerald-600";
@@ -423,8 +423,8 @@ function PatientListView() {
         const dayIdx = currentDay - 1;
         const dayData = DAY_DATA[dayIdx];
         const score = dayData.engagementScore;
-        const missedLabel = dayData.checkInDone ? "" : " MISSED";
-        const vital = `Eng: ${score}%${missedLabel}`;
+        const noReplyLabel = dayData.checkInDone ? "" : " NO REPLY";
+        const vital = `Eng: ${score}%${noReplyLabel}`;
         const risk = score < 50 ? 84 : score < 70 ? 62 : 45;
         return { ...p, vital, risk, riskDetecting: risk < 84 ? 84 : risk };
       }
@@ -546,29 +546,55 @@ function PatientListView() {
 // ---------------------------------------------------------------------------
 
 function AIThinkingFeed() {
-  const { triggerCall, completeAnalysis, addLog, currentDay, selectedPatient } = useDemo();
+  const { triggerCall, completeAnalysis, addLog, currentDay, selectedPatient, syncStep } = useDemo();
 
   // Look up thinking steps for the current day
   const steps = DAILY_THINKING_STEPS[currentDay] || DAILY_THINKING_STEPS[1];
   const dayData = currentDay >= 1 && currentDay <= 7 ? DAY_DATA[currentDay - 1] : null;
   const isCallDay = dayData?.isCallDay || dayData?.isIncidentDay;
+  const config = SYNC_CONFIG[currentDay];
+  const useTimerMode = !config; // Day 4 has no sync config — uses timer
 
-  const [stepStatuses, setStepStatuses] = useState<StepStatus[]>(() =>
+  // --- Sync mode: derive step statuses from syncStep + SYNC_CONFIG ---
+  const syncDerived = useMemo(() => {
+    if (!config) return null;
+    const statuses: StepStatus[] = steps.map(() => "pending");
+    let threshold = 0;
+
+    for (const block of config) {
+      for (const stepIdx of block) {
+        const activateAt = threshold + 1;
+        const completeAt = threshold + 2;
+        threshold += 2;
+        if (stepIdx < statuses.length) {
+          if (syncStep >= completeAt) statuses[stepIdx] = "complete";
+          else if (syncStep >= activateAt) statuses[stepIdx] = "active";
+        }
+      }
+    }
+
+    const decisionAt = threshold + 1;
+    return { statuses, decisionVisible: syncStep >= decisionAt };
+  }, [config, syncStep, steps]);
+
+  // --- Timer mode state (Day 4 only) ---
+  const [timerStatuses, setTimerStatuses] = useState<StepStatus[]>(() =>
     steps.map(() => "pending")
   );
-  const [decisionVisible, setDecisionVisible] = useState(false);
+  const [timerDecisionVisible, setTimerDecisionVisible] = useState(false);
   const triggeredRef = useRef(false);
 
   useEffect(() => {
+    if (!useTimerMode) return;
+
     const timeouts: ReturnType<typeof setTimeout>[] = [];
-    let cumulativeDelay = 400; // initial pause before first step starts
+    let cumulativeDelay = 400;
 
     steps.forEach((step, idx) => {
-      // Start step (pending -> active)
       const startDelay = cumulativeDelay;
       timeouts.push(
         setTimeout(() => {
-          setStepStatuses((prev) => {
+          setTimerStatuses((prev) => {
             const next = [...prev];
             next[idx] = "active";
             return next;
@@ -577,12 +603,11 @@ function AIThinkingFeed() {
         }, startDelay)
       );
 
-      // Complete step (active -> complete)
       cumulativeDelay += step.durationMs;
       const endDelay = cumulativeDelay;
       timeouts.push(
         setTimeout(() => {
-          setStepStatuses((prev) => {
+          setTimerStatuses((prev) => {
             const next = [...prev];
             next[idx] = "complete";
             return next;
@@ -591,15 +616,13 @@ function AIThinkingFeed() {
       );
     });
 
-    // Show decision card after all steps complete
     const decisionDelay = cumulativeDelay + 500;
     timeouts.push(
       setTimeout(() => {
-        setDecisionVisible(true);
+        setTimerDecisionVisible(true);
       }, decisionDelay)
     );
 
-    // After decision: trigger call (call days) or complete analysis (non-call days)
     const actionDelay = decisionDelay + 1000;
     timeouts.push(
       setTimeout(() => {
@@ -617,7 +640,11 @@ function AIThinkingFeed() {
     return () => {
       timeouts.forEach(clearTimeout);
     };
-  }, [triggerCall, completeAnalysis, addLog, steps, isCallDay]);
+  }, [useTimerMode, triggerCall, completeAnalysis, addLog, steps, isCallDay]);
+
+  // Pick which statuses to render
+  const stepStatuses = syncDerived ? syncDerived.statuses : timerStatuses;
+  const decisionVisible = syncDerived ? syncDerived.decisionVisible : timerDecisionVisible;
 
   return (
     <div className="flex flex-col h-full">
@@ -1017,7 +1044,7 @@ function DocumentingView() {
           <h3 className="text-[11px] font-bold uppercase tracking-wider text-slate-500 mb-1.5">AI-Generated Clinical Summary</h3>
           <div className="text-[11px] text-slate-700 leading-relaxed space-y-1.5">
             <p><strong>Patient:</strong> {selectedPatient.firstName} {selectedPatient.lastName}, {selectedPatient.age}{selectedPatient.gender}</p>
-            <p><strong>Chief Concern:</strong> GLP-1 initiation nausea &mdash; missed check-in Day 4 of Wegovy 0.25mg</p>
+            <p><strong>Chief Concern:</strong> GLP-1 initiation nausea &mdash; patient stopped responding to texts on Day 4 of Wegovy 0.25mg</p>
             <p><strong>Assessment:</strong> Grade 2 nausea since Day 2, peaking Day 3-4. Reduced oral intake ~50%, fluid intake below target. Considered discontinuing. No dehydration signs on assessment. Patient engaged and receptive.</p>
             <p><strong>Plan:</strong> Dietary counseling (small meals, ginger, hydration). Follow-up check-in Day 5. Flagged for Dr. Patel &mdash; consider ondansetron PRN. Continue Wegovy 0.25mg.</p>
           </div>

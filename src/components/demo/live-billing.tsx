@@ -178,7 +178,7 @@ function flagCellStyle(flag?: "amber" | "red"): React.CSSProperties {
 // ---------------------------------------------------------------------------
 
 export function LiveBilling() {
-  const { demoPhase, currentDay, resolveCase, selectedPatient } = useDemo();
+  const { demoPhase, currentDay, resolveCase, selectedPatient, sendPrescription } = useDemo();
 
   // BPA alert visibility states
   const [showBpaBanner, setShowBpaBanner] = useState(false);
@@ -595,12 +595,12 @@ export function LiveBilling() {
                   margin: "0 0 10px 0",
                 }}>
                   Automated voice outreach completed with {selectedPatient.firstName} {selectedPatient.lastName} regarding GLP-1
-                  initiation side effects and missed check-in (Day 4). Patient reported
+                  initiation side effects after patient stopped responding to texts (Day 4). Patient reported
                   Grade 2 nausea since Day 2, reduced oral intake ~50%, fluid intake below
                   40oz/day. Patient was considering discontinuation. AI provided dietary
                   counseling (small meals, ginger, hydration). Patient re-engaged and
-                  committed to continuing Wegovy. Recommend: consider ondansetron PRN if
-                  nausea persists beyond Day 7.
+                  committed to continuing Wegovy. AI recommends prescribing ondansetron
+                  (Zofran) 4mg PRN for persistent nausea. Review side effects and drug interactions before prescribing.
                 </p>
 
                 {/* Metadata row */}
@@ -655,7 +655,7 @@ export function LiveBilling() {
                 {[
                   "Anti-nausea coaching provided (small meals, ginger, hydration)",
                   "Follow-up check-in scheduled (Day 5)",
-                  "Flagged for Dr. Patel \u2014 consider ondansetron PRN",
+                  "Ondansetron 4mg PRN recommended \u2014 pending Dr. Patel review",
                   "Clinical note auto-drafted and ready for signature",
                 ].map((step, i) => (
                   <div key={i} style={{
@@ -801,6 +801,31 @@ export function LiveBilling() {
                     }}
                   >
                     {selectedAction === "labs" ? "\u2713 " : ""}Order Labs (A1c)
+                  </button>
+
+                  {/* Prescribe Anti-Nausea */}
+                  <button
+                    className={!selectedAction ? "epic-button-blink" : ""}
+                    onClick={() => { if (!selectedAction) setSelectedAction("antinausea"); }}
+                    style={{
+                      padding: "7px 16px",
+                      borderRadius: 20,
+                      border: "none",
+                      cursor: selectedAction && selectedAction !== "antinausea" ? "default" : "pointer",
+                      fontSize: 12,
+                      fontWeight: 600,
+                      color: "#ffffff",
+                      background: selectedAction && selectedAction !== "antinausea"
+                        ? "#94a3b8"
+                        : selectedAction === "antinausea"
+                          ? "linear-gradient(135deg, #d97706, #b45309)"
+                          : "linear-gradient(135deg, #f59e0b, #d97706)",
+                      boxShadow: selectedAction === "antinausea" ? "0 0 0 2px #f59e0b" : "0 1px 3px rgba(245, 158, 11, 0.3)",
+                      opacity: selectedAction && selectedAction !== "antinausea" ? 0.5 : 1,
+                      transition: "all 0.2s ease",
+                    }}
+                  >
+                    {selectedAction === "antinausea" ? "\u2713 " : ""}Prescribe Anti-Nausea
                   </button>
 
                   {/* Resolve (only shown when no action selected or after action confirmed) */}
@@ -1056,6 +1081,107 @@ export function LiveBilling() {
                     </div>
                     <span style={{ fontSize: 12, color: "#166534", fontWeight: 600 }}>
                       Lab order placed &mdash; Order #LC-2026-78432 (LabCorp)
+                    </span>
+                  </div>
+                )}
+
+                {/* Anti-Nausea Prescription Step */}
+                {selectedAction === "antinausea" && !actionConfirmed && (
+                  <div className="epic-fade-in" style={{
+                    border: "1px solid #fde68a",
+                    borderRadius: 4,
+                    backgroundColor: "#fffbeb",
+                    padding: "10px 12px",
+                    marginBottom: 8,
+                  }}>
+                    <div style={{ fontSize: 11, fontWeight: 700, color: "#92400e", marginBottom: 8 }}>
+                      Prescribe Anti-Nausea Medication &mdash; AI Recommended
+                    </div>
+                    <div style={{
+                      backgroundColor: "#fef3c7",
+                      border: "1px solid #fde68a",
+                      borderRadius: 4,
+                      padding: "8px 10px",
+                      marginBottom: 8,
+                    }}>
+                      <div style={{ fontSize: 11, fontWeight: 600, color: "#1e293b", marginBottom: 4 }}>
+                        Ondansetron (Zofran) 4mg
+                      </div>
+                      <div style={{ fontSize: 10, color: "#64748b", lineHeight: 1.5 }}>
+                        PO every 8 hours PRN nausea &middot; Qty: 21 &middot; 7-day supply
+                      </div>
+                    </div>
+                    <div style={{ marginBottom: 8 }}>
+                      <div style={{ fontSize: 10, fontWeight: 600, color: "#475569", marginBottom: 4, textTransform: "uppercase", letterSpacing: 0.5 }}>
+                        Side Effects to Review
+                      </div>
+                      <div style={{ display: "flex", flexWrap: "wrap", gap: 4 }}>
+                        {["Headache", "Constipation", "Dizziness", "Fatigue"].map((se) => (
+                          <span key={se} style={{
+                            fontSize: 10,
+                            padding: "2px 8px",
+                            borderRadius: 10,
+                            backgroundColor: "#fff7ed",
+                            border: "1px solid #fed7aa",
+                            color: "#9a3412",
+                          }}>{se}</span>
+                        ))}
+                      </div>
+                    </div>
+                    <div style={{
+                      fontSize: 10,
+                      color: "#64748b",
+                      marginBottom: 8,
+                      padding: "6px 8px",
+                      backgroundColor: "#f8fafc",
+                      borderRadius: 4,
+                      border: "1px solid #e2e8f0",
+                    }}>
+                      <strong>Drug Interactions:</strong> No significant interactions with current medications (Metformin, Lisinopril, Wegovy)
+                    </div>
+                    <button
+                      className="epic-button-blink"
+                      onClick={() => { setActionConfirmed(true); sendPrescription(); }}
+                      style={{
+                        padding: "7px 16px",
+                        borderRadius: 6,
+                        border: "none",
+                        cursor: "pointer",
+                        fontSize: 12,
+                        fontWeight: 600,
+                        color: "#ffffff",
+                        background: "linear-gradient(135deg, #f59e0b, #d97706)",
+                        width: "100%",
+                        transition: "all 0.2s ease",
+                      }}
+                    >
+                      Prescribe &amp; Send to Pharmacy
+                    </button>
+                  </div>
+                )}
+
+                {/* Anti-Nausea confirmed */}
+                {selectedAction === "antinausea" && actionConfirmed && (
+                  <div className="epic-fade-in" style={{
+                    border: "1px solid #bbf7d0",
+                    borderRadius: 4,
+                    backgroundColor: "#f0fdf4",
+                    padding: "8px 12px",
+                    marginBottom: 8,
+                    display: "flex",
+                    alignItems: "center",
+                    gap: 8,
+                  }}>
+                    <div style={{
+                      width: 18, height: 18, borderRadius: "50%", backgroundColor: "#dcfce7",
+                      border: "1.5px solid #22c55e", display: "flex", alignItems: "center", justifyContent: "center", flexShrink: 0,
+                    }}>
+                      <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="#16a34a" strokeWidth={3}>
+                        <path strokeLinecap="round" strokeLinejoin="round" d="M4.5 12.75l6 6 9-13.5" />
+                      </svg>
+                    </div>
+                    <span style={{ fontSize: 12, color: "#166534", fontWeight: 600 }}>
+                      Ondansetron 4mg PRN prescribed &mdash; sent to CVS Pharmacy
                     </span>
                   </div>
                 )}

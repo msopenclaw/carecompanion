@@ -1,6 +1,13 @@
 const { eq, and } = require("drizzle-orm");
 const { db } = require("../db");
-const { scheduledActions } = require("../db/schema");
+const { scheduledActions, userProfiles, medications } = require("../db/schema");
+
+const DAY_ORDER = ["sunday", "monday", "tuesday", "wednesday", "thursday", "friday", "saturday"];
+
+function getDayBefore(day) {
+  const idx = DAY_ORDER.indexOf(day.toLowerCase());
+  return DAY_ORDER[idx <= 0 ? 6 : idx - 1];
+}
 
 /**
  * Sync scheduled_actions rows based on user preferences.
@@ -15,6 +22,14 @@ async function syncScheduledActions(userId, prefs) {
       eq(scheduledActions.userId, userId),
       eq(scheduledActions.createdVia, "preferences")
     ));
+
+  // Fetch user profile (timezone, injection day) and active medications
+  const [[profile], meds] = await Promise.all([
+    db.select().from(userProfiles).where(eq(userProfiles.userId, userId)),
+    db.select().from(medications)
+      .where(and(eq(medications.patientId, userId), eq(medications.isActive, true))),
+  ]);
+  const userTimezone = profile?.timezone || "America/New_York";
 
   const rows = [];
   const quietEnd = prefs.quietEnd || "07:00";
@@ -43,25 +58,61 @@ async function syncScheduledActions(userId, prefs) {
     });
   }
 
-  // 3. Medication reminders
-  if (prefs.medReminderEnabled) {
-    rows.push({
-      userId,
-      actionType: "med_reminder",
-      label: "Time to take your medication",
-      scheduledTime: "09:00",
-      recurrence: "daily",
-      createdVia: "preferences",
-    });
-    if (prefs.medReminderPrepNightBefore) {
-      rows.push({
-        userId,
-        actionType: "med_reminder",
-        label: "Prep your medication for tomorrow",
-        scheduledTime: "20:00",
-        recurrence: "daily",
-        createdVia: "preferences",
-      });
+  // 3. Medication reminders — frequency-aware per medication
+  if (prefs.medReminderEnabled && meds.length > 0) {
+    for (const med of meds) {
+      if (med.frequency === "weekly") {
+        // Weekly medication (e.g., Wegovy) — only on injection day
+        const injDay = (profile?.injectionDay || "friday").toLowerCase();
+        rows.push({
+          userId,
+          actionType: "med_reminder",
+          label: `${med.name} ${med.dosage}`,
+          scheduledTime: "09:00",
+          recurrence: "weekly",
+          recurrenceDay: injDay,
+          createdVia: "preferences",
+        });
+        // Night-before prep reminder
+        if (prefs.medReminderPrepNightBefore) {
+          rows.push({
+            userId,
+            actionType: "med_reminder",
+            label: `Prep ${med.name} for tomorrow`,
+            scheduledTime: "20:00",
+            recurrence: "weekly",
+            recurrenceDay: getDayBefore(injDay),
+            createdVia: "preferences",
+          });
+        }
+      } else if (med.frequency === "twice_daily") {
+        rows.push({
+          userId,
+          actionType: "med_reminder",
+          label: `${med.name} ${med.dosage} (morning)`,
+          scheduledTime: "09:00",
+          recurrence: "daily",
+          createdVia: "preferences",
+        });
+        rows.push({
+          userId,
+          actionType: "med_reminder",
+          label: `${med.name} ${med.dosage} (evening)`,
+          scheduledTime: "18:00",
+          recurrence: "daily",
+          createdVia: "preferences",
+        });
+      } else {
+        // Daily (default)
+        rows.push({
+          userId,
+          actionType: "med_reminder",
+          label: `${med.name} ${med.dosage}`,
+          scheduledTime: "09:00",
+          recurrence: "daily",
+          createdVia: "preferences",
+        });
+      }
     }
   }
 
@@ -103,12 +154,15 @@ async function syncScheduledActions(userId, prefs) {
     });
   }
 
-  // 6. Bulk insert
+  // 6. Set timezone on all rows and bulk insert
+  for (const row of rows) {
+    row.timezone = userTimezone;
+  }
   if (rows.length > 0) {
     await db.insert(scheduledActions).values(rows);
   }
 
-  console.log(`[PreferenceScheduler] Created ${rows.length} scheduled actions for user ${userId}`);
+  console.log(`[PreferenceScheduler] Created ${rows.length} scheduled actions for user ${userId} (${meds.length} meds)`);
   return rows.length;
 }
 

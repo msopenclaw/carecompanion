@@ -4,9 +4,14 @@ const { eq, and } = require("drizzle-orm");
 const { db } = require("../db");
 const { pushTokens } = require("../db/schema");
 
-const APNS_HOST = process.env.NODE_ENV === "production"
-  ? "api.push.apple.com"
-  : "api.sandbox.push.apple.com";
+// Try both environments — sandbox first, then production as fallback
+const APNS_SANDBOX = "api.sandbox.push.apple.com";
+const APNS_PRODUCTION = "api.push.apple.com";
+
+// Primary environment from config
+const primaryHost = process.env.APNS_ENVIRONMENT === "production"
+  ? APNS_PRODUCTION
+  : APNS_SANDBOX;
 
 let cachedJwt = null;
 let cachedJwtExpiry = 0;
@@ -27,17 +32,10 @@ function getApnsJwt() {
   const claims = Buffer.from(JSON.stringify({ iss: teamId, iat: now })).toString("base64url");
   const signingInput = `${header}.${claims}`;
 
+  // Use ieee-p1363 encoding to get raw r||s directly (avoids DER parsing bugs)
   const sign = crypto.createSign("SHA256");
   sign.update(signingInput);
-  const signature = sign.sign(key);
-
-  // Convert DER signature to raw r||s (64 bytes)
-  const r = signature.subarray(4, 4 + signature[3]);
-  const sOffset = 4 + signature[3] + 2;
-  const s = signature.subarray(sOffset, sOffset + signature[sOffset - 1]);
-  const rawSig = Buffer.alloc(64);
-  r.copy(rawSig, 32 - r.length);
-  s.copy(rawSig, 64 - s.length);
+  const rawSig = sign.sign({ key, dsaEncoding: "ieee-p1363" });
 
   cachedJwt = `${signingInput}.${rawSig.toString("base64url")}`;
   cachedJwtExpiry = now + 3500; // refresh before 1h expiry
@@ -50,11 +48,17 @@ function getApnsJwt() {
  * @param {{ title: string, body: string, data?: object }} payload
  */
 async function sendPush(userId, { title, body, data }) {
+  console.log(`[Push] ── sendPush called ──`);
+  console.log(`[Push] userId: ${userId}`);
+  console.log(`[Push] title: "${title}", body: "${body}"`);
+
   const jwt = getApnsJwt();
   if (!jwt) {
-    console.log("[Push] APNs not configured (missing key/team/key_id)");
-    return;
+    console.error("[Push] APNs NOT configured — missing APNS_KEY_ID/APNS_TEAM_ID/APNS_AUTH_KEY");
+    console.log(`[Push] APNS_KEY_ID=${process.env.APNS_KEY_ID ? "set" : "MISSING"}, APNS_TEAM_ID=${process.env.APNS_TEAM_ID ? "set" : "MISSING"}, APNS_AUTH_KEY=${process.env.APNS_AUTH_KEY ? `set (${process.env.APNS_AUTH_KEY.length} chars)` : "MISSING"}`);
+    return { sent: 0, error: "APNs not configured" };
   }
+  console.log(`[Push] JWT generated OK, env=${process.env.APNS_ENVIRONMENT || "development"}, host=${primaryHost}`);
 
   const bundleId = process.env.APNS_BUNDLE_ID || "com.carecompanion.ios";
 
@@ -64,26 +68,52 @@ async function sendPush(userId, { title, body, data }) {
       eq(pushTokens.isActive, true),
     ));
 
+  console.log(`[Push] Found ${tokens.length} active token(s) for user`);
   if (tokens.length === 0) {
-    console.log(`[Push] No active tokens for user ${userId}`);
-    return;
+    return { sent: 0, tokensFound: 0, error: "No active device tokens registered" };
   }
 
+  for (const t of tokens) {
+    console.log(`[Push] Token: ${t.deviceToken.substring(0, 12)}... (platform=${t.platform}, active=${t.isActive})`);
+  }
+
+  // Extract category into aps dict so iOS matches registered UNNotificationCategory
+  const { category, ...customData } = data || {};
   const apnsPayload = JSON.stringify({
     aps: {
       alert: { title, body },
       sound: "default",
       badge: 1,
+      ...(category ? { category } : {}),
     },
-    ...(data || {}),
+    ...customData,
   });
+
+  let sentCount = 0;
+  const errors = [];
 
   for (const tokenRow of tokens) {
     try {
-      await sendToDevice(tokenRow.deviceToken, apnsPayload, bundleId, jwt);
-      console.log(`[Push] Sent to ${tokenRow.deviceToken.substring(0, 8)}...`);
+      await sendToDevice(tokenRow.deviceToken, apnsPayload, bundleId, jwt, primaryHost);
+      console.log(`[Push] Sent to ${tokenRow.deviceToken.substring(0, 8)}... via ${primaryHost}`);
+      sentCount++;
     } catch (err) {
-      console.error(`[Push] Failed for token ${tokenRow.deviceToken.substring(0, 8)}:`, err.message);
+      // If BadEnvironmentKeyInToken, try the other environment
+      if (err.reason === "BadDeviceToken" || err.reason === "BadEnvironmentKeyInToken") {
+        const fallbackHost = primaryHost === APNS_SANDBOX ? APNS_PRODUCTION : APNS_SANDBOX;
+        try {
+          await sendToDevice(tokenRow.deviceToken, apnsPayload, bundleId, jwt, fallbackHost);
+          console.log(`[Push] Sent to ${tokenRow.deviceToken.substring(0, 8)}... via ${fallbackHost} (fallback)`);
+          sentCount++;
+          continue;
+        } catch (fallbackErr) {
+          console.error(`[Push] Failed on both environments for ${tokenRow.deviceToken.substring(0, 8)}:`, err.message, "/", fallbackErr.message);
+          errors.push({ token: tokenRow.deviceToken.substring(0, 8), error: `${err.message} / fallback: ${fallbackErr.message}`, statusCode: err.statusCode });
+        }
+      } else {
+        console.error(`[Push] Failed for token ${tokenRow.deviceToken.substring(0, 8)}:`, err.message);
+        errors.push({ token: tokenRow.deviceToken.substring(0, 8), error: err.message, statusCode: err.statusCode });
+      }
       // Deactivate invalid tokens
       if (err.statusCode === 410 || err.reason === "Unregistered") {
         await db.update(pushTokens)
@@ -92,11 +122,19 @@ async function sendPush(userId, { title, body, data }) {
       }
     }
   }
+
+  console.log(`[Push] ── Result: sent=${sentCount}/${tokens.length}, errors=${errors.length} ──`);
+  if (errors.length > 0) {
+    for (const e of errors) {
+      console.error(`[Push] Error for ${e.token}: ${e.error} (status ${e.statusCode})`);
+    }
+  }
+  return { sent: sentCount, tokensFound: tokens.length, errors: errors.length > 0 ? errors : undefined };
 }
 
-function sendToDevice(deviceToken, payload, bundleId, jwt) {
+function sendToDevice(deviceToken, payload, bundleId, jwt, host) {
   return new Promise((resolve, reject) => {
-    const client = http2.connect(`https://${APNS_HOST}`);
+    const client = http2.connect(`https://${host}`);
 
     client.on("error", (err) => {
       client.close();

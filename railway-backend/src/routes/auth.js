@@ -1,9 +1,11 @@
 const express = require("express");
 const bcrypt = require("bcryptjs");
 const jwt = require("jsonwebtoken");
-const { eq } = require("drizzle-orm");
+const { eq, and } = require("drizzle-orm");
 const { db } = require("../db");
-const { users, userProfiles, patients } = require("../db/schema");
+const { users, userProfiles, patients, mealLogs, dailyTips, medicationLogs, medications, vitals, messages, voiceSessions, scheduledActions, pushTokens, userPreferences, userCoordinator, consents } = require("../db/schema");
+const { authMiddleware } = require("../middleware/auth");
+const { decrypt, decryptJson } = require("../services/encryption");
 
 const router = express.Router();
 const JWT_SECRET = process.env.JWT_SECRET || "dev-secret-change-me";
@@ -13,12 +15,12 @@ function generateTokens(user) {
   const accessToken = jwt.sign(
     { userId: user.id, email: user.email, role: user.role },
     JWT_SECRET,
-    { expiresIn: "1h" },
+    { expiresIn: "365d" },
   );
   const refreshToken = jwt.sign(
     { userId: user.id, type: "refresh" },
     JWT_REFRESH_SECRET,
-    { expiresIn: "7d" },
+    { expiresIn: "365d" },
   );
   return { accessToken, refreshToken };
 }
@@ -101,7 +103,11 @@ router.post("/login", async (req, res) => {
       return res.status(400).json({ error: "Email and password required" });
     }
 
-    const [user] = await db.select().from(users).where(eq(users.email, email.toLowerCase()));
+    // Allow short username aliases for console login
+    const loginAliases = { ms: "manish.openclaw@gmail.com" };
+    const lookupEmail = (loginAliases[email.toLowerCase()] || email).toLowerCase();
+
+    const [user] = await db.select().from(users).where(eq(users.email, lookupEmail));
     if (!user || !user.isActive) {
       return res.status(401).json({ error: "Invalid credentials" });
     }
@@ -115,6 +121,15 @@ router.post("/login", async (req, res) => {
 
     // Get profile if exists
     const [profile] = await db.select().from(userProfiles).where(eq(userProfiles.userId, user.id));
+
+    // Decrypt PII fields so iOS can decode the response
+    if (profile) {
+      profile.firstName = decrypt(profile.firstName);
+      profile.lastName = decrypt(profile.lastName);
+      if (profile.phone) profile.phone = decrypt(profile.phone);
+      if (profile.conditions) profile.conditions = decryptJson(profile.conditions);
+      if (profile.currentSideEffects) profile.currentSideEffects = decryptJson(profile.currentSideEffects);
+    }
 
     res.json({
       user: {
@@ -147,9 +162,33 @@ router.post("/apple", async (req, res) => {
 
     const appleUserId = decoded.sub;
     const userEmail = email || decoded.email || `${appleUserId}@privaterelay.appleid.com`;
+    console.log(`[Auth] Apple Sign In: sub=${appleUserId}, email=${email || 'none'}, tokenEmail=${decoded.email || 'none'}, resolved=${userEmail}`);
 
-    // Check if user exists by email
-    let [user] = await db.select().from(users).where(eq(users.email, userEmail.toLowerCase()));
+    // 1. Check if user exists by Apple user ID (most reliable)
+    let [user] = await db.select().from(users).where(eq(users.appleUserId, appleUserId));
+
+    // Skip inactive accounts (deactivated duplicates)
+    if (user && !user.isActive) {
+      console.log(`[Auth] Found inactive account ${user.id} by appleUserId, skipping`);
+      user = null;
+    }
+
+    // 2. Fallback: check by email (try all possible emails Apple might use)
+    if (!user) {
+      const emailsToTry = new Set([userEmail.toLowerCase()]);
+      if (decoded.email) emailsToTry.add(decoded.email.toLowerCase());
+      if (email) emailsToTry.add(email.toLowerCase());
+
+      for (const tryEmail of emailsToTry) {
+        const [found] = await db.select().from(users).where(and(eq(users.email, tryEmail), eq(users.isActive, true)));
+        if (found) {
+          user = found;
+          await db.update(users).set({ appleUserId }).where(eq(users.id, user.id));
+          console.log(`[Auth] Linked Apple ID to existing user ${user.id} via email ${tryEmail}`);
+          break;
+        }
+      }
+    }
 
     if (!user) {
       // Create new user (no password for Apple Sign In)
@@ -158,6 +197,7 @@ router.post("/apple", async (req, res) => {
         email: userEmail.toLowerCase(),
         passwordHash: dummyHash,
         role: "patient",
+        appleUserId,
       }).returning();
 
       // Create profile from Apple-provided name
@@ -186,8 +226,18 @@ router.post("/apple", async (req, res) => {
       }
     }
 
+    console.log(`[Auth] Apple auth result: userId=${user.id}, email=${user.email}, appleUserId=${user.appleUserId || appleUserId}`);
     const tokens = generateTokens(user);
     const [profile] = await db.select().from(userProfiles).where(eq(userProfiles.userId, user.id));
+
+    // Decrypt PII fields so iOS can decode the response
+    if (profile) {
+      profile.firstName = decrypt(profile.firstName);
+      profile.lastName = decrypt(profile.lastName);
+      if (profile.phone) profile.phone = decrypt(profile.phone);
+      if (profile.conditions) profile.conditions = decryptJson(profile.conditions);
+      if (profile.currentSideEffects) profile.currentSideEffects = decryptJson(profile.currentSideEffects);
+    }
 
     res.json({
       user: {
@@ -222,6 +272,36 @@ router.post("/refresh", async (req, res) => {
     res.json(tokens);
   } catch (err) {
     return res.status(401).json({ error: "Invalid or expired refresh token" });
+  }
+});
+
+// DELETE /api/auth/account — cascade delete user and all data
+router.delete("/account", authMiddleware, async (req, res) => {
+  try {
+    const userId = req.user.userId;
+    console.log(`[Auth] Deleting account for user ${userId}`);
+
+    // Cascade delete in FK-safe order
+    await db.delete(mealLogs).where(eq(mealLogs.userId, userId));
+    await db.delete(dailyTips).where(eq(dailyTips.userId, userId));
+    await db.delete(medicationLogs).where(eq(medicationLogs.patientId, userId));
+    await db.delete(medications).where(eq(medications.patientId, userId));
+    await db.delete(vitals).where(eq(vitals.patientId, userId));
+    await db.delete(messages).where(eq(messages.userId, userId));
+    await db.delete(voiceSessions).where(eq(voiceSessions.userId, userId));
+    await db.delete(scheduledActions).where(eq(scheduledActions.userId, userId));
+    await db.delete(pushTokens).where(eq(pushTokens.userId, userId));
+    await db.delete(userPreferences).where(eq(userPreferences.userId, userId));
+    await db.delete(userCoordinator).where(eq(userCoordinator.userId, userId));
+    await db.delete(consents).where(eq(consents.userId, userId));
+    await db.delete(userProfiles).where(eq(userProfiles.userId, userId));
+    await db.delete(users).where(eq(users.id, userId));
+
+    console.log(`[Auth] Account deleted for user ${userId}`);
+    res.json({ success: true, message: "Account and all data deleted" });
+  } catch (err) {
+    console.error("[Auth] Account deletion failed:", err.message);
+    res.status(500).json({ error: "Failed to delete account" });
   }
 });
 

@@ -1,13 +1,25 @@
 const express = require("express");
-const { eq, desc, and, gte, sql, count } = require("drizzle-orm");
+const { eq, desc, and, gte, sql, count, inArray } = require("drizzle-orm");
 const { db } = require("../db");
 const {
   users, userProfiles, messages, aiActions, voiceSessions,
   escalations, vitals, medications, medicationLogs, engagementConfig,
-  userCoordinator, careCoordinators,
+  userCoordinator, careCoordinators, userPreferences,
 } = require("../db/schema");
+const { decrypt, decryptJson } = require("../services/encryption");
+const { sendPush } = require("../services/pushService");
 
 const router = express.Router();
+
+/** Decrypt encrypted PII fields on a profile object (mutates in place) */
+function decryptProfile(profile) {
+  if (!profile) return;
+  profile.firstName = decrypt(profile.firstName);
+  profile.lastName = decrypt(profile.lastName);
+  if (profile.phone) profile.phone = decrypt(profile.phone);
+  if (profile.conditions) profile.conditions = decryptJson(profile.conditions);
+  if (profile.currentSideEffects) profile.currentSideEffects = decryptJson(profile.currentSideEffects);
+}
 
 // GET /api/console/patients — list all patients with status summaries
 router.get("/patients", async (req, res) => {
@@ -19,6 +31,7 @@ router.get("/patients", async (req, res) => {
     for (const user of allUsers) {
       const [profile] = await db.select().from(userProfiles)
         .where(eq(userProfiles.userId, user.id));
+      decryptProfile(profile);
 
       // Last message
       const [lastMsg] = await db.select().from(messages)
@@ -46,12 +59,18 @@ router.get("/patients", async (req, res) => {
         coordinator = coord;
       }
 
+      // Preferences
+      const [prefs] = await db.select().from(userPreferences)
+        .where(eq(userPreferences.userId, user.id));
+
       patientList.push({
         id: user.id,
         email: user.email,
         isActive: user.isActive,
+        createdAt: user.createdAt,
         profile,
         coordinator,
+        preferences: prefs || null,
         lastMessage: lastMsg || null,
         lastAiAction: lastAction || null,
         unreadCount: unreadResult?.count || 0,
@@ -76,6 +95,7 @@ router.get("/patients/:id", async (req, res) => {
 
     const [profile] = await db.select().from(userProfiles)
       .where(eq(userProfiles.userId, userId));
+    decryptProfile(profile);
 
     // Recent vitals
     const since7d = new Date(Date.now() - 7 * 24 * 60 * 60 * 1000);
@@ -106,11 +126,16 @@ router.get("/patients/:id", async (req, res) => {
       engConfig = ec;
     }
 
+    // Preferences
+    const [prefs] = await db.select().from(userPreferences)
+      .where(eq(userPreferences.userId, userId));
+
     res.json({
       user,
       profile,
       coordinator,
       engagementConfig: engConfig,
+      preferences: prefs || null,
       recentVitals,
       medications: meds,
     });
@@ -317,6 +342,165 @@ router.get("/stats", async (req, res) => {
   } catch (err) {
     console.error("Console stats error:", err);
     res.status(500).json({ error: "Failed to fetch stats" });
+  }
+});
+
+// GET /api/console/patients/:id/chart-data — vitals grouped by type for charts (30d)
+router.get("/patients/:id/chart-data", async (req, res) => {
+  try {
+    const userId = req.params.id;
+    const since30d = new Date(Date.now() - 30 * 24 * 60 * 60 * 1000);
+
+    const allVitals = await db.select().from(vitals)
+      .where(and(eq(vitals.patientId, userId), gte(vitals.recordedAt, since30d)))
+      .orderBy(vitals.recordedAt);
+
+    const grouped = {};
+    for (const v of allVitals) {
+      if (!grouped[v.vitalType]) grouped[v.vitalType] = [];
+      grouped[v.vitalType].push({
+        date: v.recordedAt.toISOString().split("T")[0],
+        value: v.value,
+        unit: v.unit,
+      });
+    }
+
+    res.json(grouped);
+  } catch (err) {
+    console.error("Console chart-data error:", err);
+    res.status(500).json({ error: "Failed to fetch chart data" });
+  }
+});
+
+// GET /api/console/patients/:id/adherence — medication adherence (30d)
+router.get("/patients/:id/adherence", async (req, res) => {
+  try {
+    const userId = req.params.id;
+    const since30d = new Date(Date.now() - 30 * 24 * 60 * 60 * 1000);
+
+    const logs = await db.select().from(medicationLogs)
+      .where(and(eq(medicationLogs.patientId, userId), gte(medicationLogs.scheduledAt, since30d)));
+
+    const totalScheduled = logs.length;
+    const totalTaken = logs.filter(l => l.status === "taken" || l.status === "late").length;
+    const totalMissed = logs.filter(l => l.status === "missed").length;
+
+    // Group by date
+    const daily = {};
+    for (const l of logs) {
+      const date = l.scheduledAt.toISOString().split("T")[0];
+      if (!daily[date]) daily[date] = { date, taken: 0, missed: 0, total: 0 };
+      daily[date].total++;
+      if (l.status === "taken" || l.status === "late") daily[date].taken++;
+      if (l.status === "missed") daily[date].missed++;
+    }
+
+    res.json({
+      totalScheduled,
+      totalTaken,
+      totalMissed,
+      rate: totalScheduled > 0 ? Math.round((totalTaken / totalScheduled) * 100) : 100,
+      daily: Object.values(daily).sort((a, b) => a.date.localeCompare(b.date)),
+    });
+  } catch (err) {
+    console.error("Console adherence error:", err);
+    res.status(500).json({ error: "Failed to fetch adherence" });
+  }
+});
+
+// GET /api/console/patients/:id/encounters — encounter summaries
+router.get("/patients/:id/encounters", async (req, res) => {
+  try {
+    const userId = req.params.id;
+    const limit = parseInt(req.query.limit) || 30;
+
+    const encounters = await db.select().from(aiActions)
+      .where(and(
+        eq(aiActions.userId, userId),
+        inArray(aiActions.source, ["chat_summary", "cron"]),
+      ))
+      .orderBy(desc(aiActions.createdAt))
+      .limit(limit);
+
+    res.json(encounters);
+  } catch (err) {
+    console.error("Console encounters error:", err);
+    res.status(500).json({ error: "Failed to fetch encounters" });
+  }
+});
+
+// POST /api/console/push — send push notification to a patient
+router.post("/push", async (req, res) => {
+  try {
+    const { userId, title, body, category } = req.body;
+    if (!userId || !title || !body) {
+      return res.status(400).json({ error: "userId, title, and body required" });
+    }
+
+    const result = await sendPush(userId, {
+      title,
+      body,
+      data: { route: "messages", ...(category ? { category } : {}) },
+    });
+
+    // Log as AI action
+    await db.insert(aiActions).values({
+      userId,
+      observation: "Admin sent push notification from console",
+      reasoning: `Push: "${title}" — "${body}"`,
+      assessment: "Admin-initiated push notification",
+      urgency: "low",
+      action: "send_message",
+      messageContent: body,
+      source: "manual_override",
+    });
+
+    res.json({ success: result.sent > 0, ...result });
+  } catch (err) {
+    console.error("Console push error:", err);
+    res.status(500).json({ error: "Failed to send push" });
+  }
+});
+
+// POST /api/console/call-request — request a call (sends push to open call screen)
+router.post("/call-request", async (req, res) => {
+  try {
+    const { userId, reason } = req.body;
+    if (!userId) {
+      return res.status(400).json({ error: "userId required" });
+    }
+
+    // Get coordinator name for the push title
+    let coordinatorName = "Care Coordinator";
+    const [uc] = await db.select().from(userCoordinator)
+      .where(eq(userCoordinator.userId, userId));
+    if (uc) {
+      const [coord] = await db.select().from(careCoordinators)
+        .where(eq(careCoordinators.id, uc.coordinatorId));
+      if (coord) coordinatorName = coord.name;
+    }
+
+    const result = await sendPush(userId, {
+      title: coordinatorName,
+      body: reason || "Your care coordinator would like to speak with you. Tap to start a call.",
+      data: { route: "call", category: "call_request" },
+    });
+
+    // Log
+    await db.insert(aiActions).values({
+      userId,
+      observation: "Admin requested call from console",
+      reasoning: reason || "Admin wants to speak with patient",
+      assessment: "Admin-initiated call request",
+      urgency: "medium",
+      action: "call",
+      source: "manual_override",
+    });
+
+    res.json({ success: result.sent > 0, ...result });
+  } catch (err) {
+    console.error("Console call-request error:", err);
+    res.status(500).json({ error: "Failed to send call request" });
   }
 });
 

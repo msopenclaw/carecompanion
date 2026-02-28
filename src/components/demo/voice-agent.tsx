@@ -1,7 +1,7 @@
 "use client";
 
-import { useState, useEffect, useCallback, useRef } from "react";
-import { useDemo, DAY_DATA, personalizeText, type DayData, type TextMessage } from "./demo-context";
+import { useState, useEffect, useCallback, useRef, useMemo } from "react";
+import { useDemo, DAY_DATA, DAILY_THINKING_STEPS, SYNC_CONFIG, personalizeText, type DayData } from "./demo-context";
 
 // ---------------------------------------------------------------------------
 // Types
@@ -36,11 +36,11 @@ function nauseaLabel(grade: number): string {
 
 function nauseaColor(grade: number): string {
   switch (grade) {
-    case 0: return "text-emerald-400";
-    case 1: return "text-amber-400";
-    case 2: return "text-orange-400";
-    case 3: return "text-red-400";
-    default: return "text-emerald-400";
+    case 0: return "text-emerald-600";
+    case 1: return "text-amber-600";
+    case 2: return "text-orange-600";
+    case 3: return "text-red-600";
+    default: return "text-emerald-600";
   }
 }
 
@@ -67,13 +67,70 @@ function delay(ms: number): Promise<void> {
 }
 
 // ---------------------------------------------------------------------------
-// iOS notification sound (Web Audio API tri-tone)
+// Shared AudioContext — created once, reused for notification + TTS playback
 // ---------------------------------------------------------------------------
 
-function playNotificationSound() {
-  try {
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+let sharedAudioCtx: AudioContext | null = null;
+
+function getSharedAudioContext(): AudioContext {
+  if (!sharedAudioCtx || sharedAudioCtx.state === "closed") {
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    const ctx = new (window.AudioContext || (window as unknown as Record<string, typeof AudioContext>).webkitAudioContext)();
+    sharedAudioCtx = new (window.AudioContext || (window as unknown as Record<string, typeof AudioContext>).webkitAudioContext)();
+  }
+  return sharedAudioCtx;
+}
+
+// Eagerly resume AudioContext on first user interaction (browser autoplay policy)
+let audioUnlocked = false;
+function unlockAudio() {
+  if (audioUnlocked) return;
+  audioUnlocked = true;
+  try {
+    const ctx = getSharedAudioContext();
+    if (ctx.state === "suspended") ctx.resume();
+  } catch { /* ignore */ }
+  document.removeEventListener("click", unlockAudio);
+  document.removeEventListener("touchstart", unlockAudio);
+  document.removeEventListener("keydown", unlockAudio);
+}
+if (typeof document !== "undefined") {
+  document.addEventListener("click", unlockAudio, { once: false });
+  document.addEventListener("touchstart", unlockAudio, { once: false });
+  document.addEventListener("keydown", unlockAudio, { once: false });
+}
+
+/** Play a TTS audio blob via AudioContext (more reliable than new Audio for autoplay) */
+async function playBlobViaAudioContext(blob: Blob, signal: AbortSignal): Promise<boolean> {
+  try {
+    const ctx = getSharedAudioContext();
+    if (ctx.state === "suspended") await ctx.resume();
+    const arrayBuffer = await blob.arrayBuffer();
+    if (signal.aborted) return false;
+    const audioBuffer = await ctx.decodeAudioData(arrayBuffer);
+    if (signal.aborted) return false;
+    return await new Promise<boolean>((resolve) => {
+      const source = ctx.createBufferSource();
+      source.buffer = audioBuffer;
+      source.connect(ctx.destination);
+      source.onended = () => resolve(true);
+      const onAbort = () => { try { source.stop(); } catch { /* already stopped */ } resolve(false); };
+      signal.addEventListener("abort", onAbort, { once: true });
+      source.start(0);
+    });
+  } catch {
+    return false;
+  }
+}
+
+// ---------------------------------------------------------------------------
+// iOS notification sound (Web Audio API tri-tone) — uses shared AudioContext
+// ---------------------------------------------------------------------------
+
+async function playNotificationSound() {
+  try {
+    const ctx = getSharedAudioContext();
+    if (ctx.state === "suspended") await ctx.resume();
     const notes = [880, 1046.5, 1318.5]; // A5, C6, E6 - gentle ascending tri-tone
     notes.forEach((freq, i) => {
       const osc = ctx.createOscillator();
@@ -148,7 +205,7 @@ function buildIncidentScript(): ScriptLine[] {
   return [
     {
       speaker: "ai",
-      text: "Margaret, hi \u2014 this is CareCompanion. I noticed you haven't checked in today and I wanted to make sure you're OK. How are you feeling?",
+      text: "Margaret, hi \u2014 this is CareCompanion. I noticed you didn't reply to my text today and I wanted to make sure you're OK. How are you feeling?",
       speakDuration: 4800,
       preDelay: 1200,
     },
@@ -284,41 +341,69 @@ function TextNotification({
 }
 
 // ---------------------------------------------------------------------------
-// TextingView — iMessage-style animated text conversation
+// DisplayMessage — used for cumulative thread rendering
+// ---------------------------------------------------------------------------
+
+type DisplayMessage =
+  | { type: "message"; sender: "ai" | "patient"; text: string }
+  | { type: "separator"; day: number; date: string }
+  | { type: "no-response" };
+
+// ---------------------------------------------------------------------------
+// TextingView — iMessage-style animated text conversation (cumulative)
+// Shows all previous days' messages as one long thread with day separators.
+// History is shown instantly; current day messages animate in.
 // ---------------------------------------------------------------------------
 
 function TextingView({
-  thread,
+  messages,
+  animateFromIndex,
+  controlledVisibleCount: cvCount,
+  controlledShowTyping: cvTyping,
   onComplete,
   showNoResponse,
   isReplay,
 }: {
-  thread: TextMessage[];
+  messages: DisplayMessage[];
+  animateFromIndex: number;
+  controlledVisibleCount?: number;
+  controlledShowTyping?: boolean;
   onComplete: () => void;
   showNoResponse?: boolean;
   isReplay?: boolean;
 }) {
-  const [visibleCount, setVisibleCount] = useState(isReplay ? thread.length : 0);
-  const [showTyping, setShowTyping] = useState(!isReplay);
+  const isControlled = cvCount !== undefined;
+  const startCount = isReplay ? messages.length : animateFromIndex;
+  const [visibleCount, setVisibleCount] = useState(startCount);
+  const [showTyping, setShowTyping] = useState(false);
   const [showNoResponseLabel, setShowNoResponseLabel] = useState(false);
   const scrollRef = useRef<HTMLDivElement>(null);
   const completedRef = useRef(false);
 
+  // --- Controlled mode: sync visibleCount + typing from parent ---
   useEffect(() => {
-    // If replay mode, show all messages immediately and complete
+    if (!isControlled) return;
+    setVisibleCount(animateFromIndex + (cvCount ?? 0));
+    setShowTyping(cvTyping ?? false);
+  }, [isControlled, cvCount, cvTyping, animateFromIndex]);
+
+  // --- Autonomous mode (patientInitThread, Day 4 prescription text, replay) ---
+  useEffect(() => {
+    if (isControlled) return;
+
     if (isReplay) {
-      setVisibleCount(thread.length);
+      setVisibleCount(messages.length);
       setShowTyping(false);
       if (!completedRef.current) {
         completedRef.current = true;
-        // Small delay so the component renders before calling onComplete
         const t = setTimeout(onComplete, 100);
         return () => clearTimeout(t);
       }
       return;
     }
 
-    if (thread.length === 0) {
+    const newMessages = messages.slice(animateFromIndex);
+    if (newMessages.length === 0) {
       onComplete();
       return;
     }
@@ -326,44 +411,47 @@ function TextingView({
     let cancelled = false;
 
     const animate = async () => {
-      // Show first message after brief typing indicator
-      await delay(1200);
+      setVisibleCount(animateFromIndex);
+      await delay(600);
       if (cancelled) return;
-      setShowTyping(false);
-      setVisibleCount(1);
 
-      for (let i = 1; i < thread.length; i++) {
-        // Show typing indicator
-        await delay(800);
-        if (cancelled) return;
-        setShowTyping(true);
+      for (let i = 0; i < newMessages.length; i++) {
+        const msg = newMessages[i];
+        const absIdx = animateFromIndex + i;
 
-        // Typing duration based on message length
-        const typingTime = Math.min(600 + thread[i].text.length * 12, 2200);
-        await delay(typingTime);
+        if (msg.type === "separator") {
+          setVisibleCount(absIdx + 1);
+          continue;
+        }
+
+        if (i === 0) {
+          setShowTyping(true);
+          await delay(1200);
+        } else {
+          await delay(800);
+          if (cancelled) return;
+          setShowTyping(true);
+          const typingTime = msg.type === "message"
+            ? Math.min(600 + msg.text.length * 12, 2200)
+            : 800;
+          await delay(typingTime);
+        }
         if (cancelled) return;
 
         setShowTyping(false);
-        setVisibleCount(i + 1);
+        setVisibleCount(absIdx + 1);
       }
 
-      // Check if we need the "no response" dramatic pause
-      const lastMessage = thread[thread.length - 1];
-      if (showNoResponse && lastMessage && lastMessage.sender === "ai") {
-        // Dramatic pause: show typing indicator as if patient is typing
+      // "No response" dramatic pause (Day 4)
+      const lastNew = newMessages[newMessages.length - 1];
+      if (showNoResponse && lastNew?.type === "message" && lastNew.sender === "ai") {
         await delay(1000);
         if (cancelled) return;
         setShowTyping(true);
-
-        // Wait 3.5 seconds (patient starts typing then goes silent)
         await delay(3500);
         if (cancelled) return;
         setShowTyping(false);
-
-        // Show "Read - No response" label
         setShowNoResponseLabel(true);
-
-        // Wait 2 seconds then complete
         await delay(2000);
         if (cancelled) return;
         if (!completedRef.current) {
@@ -373,7 +461,6 @@ function TextingView({
         return;
       }
 
-      // All messages shown (normal flow)
       await delay(1500);
       if (cancelled) return;
       if (!completedRef.current) {
@@ -384,71 +471,102 @@ function TextingView({
 
     animate();
     return () => { cancelled = true; };
-  }, [thread, onComplete, showNoResponse, isReplay]);
+  }, [isControlled, messages, animateFromIndex, onComplete, showNoResponse, isReplay]);
 
   // Auto-scroll as messages appear
   useEffect(() => {
-    scrollRef.current?.scrollTo({
-      top: scrollRef.current.scrollHeight,
-      behavior: "smooth",
-    });
+    if (scrollRef.current) {
+      scrollRef.current.scrollTo({
+        top: scrollRef.current.scrollHeight,
+        behavior: "smooth",
+      });
+    }
   }, [visibleCount, showTyping, showNoResponseLabel]);
 
-  const visibleMessages = thread.slice(0, visibleCount);
+  // Scroll to bottom on mount (to show end of history)
+  useEffect(() => {
+    if (scrollRef.current && animateFromIndex > 0) {
+      scrollRef.current.scrollTop = scrollRef.current.scrollHeight;
+    }
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
+  const visibleMessages = messages.slice(0, visibleCount);
 
   // Determine who is "typing" next
-  const nextMessage = visibleCount < thread.length ? thread[visibleCount] : null;
-
-  // For no-response mode, after all messages shown, typing indicator shows as patient
-  const typingAsSender = nextMessage
-    ? nextMessage.sender
-    : (showNoResponse && !showNoResponseLabel ? "patient" : null);
+  const nextMsg = visibleCount < messages.length ? messages[visibleCount] : null;
+  const typingAsSender = showTyping && nextMsg?.type === "message"
+    ? nextMsg.sender
+    : (showTyping && showNoResponse && !showNoResponseLabel ? "patient" : null);
 
   return (
     <div className="flex flex-col h-full">
       {/* Header */}
-      <div className="flex-shrink-0 px-3 pt-2 pb-1.5 border-b border-slate-800/50">
+      <div className="flex-shrink-0 px-3 pt-2 pb-1.5 border-b border-slate-200">
         <div className="flex items-center gap-2">
           <div className="w-7 h-7 rounded-full bg-gradient-to-br from-blue-500 to-indigo-600 flex items-center justify-center">
             <span className="text-white font-bold text-[8px]">CC</span>
           </div>
           <div>
-            <div className="text-[10px] font-bold text-white">CareCompanion AI</div>
-            <div className="text-[8px] text-slate-400">Messages</div>
+            <div className="text-[10px] font-bold text-slate-900">CareCompanion AI</div>
+            <div className="text-[8px] text-slate-500">Messages</div>
           </div>
         </div>
       </div>
 
       {/* Message area */}
       <div ref={scrollRef} className="flex-1 overflow-y-auto px-3 py-2 space-y-2 scrollbar-hide">
-        {visibleMessages.map((msg, idx) => {
-          const isAi = msg.sender === "ai";
+        {visibleMessages.map((item, idx) => {
+          const isHistory = idx < animateFromIndex;
+
+          // Day separator
+          if (item.type === "separator") {
+            return (
+              <div key={`sep-${item.day}`} className="flex justify-center py-1.5">
+                <span className="text-[9px] text-slate-400 font-medium bg-white px-2">
+                  Day {item.day} &middot; {item.date}
+                </span>
+              </div>
+            );
+          }
+
+          // No-response marker (in history)
+          if (item.type === "no-response") {
+            return (
+              <div key={`nr-${idx}`} className="flex justify-center py-1">
+                <span className="text-[9px] text-slate-400/60 italic">Read &middot; No response</span>
+              </div>
+            );
+          }
+
+          // Message bubble
+          const isAi = item.sender === "ai";
           return (
             <div
               key={idx}
               className={`flex ${isAi ? "justify-start" : "justify-end"}`}
-              style={isReplay ? undefined : { animation: "bubbleFadeIn 0.3s ease-out both" }}
+              style={isHistory || isReplay ? undefined : { animation: "bubbleFadeIn 0.3s ease-out both" }}
             >
               <div
                 className={`max-w-[85%] rounded-2xl px-3 py-2 text-[10px] leading-[1.5] ${
                   isAi
-                    ? "bg-slate-700/80 text-slate-100 rounded-tl-sm"
+                    ? "bg-slate-100 text-slate-800 rounded-tl-sm"
                     : "bg-blue-600 text-white rounded-tr-sm"
                 }`}
               >
-                {msg.text}
+                {item.text}
               </div>
             </div>
           );
         })}
 
         {/* Typing indicator */}
-        {showTyping && typingAsSender && (
+        {typingAsSender && (
           <div className={`flex ${typingAsSender === "ai" ? "justify-start" : "justify-end"}`}>
             <div
               className={`rounded-2xl px-3 py-2.5 ${
                 typingAsSender === "ai"
-                  ? "bg-slate-700/80 rounded-tl-sm"
+                  ? "bg-slate-100 rounded-tl-sm"
                   : "bg-blue-600/80 rounded-tr-sm"
               }`}
               style={{ animation: "bubbleFadeIn 0.2s ease-out both" }}
@@ -470,7 +588,7 @@ function TextingView({
           </div>
         )}
 
-        {/* No response label (Day 4 dramatic pause) */}
+        {/* No response label (Day 4 dramatic pause — live, not history) */}
         {showNoResponseLabel && (
           <div
             className="flex justify-center py-2"
@@ -483,7 +601,7 @@ function TextingView({
 
       {/* Input bar (decorative) */}
       <div className="flex-shrink-0 px-3 pb-2 pt-1">
-        <div className="flex items-center gap-2 bg-slate-800/60 rounded-full px-3 py-1.5 border border-slate-700/40">
+        <div className="flex items-center gap-2 bg-slate-100 rounded-full px-3 py-1.5 border border-slate-200">
           <span className="text-[9px] text-slate-500 flex-1">iMessage</span>
           <div className="w-5 h-5 rounded-full bg-blue-600 flex items-center justify-center opacity-40">
             <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="white" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
@@ -506,11 +624,13 @@ function DailyVitalsCard({
   showMissedAlert,
   showAnalyzingHint,
   onViewMessages,
+  messageCount,
 }: {
   dayData: DayData;
   showMissedAlert: boolean;
   showAnalyzingHint: boolean;
   onViewMessages?: () => void;
+  messageCount?: number;
 }) {
   const statusGood = dayData.engagementScore > 70;
 
@@ -523,15 +643,15 @@ function DailyVitalsCard({
             <span className="text-white font-bold text-[8px]">CC</span>
           </div>
           <div>
-            <div className="text-[10px] font-bold text-white">My Health</div>
-            <div className="text-[8px] text-slate-400">CareCompanion</div>
+            <div className="text-[10px] font-bold text-slate-900">My Health</div>
+            <div className="text-[8px] text-slate-500">CareCompanion</div>
           </div>
         </div>
         <div
           className={`flex items-center gap-1 px-2 py-0.5 rounded-full text-[8px] font-bold uppercase tracking-wide transition-all duration-500 ${
             statusGood
-              ? "bg-emerald-500/20 text-emerald-400 border border-emerald-500/30"
-              : "bg-amber-500/20 text-amber-400 border border-amber-500/30"
+              ? "bg-emerald-50 text-emerald-600 border border-emerald-200"
+              : "bg-amber-50 text-amber-600 border border-amber-200"
           }`}
         >
           <span
@@ -546,11 +666,11 @@ function DailyVitalsCard({
       </div>
 
       {/* Day banner */}
-      <div className="mx-3 mb-1.5 px-2.5 py-1.5 rounded-lg bg-gradient-to-r from-indigo-600/30 to-violet-600/20 border border-indigo-500/30">
-        <div className="text-[10px] font-bold text-white">
+      <div className="mx-3 mb-1.5 px-2.5 py-1.5 rounded-lg bg-gradient-to-r from-indigo-50 to-violet-50 border border-indigo-200">
+        <div className="text-[10px] font-bold text-indigo-900">
           Day {dayData.day} of Wegovy Journey
         </div>
-        <div className="text-[8px] text-indigo-300">{dayData.date}</div>
+        <div className="text-[8px] text-indigo-600">{dayData.date}</div>
       </div>
 
       {/* Scrollable content */}
@@ -567,15 +687,15 @@ function DailyVitalsCard({
                 <line x1="12" y1="9" x2="12" y2="13" />
                 <line x1="12" y1="17" x2="12.01" y2="17" />
               </svg>
-              <span className="text-[9px] font-semibold text-red-400">
-                Missed Check-in {showAnalyzingHint ? "\u2014 AI analyzing..." : "\u2014 engagement drop detected"}
+              <span className="text-[9px] font-semibold text-red-600">
+                No reply to today&apos;s text {showAnalyzingHint ? "\u2014 AI analyzing..." : "\u2014 3-day engagement decline"}
               </span>
             </div>
           </div>
         )}
 
         {/* Connected devices indicator */}
-        <div className="flex items-center gap-1.5 px-2 py-1 rounded-md bg-slate-800/30">
+        <div className="flex items-center gap-1.5 px-2 py-1 rounded-md bg-slate-50">
           <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="#64748b" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
             <path d="M5 12.55a11 11 0 0 1 14.08 0" />
             <path d="M1.42 9a16 16 0 0 1 21.16 0" />
@@ -588,34 +708,34 @@ function DailyVitalsCard({
         {/* 2x2 Vitals grid */}
         <div className="grid grid-cols-2 gap-2">
           {/* Weight */}
-          <div className="rounded-lg p-2 bg-slate-800/60 border border-slate-700/50">
+          <div className="rounded-lg p-2 bg-slate-50 border border-slate-200">
             <div className="flex items-center justify-between mb-1">
-              <span className="text-[8px] text-slate-400 uppercase tracking-wider font-medium">Weight</span>
+              <span className="text-[8px] text-slate-500 uppercase tracking-wider font-medium">Weight</span>
               <span className="text-[6px] text-slate-600 uppercase tracking-wide">Smart Scale</span>
             </div>
-            <div className="text-lg font-bold tabular-nums text-white leading-none">{dayData.weight}</div>
+            <div className="text-lg font-bold tabular-nums text-slate-900 leading-none">{dayData.weight}</div>
             <div className="text-[8px] text-slate-500 mt-0.5">lbs</div>
           </div>
 
           {/* Blood Pressure */}
-          <div className="rounded-lg p-2 bg-slate-800/60 border border-slate-700/50">
+          <div className="rounded-lg p-2 bg-slate-50 border border-slate-200">
             <div className="flex items-center justify-between mb-1">
-              <span className="text-[8px] text-slate-400 uppercase tracking-wider font-medium">Blood Pressure</span>
+              <span className="text-[8px] text-slate-500 uppercase tracking-wider font-medium">Blood Pressure</span>
               <span className="text-[6px] text-slate-600 uppercase tracking-wide">BP Cuff</span>
             </div>
-            <div className="text-lg font-bold tabular-nums text-white leading-none">
+            <div className="text-lg font-bold tabular-nums text-slate-900 leading-none">
               {dayData.bpSys}/{dayData.bpDia}
             </div>
             <div className="text-[8px] text-slate-500 mt-0.5">mmHg</div>
           </div>
 
           {/* Glucose */}
-          <div className="rounded-lg p-2 bg-slate-800/60 border border-slate-700/50">
+          <div className="rounded-lg p-2 bg-slate-50 border border-slate-200">
             <div className="flex items-center justify-between mb-1">
-              <span className="text-[8px] text-slate-400 uppercase tracking-wider font-medium">Glucose</span>
+              <span className="text-[8px] text-slate-500 uppercase tracking-wider font-medium">Glucose</span>
               <span className="text-[6px] text-slate-600 uppercase tracking-wide">Glucometer</span>
             </div>
-            <div className="text-lg font-bold tabular-nums text-white leading-none">{dayData.glucose}</div>
+            <div className="text-lg font-bold tabular-nums text-slate-900 leading-none">{dayData.glucose}</div>
             <div className="text-[8px] text-slate-500 mt-0.5">mg/dL</div>
           </div>
 
@@ -623,10 +743,10 @@ function DailyVitalsCard({
           <div className={`rounded-lg p-2 border ${
             dayData.nauseaGrade >= 2
               ? "bg-orange-500/10 border-orange-500/30"
-              : "bg-slate-800/60 border-slate-700/50"
+              : "bg-slate-50 border-slate-200"
           }`}>
             <div className="flex items-center justify-between mb-1">
-              <span className="text-[8px] text-slate-400 uppercase tracking-wider font-medium">Nausea</span>
+              <span className="text-[8px] text-slate-500 uppercase tracking-wider font-medium">Nausea</span>
               <span className="text-[6px] text-slate-600 uppercase tracking-wide">Self-reported</span>
             </div>
             <div className={`text-lg font-bold leading-none ${nauseaColor(dayData.nauseaGrade)}`}>
@@ -637,14 +757,14 @@ function DailyVitalsCard({
         </div>
 
         {/* Hydration bar */}
-        <div className="px-2.5 py-1.5 rounded-lg bg-slate-800/40 border border-slate-700/40">
+        <div className="px-2.5 py-1.5 rounded-lg bg-slate-50 border border-slate-200">
           <div className="flex items-center justify-between mb-1">
             <div className="flex items-center gap-1.5">
-              <span className="text-[8px] text-slate-400 uppercase tracking-wider font-bold">Hydration</span>
+              <span className="text-[8px] text-slate-500 uppercase tracking-wider font-bold">Hydration</span>
               <span className="text-[6px] text-slate-600 uppercase tracking-wide">Self-reported</span>
             </div>
             <span className={`text-[8px] font-bold tabular-nums ${
-              dayData.fluidOz > 56 ? "text-emerald-400" : dayData.fluidOz > 40 ? "text-amber-400" : "text-red-400"
+              dayData.fluidOz > 56 ? "text-emerald-600" : dayData.fluidOz > 40 ? "text-amber-600" : "text-red-600"
             }`}>
               {dayData.fluidOz} / 64 oz
             </span>
@@ -660,14 +780,14 @@ function DailyVitalsCard({
         {/* Medications */}
         <div>
           <div className="flex items-center justify-between mb-1.5">
-            <span className="text-[9px] font-bold text-slate-400 uppercase tracking-wider">Medications</span>
+            <span className="text-[9px] font-bold text-slate-500 uppercase tracking-wider">Medications</span>
             <span className="text-[6px] text-slate-600 uppercase tracking-wide">Self-reported</span>
           </div>
           <div className="space-y-1">
             {/* Wegovy */}
-            <div className="flex items-center gap-2 bg-slate-800/40 rounded-md px-2 py-1.5">
+            <div className="flex items-center gap-2 bg-slate-50 rounded-md px-2 py-1.5">
               <div className={`w-4 h-4 rounded flex items-center justify-center ${
-                dayData.day === 1 ? "bg-emerald-500/20" : "bg-slate-700"
+                dayData.day === 1 ? "bg-emerald-500/20" : "bg-slate-200"
               }`}>
                 {dayData.day === 1 ? (
                   <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="#10b981" strokeWidth="3" strokeLinecap="round" strokeLinejoin="round"><path d="M20 6L9 17l-5-5" /></svg>
@@ -679,36 +799,36 @@ function DailyVitalsCard({
                 )}
               </div>
               <div className="flex-1">
-                <span className="text-[9px] text-white font-medium">Wegovy 0.25mg</span>
+                <span className="text-[9px] text-slate-900 font-medium">Wegovy 0.25mg</span>
                 <span className="text-[8px] text-slate-500 ml-1">Weekly - Monday</span>
               </div>
-              <span className={`text-[8px] font-medium ${dayData.day === 1 ? "text-emerald-400" : "text-slate-500"}`}>
+              <span className={`text-[8px] font-medium ${dayData.day === 1 ? "text-emerald-600" : "text-slate-500"}`}>
                 {wegovyStatus(dayData.day)}
               </span>
             </div>
 
             {/* Metformin */}
-            <div className="flex items-center gap-2 bg-slate-800/40 rounded-md px-2 py-1.5">
+            <div className="flex items-center gap-2 bg-slate-50 rounded-md px-2 py-1.5">
               <div className="w-4 h-4 rounded bg-emerald-500/20 flex items-center justify-center">
                 <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="#10b981" strokeWidth="3" strokeLinecap="round" strokeLinejoin="round"><path d="M20 6L9 17l-5-5" /></svg>
               </div>
               <div className="flex-1">
-                <span className="text-[9px] text-white font-medium">Metformin 1000mg</span>
+                <span className="text-[9px] text-slate-900 font-medium">Metformin 1000mg</span>
                 <span className="text-[8px] text-slate-500 ml-1">Twice daily</span>
               </div>
-              <span className="text-[8px] text-emerald-400 font-medium">Taken</span>
+              <span className="text-[8px] text-emerald-600 font-medium">Taken</span>
             </div>
 
             {/* Lisinopril */}
-            <div className="flex items-center gap-2 bg-slate-800/40 rounded-md px-2 py-1.5">
+            <div className="flex items-center gap-2 bg-slate-50 rounded-md px-2 py-1.5">
               <div className="w-4 h-4 rounded bg-emerald-500/20 flex items-center justify-center">
                 <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="#10b981" strokeWidth="3" strokeLinecap="round" strokeLinejoin="round"><path d="M20 6L9 17l-5-5" /></svg>
               </div>
               <div className="flex-1">
-                <span className="text-[9px] text-white font-medium">Lisinopril 20mg</span>
+                <span className="text-[9px] text-slate-900 font-medium">Lisinopril 20mg</span>
                 <span className="text-[8px] text-slate-500 ml-1">Daily</span>
               </div>
-              <span className="text-[8px] text-emerald-400 font-medium">Taken</span>
+              <span className="text-[8px] text-emerald-600 font-medium">Taken</span>
             </div>
           </div>
         </div>
@@ -723,19 +843,19 @@ function DailyVitalsCard({
               <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="#60a5fa" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
                 <path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z" />
               </svg>
-              <span className="text-[9px] text-blue-400 font-medium">View Messages</span>
+              <span className="text-[9px] text-blue-600 font-medium">View Messages</span>
             </div>
-            <span className="text-[8px] text-blue-500/60">{dayData.textThread.length} messages</span>
+            <span className="text-[8px] text-blue-500/60">{messageCount ?? dayData.textThread.length} messages</span>
           </button>
         )}
       </div>
 
       {/* Engagement score at bottom */}
       <div className="flex-shrink-0 px-3 pb-3 pt-1">
-        <div className="flex items-center justify-between px-2.5 py-1.5 rounded-lg bg-slate-800/60 border border-slate-700/50">
+        <div className="flex items-center justify-between px-2.5 py-1.5 rounded-lg bg-slate-50 border border-slate-200">
           <span className="text-[8px] text-slate-400 uppercase tracking-wider font-bold">Engagement Score</span>
           <div className="flex items-center gap-1.5">
-            <div className="w-16 h-1.5 rounded-full bg-slate-700">
+            <div className="w-16 h-1.5 rounded-full bg-slate-200">
               <div
                 className={`h-full rounded-full transition-all duration-700 ${
                   dayData.engagementScore > 70
@@ -749,10 +869,10 @@ function DailyVitalsCard({
             </div>
             <span className={`text-[10px] font-bold tabular-nums ${
               dayData.engagementScore > 70
-                ? "text-emerald-400"
+                ? "text-emerald-600"
                 : dayData.engagementScore > 50
-                  ? "text-amber-400"
-                  : "text-red-400"
+                  ? "text-amber-600"
+                  : "text-red-600"
             }`}>
               {dayData.engagementScore}%
             </span>
@@ -783,11 +903,15 @@ export default function VoiceAgent({ patientName }: VoiceAgentProps) {
     transcript,
     addTranscript,
     addLog,
-    openAnalysis,
+    triggerCall,
     setPhaseActive,
     completeCall,
     completeProactiveCall,
+    completeAnalysis,
     updateBilling,
+    setDayContentComplete,
+    setSyncStep,
+    prescriptionSent,
   } = useDemo();
 
   // Local state
@@ -799,7 +923,10 @@ export default function VoiceAgent({ patientName }: VoiceAgentProps) {
   const [showAnalyzingHint, setShowAnalyzingHint] = useState(false);
   const [showNotification, setShowNotification] = useState(false);
   const [onSecondThread, setOnSecondThread] = useState(false);
+  const [showPrescriptionText, setShowPrescriptionText] = useState(false);
   const [countdown, setCountdown] = useState(3);
+  const [controlledVisibleCount, setControlledVisibleCount] = useState(0);
+  const [controlledShowTyping, setControlledShowTyping] = useState(false);
 
   // Refs
   const timeoutsRef = useRef<ReturnType<typeof setTimeout>[]>([]);
@@ -809,6 +936,7 @@ export default function VoiceAgent({ patientName }: VoiceAgentProps) {
   const abortControllerRef = useRef<AbortController | null>(null);
   const preloadedAudioRef = useRef<Blob | null>(null);
   const threadShownRef = useRef(false);
+  const syncActiveRef = useRef(false);
 
   // ------ Auto-scroll transcript ------
   useEffect(() => {
@@ -853,12 +981,12 @@ export default function VoiceAgent({ patientName }: VoiceAgentProps) {
     return `${m}:${sec.toString().padStart(2, "0")}`;
   };
 
-  // ------ Text notification trigger (fires when phase becomes "idle") ------
-  // Non-call days start in "analyzing" -> thinking feed plays -> idle -> notification
-  // Day 2 starts idle -> notification immediately
-  // Day 4 starts detecting -> no notification (patient unresponsive)
+  // ------ Text notification trigger ------
+  // Synced days: handled by sync orchestration effect below
+  // Non-synced edge cases: fire on idle (shouldn't normally happen)
   useEffect(() => {
     if (demoPhase !== "idle" || currentDay < 1 || notificationShownRef.current) return;
+    if (SYNC_CONFIG[currentDay]) return; // synced days handled by orchestration
 
     const dd = DAY_DATA[currentDay - 1];
     if (!dd || dd.textThread.length === 0 || dd.isIncidentDay) return;
@@ -868,48 +996,33 @@ export default function VoiceAgent({ patientName }: VoiceAgentProps) {
       setShowNotification(true);
       playNotificationSound();
     }, 800);
-    // Don't push to timeoutsRef -- the "reset on idle" effect clears it simultaneously
     return () => clearTimeout(t);
   }, [demoPhase, currentDay]);
 
   // ------ Texting complete handler ------
+  // Only called in autonomous mode (patientInitThread, Day 4 prescription text, replay)
+  // Main thread completion is handled by the sync orchestration
   const handleTextingComplete = useCallback(() => {
+    threadShownRef.current = true;
     const dd = currentDay >= 1 && currentDay <= 7 ? DAY_DATA[currentDay - 1] : null;
 
-    // Mark thread as shown for replay feature
-    threadShownRef.current = true;
-
-    if (dd?.isIncidentDay) {
-      // Day 4: return to vitals view -- the detecting->analyzing flow handles the call
+    if (dd?.isIncidentDay && showPrescriptionText) {
+      // Day 4 prescription text done
       const t = setTimeout(() => {
         setPhonePhase("app");
-      }, 1500);
-      timeoutsRef.current.push(t);
-    } else if (dd?.isCallDay && !onSecondThread) {
-      // Day 2: trigger AI analysis on middle panel -> thinking feed -> auto-triggers call
-      const t = setTimeout(() => {
-        openAnalysis();
+        setDayContentComplete(true);
       }, 2000);
       timeoutsRef.current.push(t);
-    } else if (!onSecondThread && dd?.patientInitThread && dd.patientInitThread.length > 0) {
-      // First thread done, patient-initiated thread exists -- show it after a pause
+    } else if (onSecondThread) {
+      // Patient-initiated thread done
       const t = setTimeout(() => {
         setPhonePhase("app");
-      }, 1500);
-      const t2 = setTimeout(() => {
-        setOnSecondThread(true);
-        setShowNotification(true);
-        playNotificationSound();
-      }, 4000);
-      timeoutsRef.current.push(t, t2);
-    } else {
-      // Non-call days or second thread done: return to vitals view
-      const t = setTimeout(() => {
-        setPhonePhase("app");
+        setDayContentComplete(true);
       }, 2000);
       timeoutsRef.current.push(t);
     }
-  }, [currentDay, openAnalysis, onSecondThread]);
+    // Main thread: orchestration handles everything — no action here
+  }, [currentDay, onSecondThread, setDayContentComplete, showPrescriptionText]);
 
   // ------ Audio playback for a single line ------
   const playLineAudio = useCallback(async (
@@ -922,21 +1035,12 @@ export default function VoiceAgent({ patientName }: VoiceAgentProps) {
     if (speaker === "ai" && preloadedAudioRef.current) {
       const blob = preloadedAudioRef.current;
       preloadedAudioRef.current = null;
-      try {
-        const url = URL.createObjectURL(blob);
-        const audio = new Audio(url);
-        await new Promise<void>((resolve, reject) => {
-          audio.onended = () => { URL.revokeObjectURL(url); resolve(); };
-          audio.onerror = () => { URL.revokeObjectURL(url); reject(); };
-          const onAbort = () => { audio.pause(); URL.revokeObjectURL(url); resolve(); };
-          signal.addEventListener("abort", onAbort, { once: true });
-          audio.play().catch(reject);
-        });
-        return;
-      } catch {
-        // Fall through
-      }
+      const played = await playBlobViaAudioContext(blob, signal);
+      if (played) return;
     }
+
+    // Bail early if already aborted
+    if (signal.aborted) return;
 
     // Try ElevenLabs TTS for all lines (AI = Rachel voice, Patient = Dorothy voice)
     try {
@@ -948,16 +1052,9 @@ export default function VoiceAgent({ patientName }: VoiceAgentProps) {
       });
       if (res.ok) {
         const blob = await res.blob();
-        const url = URL.createObjectURL(blob);
-        const audio = new Audio(url);
-        await new Promise<void>((resolve, reject) => {
-          audio.onended = () => { URL.revokeObjectURL(url); resolve(); };
-          audio.onerror = () => { URL.revokeObjectURL(url); reject(); };
-          const onAbort = () => { audio.pause(); URL.revokeObjectURL(url); resolve(); };
-          signal.addEventListener("abort", onAbort, { once: true });
-          audio.play().catch(reject);
-        });
-        return;
+        if (signal.aborted) return;
+        const played = await playBlobViaAudioContext(blob, signal);
+        if (played) return;
       }
     } catch {
       if (signal.aborted) return;
@@ -1055,9 +1152,10 @@ export default function VoiceAgent({ patientName }: VoiceAgentProps) {
       } else {
         completeCall();
       }
+      setDayContentComplete(true);
       addLog("voice", "Call ended \u2014 session complete");
     }
-  }, [addTranscript, addLog, completeCall, completeProactiveCall, updateBilling, playLineAudio]);
+  }, [addTranscript, addLog, completeCall, completeProactiveCall, updateBilling, playLineAudio, setDayContentComplete]);
 
   // ------ End call (hang up) ------
   const endCall = useCallback(() => {
@@ -1078,8 +1176,9 @@ export default function VoiceAgent({ patientName }: VoiceAgentProps) {
     } else {
       completeCall();
     }
+    setDayContentComplete(true);
     addLog("voice", "Call ended by user");
-  }, [completeCall, completeProactiveCall, addLog, currentDay]);
+  }, [completeCall, completeProactiveCall, addLog, currentDay, setDayContentComplete]);
 
   // ------ Demo phase: "detecting" -- Day 4 engagement drop ------
   useEffect(() => {
@@ -1091,7 +1190,7 @@ export default function VoiceAgent({ patientName }: VoiceAgentProps) {
     const t1 = setTimeout(() => {
       setPhonePhase("alert");
       setShowAlertBanner(true);
-      addLog("rules", "Threshold: missed check-in + nausea Grade 2 + low fluid intake");
+      addLog("rules", "Threshold: no reply to text + nausea Grade 2 + low fluid intake");
     }, 2500);
 
     timeoutsRef.current.push(t1);
@@ -1158,28 +1257,183 @@ export default function VoiceAgent({ patientName }: VoiceAgentProps) {
   // ------ Reset on demo idle ------
   useEffect(() => {
     if (demoPhase === "idle") {
-      if (abortControllerRef.current) {
-        abortControllerRef.current.abort();
-        abortControllerRef.current = null;
-      }
-      if (typeof window !== "undefined" && "speechSynthesis" in window) {
-        speechSynthesis.cancel();
-      }
-      timeoutsRef.current.forEach(clearTimeout);
-      timeoutsRef.current = [];
-      setPhonePhase("app");
+      // Don't reset phone if text is playing or about to play second thread
+      if (phonePhase === "texting") return;
+
+      // Only abort audio/speech if coming from a call (not from sync analysis)
+      // This preserves the AudioContext for notification sounds
       setShowAlertBanner(false);
       setAiSpeaking(false);
       setIsListening(false);
       setElapsed(0);
       setShowAnalyzingHint(false);
-      preloadedAudioRef.current = null;
     }
-  }, [demoPhase]);
+  }, [demoPhase, phonePhase]);
 
-  // ------ Reset threadShownRef on remount (new day) ------
+  // ------ Day 4: Prescription text notification ------
+  const prescriptionNotifiedRef = useRef(false);
+  useEffect(() => {
+    if (currentDay !== 4 || !prescriptionSent || prescriptionNotifiedRef.current) return;
+    if (phonePhase === "call" || phonePhase === "ringing") return; // Wait until call ends
+
+    prescriptionNotifiedRef.current = true;
+    const t = setTimeout(() => {
+      setShowPrescriptionText(true);
+      setShowNotification(true);
+      playNotificationSound();
+    }, 1500);
+    timeoutsRef.current.push(t);
+    return () => clearTimeout(t);
+  }, [currentDay, prescriptionSent, phonePhase]);
+
+  // ------ SYNC ORCHESTRATION — lockstep center panel + phone ------
+  useEffect(() => {
+    if (demoPhase !== "analyzing" || currentDay < 1 || !dayData) return;
+    if (dayData.isIncidentDay) return; // Day 4 uses its own flow
+
+    const config = SYNC_CONFIG[currentDay];
+    if (!config) return;
+    const thinkingSteps = DAILY_THINKING_STEPS[currentDay];
+    if (!thinkingSteps) return;
+
+    let cancelled = false;
+    syncActiveRef.current = true;
+    setSyncStep(0);
+    setControlledVisibleCount(0);
+    setControlledShowTyping(false);
+
+    const thread = dayData.textThread;
+
+    // Find last block index that has thinking steps
+    const lastNonEmptyBlockIdx = config.reduce(
+      (last: number, block: number[], idx: number) => (block.length > 0 ? idx : last), -1
+    );
+
+    async function run() {
+      await delay(500);
+      if (cancelled) return;
+
+      let syncVal = 0;
+      let msgCount = 0;
+
+      for (let blockIdx = 0; blockIdx < config.length; blockIdx++) {
+        const stepsForBlock = config[blockIdx];
+
+        // 1. Play thinking steps for this block
+        for (const stepIdx of stepsForBlock) {
+          if (cancelled) return;
+          syncVal++;
+          setSyncStep(syncVal); // activate
+          await delay(thinkingSteps[stepIdx].durationMs);
+          if (cancelled) return;
+          syncVal++;
+          setSyncStep(syncVal); // complete
+          await delay(300);
+        }
+
+        // 2. Show decision card after last block with steps
+        if (blockIdx === lastNonEmptyBlockIdx && stepsForBlock.length > 0) {
+          if (cancelled) return;
+          syncVal++;
+          setSyncStep(syncVal); // decision visible
+          await delay(1200);
+          if (cancelled) return;
+        }
+
+        // 3. Show AI message
+        if (blockIdx === 0) {
+          // First AI message: show notification
+          notificationShownRef.current = true;
+          msgCount = 1;
+          setControlledVisibleCount(1);
+          setShowNotification(true);
+          playNotificationSound();
+          // Wait for notification dismiss (auto 3.5s + animation)
+          await delay(4200);
+          if (cancelled) return;
+        } else {
+          // Subsequent AI messages: typing → reveal
+          if (cancelled) return;
+          setControlledShowTyping(true);
+          const aiMsgThreadIdx = blockIdx * 2;
+          const aiText = aiMsgThreadIdx < thread.length ? thread[aiMsgThreadIdx].text : "";
+          await delay(Math.min(600 + aiText.length * 12, 2200));
+          if (cancelled) return;
+          setControlledShowTyping(false);
+          msgCount++;
+          setControlledVisibleCount(msgCount);
+        }
+
+        // 4. Show patient response (if exists)
+        const patientThreadIdx = blockIdx * 2 + 1;
+        if (patientThreadIdx < thread.length) {
+          await delay(800);
+          if (cancelled) return;
+          setControlledShowTyping(true);
+          const patientText = thread[patientThreadIdx].text;
+          await delay(Math.min(600 + patientText.length * 12, 2200));
+          if (cancelled) return;
+          setControlledShowTyping(false);
+          msgCount++;
+          setControlledVisibleCount(msgCount);
+        }
+      }
+
+      // 5. Transition
+      if (cancelled) return;
+      threadShownRef.current = true;
+      await delay(1500);
+      if (cancelled) return;
+
+      if (dayData!.isCallDay) {
+        triggerCall();
+      } else {
+        // Set dayContentComplete for days WITHOUT patientInitThread
+        // (days WITH patientInitThread: handleTextingComplete sets it after second thread)
+        const hasSecondThread = dayData!.patientInitThread && dayData!.patientInitThread.length > 0;
+        if (!hasSecondThread) {
+          setDayContentComplete(true);
+        }
+        setPhonePhase("app");
+        syncActiveRef.current = false;
+        // completeAnalysis() → idle triggers the patientInitThread effect below
+        completeAnalysis();
+      }
+    }
+
+    run();
+    return () => {
+      cancelled = true;
+      syncActiveRef.current = false;
+    };
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [demoPhase, currentDay]);
+
+  // ------ PatientInitThread trigger (after main sync completes → idle) ------
+  const patientInitTriggeredRef = useRef(false);
+  useEffect(() => {
+    if (demoPhase !== "idle" || currentDay < 1 || onSecondThread) return;
+    if (!threadShownRef.current) return; // main thread hasn't completed yet
+    if (patientInitTriggeredRef.current) return;
+
+    const dd = DAY_DATA[currentDay - 1];
+    if (!dd?.patientInitThread || dd.patientInitThread.length === 0) return;
+
+    patientInitTriggeredRef.current = true;
+    const t = setTimeout(() => {
+      setOnSecondThread(true);
+      setShowNotification(true);
+      playNotificationSound();
+    }, 3000);
+    return () => clearTimeout(t);
+  }, [demoPhase, currentDay, onSecondThread]);
+
+  // ------ Reset refs on remount (new day) ------
   useEffect(() => {
     threadShownRef.current = false;
+    prescriptionNotifiedRef.current = false;
+    syncActiveRef.current = false;
+    patientInitTriggeredRef.current = false;
   }, [currentDay]);
 
   // ------ Cleanup on unmount ------
@@ -1200,30 +1454,104 @@ export default function VoiceAgent({ patientName }: VoiceAgentProps) {
   const dayData: DayData | null =
     currentDay >= 1 && currentDay <= 7 ? DAY_DATA[currentDay - 1] : null;
 
-  // ------ Resolve active thread (first or patient-initiated) ------
-  const activeThread: TextMessage[] = (() => {
-    if (!dayData) return [];
-    const raw = onSecondThread && dayData.patientInitThread
-      ? dayData.patientInitThread
-      : dayData.textThread;
-    return raw.map((msg) => ({
-      ...msg,
-      text: personalizeText(msg.text, selectedPatient.firstName),
-    }));
-  })();
+  // ------ Build cumulative message thread (all days up to current) ------
+  const { cumulativeMessages, animateFromIndex } = useMemo(() => {
+    const msgs: DisplayMessage[] = [];
+    let animateFrom = 0;
+
+    if (!dayData || currentDay < 1) return { cumulativeMessages: msgs, animateFromIndex: 0 };
+
+    for (let d = 1; d <= currentDay; d++) {
+      const dd = DAY_DATA[d - 1];
+      const isPast = d < currentDay;
+
+      // Day separator
+      msgs.push({ type: "separator", day: d, date: dd.date });
+
+      // Main thread messages (personalized)
+      const thread = dd.textThread.map((m) => ({
+        type: "message" as const,
+        sender: m.sender,
+        text: personalizeText(m.text, selectedPatient.firstName),
+      }));
+
+      if (isPast) {
+        msgs.push(...thread);
+
+        // Day 4 past: add no-response marker + post-call messages
+        if (d === 4) {
+          msgs.push({ type: "no-response" });
+          if (dd.postCallThread) {
+            msgs.push(...dd.postCallThread.map((m) => ({
+              type: "message" as const,
+              sender: m.sender,
+              text: personalizeText(m.text, selectedPatient.firstName),
+            })));
+          }
+        }
+
+        // Include patient-initiated thread for past days
+        if (dd.patientInitThread) {
+          msgs.push(...dd.patientInitThread.map((m) => ({
+            type: "message" as const,
+            sender: m.sender,
+            text: personalizeText(m.text, selectedPatient.firstName),
+          })));
+        }
+      } else {
+        // Current day — these are the new messages to animate
+
+        if (onSecondThread && dd.patientInitThread) {
+          // Show main thread as history, animate patient-initiated thread
+          msgs.push(...thread);
+          if (d === 4 && dd.postCallThread) {
+            msgs.push({ type: "no-response" });
+            msgs.push(...dd.postCallThread.map((m) => ({
+              type: "message" as const,
+              sender: m.sender,
+              text: personalizeText(m.text, selectedPatient.firstName),
+            })));
+          }
+          animateFrom = msgs.length;
+          msgs.push(...dd.patientInitThread.map((m) => ({
+            type: "message" as const,
+            sender: m.sender,
+            text: personalizeText(m.text, selectedPatient.firstName),
+          })));
+        } else if (showPrescriptionText && d === 4 && dd.postCallThread) {
+          // Day 4 prescription text mode
+          msgs.push(...thread);
+          msgs.push({ type: "no-response" });
+          animateFrom = msgs.length;
+          msgs.push(...dd.postCallThread.map((m) => ({
+            type: "message" as const,
+            sender: m.sender,
+            text: personalizeText(m.text, selectedPatient.firstName),
+          })));
+        } else {
+          // Main thread
+          animateFrom = msgs.length;
+          msgs.push(...thread);
+        }
+      }
+    }
+
+    return { cumulativeMessages: msgs, animateFromIndex: animateFrom };
+  }, [currentDay, dayData, selectedPatient.firstName, onSecondThread, showPrescriptionText]);
 
   // ------ Determine if texting view should show "no response" (Day 4, first thread) ------
-  const showNoResponseForTexting = !!(dayData?.isIncidentDay && !onSecondThread);
+  const showNoResponseForTexting = !!(dayData?.isIncidentDay && !onSecondThread && !showPrescriptionText);
 
-  // ------ Determine if texting view should replay statically ------
-  const isTextReplay = threadShownRef.current && phonePhase === "texting";
+  // ------ Controlled vs autonomous texting mode ------
+  const useControlledTexting = syncActiveRef.current && !onSecondThread && !showPrescriptionText;
+  const isTextReplay = !useControlledTexting && threadShownRef.current && phonePhase === "texting";
 
   // ======================================================================
   // RENDER
   // ======================================================================
 
   return (
-    <div className="relative flex flex-col h-full w-full bg-slate-950 text-white overflow-hidden select-none">
+    <div className="relative flex flex-col h-full w-full bg-white text-slate-900 overflow-hidden select-none">
       <style>{`
         @keyframes voiceBar {
           0% { height: 4px; }
@@ -1269,22 +1597,28 @@ export default function VoiceAgent({ patientName }: VoiceAgentProps) {
       `}</style>
 
       {/* iOS-style text notification overlay */}
-      {showNotification && activeThread.length > 0 && (
-        <div style={{ position: "absolute", top: 0, left: 0, right: 0, zIndex: 50 }}>
-          <TextNotification
-            message={activeThread[0].text}
-            senderName={onSecondThread ? `${selectedPatient.firstName} ${selectedPatient.lastName}` : undefined}
-            onDismiss={() => {
-              setShowNotification(false);
-              setPhonePhase("texting");
-            }}
-            onTap={() => {
-              setShowNotification(false);
-              setPhonePhase("texting");
-            }}
-          />
-        </div>
-      )}
+      {showNotification && cumulativeMessages.length > 0 && (() => {
+        // Find first message in the animated section for notification preview
+        const firstNewMsg = cumulativeMessages.slice(animateFromIndex).find((m) => m.type === "message");
+        const notifText = firstNewMsg?.type === "message" ? firstNewMsg.text : "";
+        if (!notifText) return null;
+        return (
+          <div style={{ position: "absolute", top: 0, left: 0, right: 0, zIndex: 50 }}>
+            <TextNotification
+              message={notifText}
+              senderName={onSecondThread ? `${selectedPatient.firstName} ${selectedPatient.lastName}` : undefined}
+              onDismiss={() => {
+                setShowNotification(false);
+                setPhonePhase("texting");
+              }}
+              onTap={() => {
+                setShowNotification(false);
+                setPhonePhase("texting");
+              }}
+            />
+          </div>
+        );
+      })()}
 
       {/* ================================================================ */}
       {/* IDLE STATE -- Day 0, no data yet                                 */}
@@ -1294,19 +1628,19 @@ export default function VoiceAgent({ patientName }: VoiceAgentProps) {
           <div className="w-14 h-14 rounded-2xl bg-gradient-to-br from-blue-500 to-indigo-600 flex items-center justify-center mb-3">
             <span className="text-white font-bold text-base">CC</span>
           </div>
-          <h2 className="text-sm font-bold text-white mb-0.5">CareCompanion</h2>
-          <p className="text-[10px] text-slate-400 mb-3">Patient Health Monitor</p>
+          <h2 className="text-sm font-bold text-slate-900 mb-0.5">CareCompanion</h2>
+          <p className="text-[10px] text-slate-500 mb-3">Patient Health Monitor</p>
 
           {/* Patient info */}
-          <div className="w-full max-w-[200px] rounded-xl bg-slate-800/60 border border-slate-700/50 px-3 py-2.5 mb-3">
-            <div className="text-[11px] font-bold text-white text-center mb-1">
+          <div className="w-full max-w-[200px] rounded-xl bg-slate-50 border border-slate-200 px-3 py-2.5 mb-3">
+            <div className="text-[11px] font-bold text-slate-900 text-center mb-1">
               {selectedPatient.firstName} {selectedPatient.lastName}
             </div>
-            <div className="text-[9px] text-slate-400 text-center mb-1.5">
+            <div className="text-[9px] text-slate-500 text-center mb-1.5">
               {selectedPatient.age}{selectedPatient.gender} &middot; BMI 34 &middot; T2D + Obesity + HTN
             </div>
-            <div className="h-px bg-slate-700/50 mb-1.5" />
-            <div className="text-[9px] text-indigo-300 text-center font-medium">
+            <div className="h-px bg-slate-200 mb-1.5" />
+            <div className="text-[9px] text-indigo-600 text-center font-medium">
               Starting Wegovy 0.25mg &mdash; Week 1 Simulation
             </div>
           </div>
@@ -1315,19 +1649,22 @@ export default function VoiceAgent({ patientName }: VoiceAgentProps) {
             Press Start Day 1 to begin the 7-day journey
           </p>
 
-          <div className="flex items-center gap-1 px-3 py-1.5 rounded-full bg-slate-800/60 border border-slate-700/40">
+          <div className="flex items-center gap-1 px-3 py-1.5 rounded-full bg-slate-50 border border-slate-200">
             <span className="w-2 h-2 rounded-full bg-emerald-400 animate-pulse" />
-            <span className="text-[9px] text-slate-300">Ready to begin</span>
+            <span className="text-[9px] text-slate-600">Ready to begin</span>
           </div>
         </div>
       )}
 
       {/* ================================================================ */}
-      {/* TEXTING VIEW -- animated text conversation                       */}
+      {/* TEXTING VIEW -- animated text conversation (cumulative)          */}
       {/* ================================================================ */}
-      {phonePhase === "texting" && activeThread.length > 0 && (
+      {phonePhase === "texting" && cumulativeMessages.length > 0 && (
         <TextingView
-          thread={activeThread}
+          messages={cumulativeMessages}
+          animateFromIndex={animateFromIndex}
+          controlledVisibleCount={useControlledTexting ? controlledVisibleCount : undefined}
+          controlledShowTyping={useControlledTexting ? controlledShowTyping : undefined}
           onComplete={handleTextingComplete}
           showNoResponse={showNoResponseForTexting}
           isReplay={isTextReplay}
@@ -1344,7 +1681,8 @@ export default function VoiceAgent({ patientName }: VoiceAgentProps) {
             dayData.isIncidentDay && (showAlertBanner || demoPhase === "detecting" || demoPhase === "analyzing")
           }
           showAnalyzingHint={showAnalyzingHint}
-          onViewMessages={activeThread.length > 0 ? () => setPhonePhase("texting") : undefined}
+          onViewMessages={!syncActiveRef.current && cumulativeMessages.length > 0 ? () => setPhonePhase("texting") : undefined}
+          messageCount={cumulativeMessages.filter((m) => m.type === "message").length}
         />
       )}
 
@@ -1362,20 +1700,20 @@ export default function VoiceAgent({ patientName }: VoiceAgentProps) {
             </svg>
           </div>
 
-          <h2 className="text-sm font-bold text-white mb-0.5">CareCompanion AI</h2>
-          <p className="text-[10px] text-slate-400 mb-1">
+          <h2 className="text-sm font-bold text-slate-900 mb-0.5">CareCompanion AI</h2>
+          <p className="text-[10px] text-slate-500 mb-1">
             {currentDay === 2 ? "Proactive wellness check-in" : "GLP-1 engagement check-in"}
           </p>
-          <p className="text-[10px] text-emerald-400 animate-pulse mb-8">Incoming call...</p>
+          <p className="text-[10px] text-emerald-600 animate-pulse mb-8">Incoming call...</p>
 
-          <div className="flex items-center gap-1.5 px-2.5 py-1 rounded-full bg-slate-800/60 border border-slate-700/40">
+          <div className="flex items-center gap-1.5 px-2.5 py-1 rounded-full bg-slate-50 border border-slate-200">
             <div className="w-3 h-3 rounded-full bg-gradient-to-br from-emerald-400 to-teal-600 flex items-center justify-center">
               <svg width="6" height="6" viewBox="0 0 24 24" fill="none" stroke="white" strokeWidth="3" strokeLinecap="round" strokeLinejoin="round">
                 <path d="M22 16.92V19a2 2 0 0 1-2.18 2A19.79 19.79 0 0 1 3 4.18 2 2 0 0 1 5 2h2.09" />
               </svg>
             </div>
             <span className="text-[8px] text-slate-400">
-              Auto-connecting in <span className="text-emerald-400 font-bold text-[10px]">{countdown}</span>s...
+              Auto-connecting in <span className="text-emerald-600 font-bold text-[10px]">{countdown}</span>s...
             </span>
           </div>
         </div>
@@ -1408,9 +1746,9 @@ export default function VoiceAgent({ patientName }: VoiceAgentProps) {
                   </span>
                 </div>
                 <div className="leading-tight">
-                  <div className="text-[10px] font-semibold text-white">CareCompanion AI</div>
+                  <div className="text-[10px] font-semibold text-slate-900">CareCompanion AI</div>
                   <div className="flex items-center gap-1">
-                    <span className={`text-[8px] font-medium ${phonePhase === "call" ? "text-emerald-400" : "text-slate-500"}`}>
+                    <span className={`text-[8px] font-medium ${phonePhase === "call" ? "text-emerald-600" : "text-slate-500"}`}>
                       {phonePhase === "call" ? "Simulated call" : "Call ended"}
                     </span>
                     <span className="text-[8px] text-slate-600">&bull;</span>
@@ -1461,12 +1799,12 @@ export default function VoiceAgent({ patientName }: VoiceAgentProps) {
                   <div
                     className={`relative max-w-[82%] rounded-xl px-2.5 py-1.5 text-[9px] leading-[1.5] ${
                       isAi
-                        ? "bg-slate-800/90 text-slate-100 rounded-tl-sm"
+                        ? "bg-slate-100 text-slate-800 rounded-tl-sm"
                         : "bg-emerald-600/90 text-white rounded-tr-sm"
                     }`}
                   >
                     <div className={`text-[7px] font-bold uppercase tracking-widest mb-0.5 ${
-                      isAi ? "text-emerald-400" : "text-emerald-200"
+                      isAi ? "text-emerald-600" : "text-emerald-600"
                     }`}>
                       {isAi ? "CareCompanion" : patientName}
                     </div>
@@ -1503,14 +1841,14 @@ export default function VoiceAgent({ patientName }: VoiceAgentProps) {
                       : isListening
                         ? "bg-blue-500/20 border-2 border-blue-500/50"
                         : phonePhase === "call"
-                          ? "bg-slate-700"
-                          : "bg-slate-700/50"
+                          ? "bg-slate-100"
+                          : "bg-slate-50"
                   }`}
                 >
                   <svg
                     width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor"
                     strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"
-                    className={aiSpeaking ? "text-emerald-400" : isListening ? "text-blue-400" : "text-slate-400"}
+                    className={aiSpeaking ? "text-emerald-600" : isListening ? "text-blue-600" : "text-slate-400"}
                   >
                     <polygon points="11 5 6 9 2 9 2 15 6 15 11 19 11 5" />
                     <path d="M19.07 4.93a10 10 0 0 1 0 14.14" />
@@ -1521,9 +1859,9 @@ export default function VoiceAgent({ patientName }: VoiceAgentProps) {
                   {phonePhase === "ended" ? (
                     "Call complete"
                   ) : aiSpeaking ? (
-                    <span className="text-emerald-400">AI speaking...</span>
+                    <span className="text-emerald-600">AI speaking...</span>
                   ) : isListening ? (
-                    <span className="text-blue-400">Patient speaking...</span>
+                    <span className="text-blue-600">Patient speaking...</span>
                   ) : (
                     "Connecting..."
                   )}

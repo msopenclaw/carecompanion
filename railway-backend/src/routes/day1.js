@@ -2,6 +2,7 @@ const express = require("express");
 const { eq } = require("drizzle-orm");
 const { db } = require("../db");
 const { messages, userProfiles, userCoordinator, careCoordinators } = require("../db/schema");
+const { decrypt } = require("../services/encryption");
 
 const router = express.Router();
 
@@ -24,7 +25,7 @@ router.post("/trigger", async (req, res) => {
       if (coord) coordinatorName = coord.name;
     }
 
-    const firstName = profile?.firstName || "there";
+    const firstName = profile ? (decrypt(profile.firstName) || "there") : "there";
 
     // Send intro messages
     const introMessages = [

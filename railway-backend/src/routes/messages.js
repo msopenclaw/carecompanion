@@ -70,4 +70,22 @@ router.put("/:id/read", async (req, res) => {
   }
 });
 
+// DELETE /api/messages/:id
+router.delete("/:id", async (req, res) => {
+  try {
+    const [deleted] = await db.delete(messages)
+      .where(and(eq(messages.id, req.params.id), eq(messages.userId, req.user.userId)))
+      .returning();
+
+    if (!deleted) {
+      return res.status(404).json({ error: "Message not found" });
+    }
+
+    res.json({ success: true });
+  } catch (err) {
+    console.error("Message delete error:", err);
+    res.status(500).json({ error: "Failed to delete message" });
+  }
+});
+
 module.exports = router;

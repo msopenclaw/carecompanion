@@ -1,7 +1,9 @@
 const express = require("express");
 const { eq, and } = require("drizzle-orm");
+const { sql, min } = require("drizzle-orm");
 const { db } = require("../db");
-const { userProfiles, userCoordinator, careCoordinators, medications } = require("../db/schema");
+const { userProfiles, userCoordinator, careCoordinators, medications, messages, consents } = require("../db/schema");
+const { encrypt, decrypt, encryptJson, decryptJson } = require("../services/encryption");
 
 const router = express.Router();
 
@@ -15,6 +17,13 @@ router.get("/", async (req, res) => {
       return res.status(404).json({ error: "Profile not found" });
     }
 
+    // Decrypt PII fields
+    profile.firstName = decrypt(profile.firstName);
+    profile.lastName = decrypt(profile.lastName);
+    if (profile.phone) profile.phone = decrypt(profile.phone);
+    if (profile.conditions) profile.conditions = decryptJson(profile.conditions);
+    if (profile.currentSideEffects) profile.currentSideEffects = decryptJson(profile.currentSideEffects);
+
     // Get coordinator
     const [uc] = await db.select().from(userCoordinator)
       .where(eq(userCoordinator.userId, req.user.userId));
@@ -26,7 +35,33 @@ router.get("/", async (req, res) => {
       coordinator = coord;
     }
 
-    res.json({ ...profile, coordinator });
+    // Compute effective start date from earliest activity
+    const candidates = [];
+
+    // 1. Profile creation date
+    if (profile.createdAt) candidates.push(new Date(profile.createdAt));
+
+    // 2. Explicit glp1StartDate (user may have started meds before signing up)
+    if (profile.glp1StartDate) candidates.push(new Date(profile.glp1StartDate));
+
+    // 3. Earliest message
+    const [firstMsg] = await db.select({ earliest: sql`MIN(${messages.createdAt})` })
+      .from(messages).where(eq(messages.userId, req.user.userId));
+    if (firstMsg?.earliest) candidates.push(new Date(firstMsg.earliest));
+
+    // 4. Earliest consent (signed during onboarding)
+    const [firstConsent] = await db.select({ earliest: sql`MIN(${consents.createdAt})` })
+      .from(consents).where(eq(consents.userId, req.user.userId));
+    if (firstConsent?.earliest) candidates.push(new Date(firstConsent.earliest));
+
+    // Pick the earliest date
+    let effectiveStartDate = null;
+    if (candidates.length > 0) {
+      const earliest = new Date(Math.min(...candidates.map(d => d.getTime())));
+      effectiveStartDate = earliest.toISOString().split("T")[0]; // yyyy-MM-dd
+    }
+
+    res.json({ ...profile, coordinator, effectiveStartDate });
   } catch (err) {
     console.error("Profile fetch error:", err);
     res.status(500).json({ error: "Failed to fetch profile" });
@@ -69,6 +104,13 @@ router.put("/", async (req, res) => {
     if (otherMedications !== undefined) updates.otherMedications = otherMedications;
     if (currentSideEffects !== undefined) updates.currentSideEffects = currentSideEffects;
     if (goals !== undefined) updates.goals = goals;
+
+    // Encrypt PII fields before writing to DB
+    if (updates.firstName) updates.firstName = encrypt(updates.firstName);
+    if (updates.lastName) updates.lastName = encrypt(updates.lastName);
+    if (updates.phone) updates.phone = encrypt(updates.phone);
+    if (updates.conditions) updates.conditions = encryptJson(updates.conditions);
+    if (updates.currentSideEffects) updates.currentSideEffects = encryptJson(updates.currentSideEffects);
 
     updates.updatedAt = new Date();
 

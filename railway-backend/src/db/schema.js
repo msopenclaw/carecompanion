@@ -21,10 +21,11 @@ const messageSenderEnum = pgEnum("message_sender", ["ai", "patient", "admin"]);
 const messageTypeEnum = pgEnum("message_type", ["check_in", "nudge", "alert", "celebration", "text", "call_request"]);
 const aiUrgencyEnum = pgEnum("ai_urgency", ["low", "medium", "high", "critical"]);
 const aiActionEnum = pgEnum("ai_action", ["none", "send_message", "call", "escalate"]);
-const aiSourceEnum = pgEnum("ai_source", ["cron", "manual_override", "patient_trigger"]);
+const aiSourceEnum = pgEnum("ai_source", ["cron", "manual_override", "patient_trigger", "chat_summary"]);
 const voiceInitiatorEnum = pgEnum("voice_initiator", ["ai", "patient", "admin"]);
 const escalationTypeEnum = pgEnum("escalation_type", ["provider", "emergency"]);
 const escalationStatusEnum = pgEnum("escalation_status", ["open", "acknowledged", "resolved"]);
+const mealSourceEnum = pgEnum("meal_source", ["photo_ai", "manual", "chat_agent"]);
 
 // ---------------------------------------------------------------------------
 // Existing Tables
@@ -122,6 +123,7 @@ const users = pgTable("users", {
   passwordHash: varchar("password_hash", { length: 255 }).notNull(),
   role: userRoleEnum("role").default("patient").notNull(),
   isActive: boolean("is_active").default(true).notNull(),
+  appleUserId: varchar("apple_user_id", { length: 255 }),
   createdAt: timestamp("created_at", { withTimezone: true }).defaultNow().notNull(),
   updatedAt: timestamp("updated_at", { withTimezone: true }).defaultNow().notNull(),
 });
@@ -311,9 +313,24 @@ const dailyTips = pgTable("daily_tips", {
   createdAt: timestamp("created_at", { withTimezone: true }).defaultNow().notNull(),
 });
 
+const mealLogs = pgTable("meal_logs", {
+  id: uuid("id").defaultRandom().primaryKey(),
+  userId: uuid("user_id").references(() => users.id).notNull(),
+  calories: real("calories"),
+  proteinG: real("protein_g"),
+  carbsG: real("carbs_g"),
+  fatG: real("fat_g"),
+  fiberG: real("fiber_g"),
+  description: varchar("description", { length: 500 }),
+  mealType: varchar("meal_type", { length: 20 }),
+  source: varchar("source", { length: 20 }).default("photo_ai").notNull(),
+  analyzedAt: timestamp("analyzed_at", { withTimezone: true }),
+  createdAt: timestamp("created_at", { withTimezone: true }).defaultNow().notNull(),
+});
+
 module.exports = {
   providers, patients, vitals, medications, medicationLogs, alerts,
   users, userProfiles, careCoordinators, userCoordinator,
   aiActions, messages, pushTokens, voiceSessions, escalations, consents, engagementConfig,
-  userPreferences, scheduledActions, dailyTips,
+  userPreferences, scheduledActions, dailyTips, mealLogs,
 };

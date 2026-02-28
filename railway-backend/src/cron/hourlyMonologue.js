@@ -7,6 +7,7 @@ const {
   userPreferences,
 } = require("../db/schema");
 const { sendPush } = require("../services/pushService");
+const { decrypt, decryptJson } = require("../services/encryption");
 
 /**
  * Hourly Monologue — The Autonomous AI Brain
@@ -41,13 +42,18 @@ async function runHourlyMonologue(singleUserId) {
 
   const results = [];
 
-  for (const patient of patientUsers) {
+  for (let i = 0; i < patientUsers.length; i++) {
+    const patient = patientUsers[i];
     try {
       const result = await processPatient(patient, model);
       results.push(result);
     } catch (err) {
       console.error(`[MONOLOGUE] Error processing user ${patient.id}:`, err);
       results.push({ userId: patient.id, error: err.message });
+    }
+    // Stagger requests to avoid Gemini 429 rate limits
+    if (i < patientUsers.length - 1) {
+      await new Promise(r => setTimeout(r, 3000));
     }
   }
 
@@ -69,6 +75,12 @@ async function processPatient(patient, model) {
   if (!profile) {
     return { userId, action: "none", reason: "No profile found" };
   }
+
+  // Decrypt encrypted PII fields
+  profile.firstName = decrypt(profile.firstName);
+  profile.lastName = decrypt(profile.lastName);
+  if (profile.conditions) profile.conditions = decryptJson(profile.conditions);
+  if (profile.currentSideEffects) profile.currentSideEffects = decryptJson(profile.currentSideEffects);
 
   const recentVitals = await db.select().from(vitals)
     .where(and(eq(vitals.patientId, userId), gte(vitals.recordedAt, since7d)))
@@ -224,11 +236,11 @@ Respond in valid JSON with this exact format:
   // -----------------------------------------------------------------------
   const [actionRow] = await db.insert(aiActions).values({
     userId,
-    observation: decision.observation,
-    reasoning: decision.reasoning,
-    assessment: decision.assessment,
-    urgency: decision.urgency,
-    action: decision.action,
+    observation: decision.observation || "Routine check",
+    reasoning: decision.reasoning || "No notable changes",
+    assessment: decision.assessment || "Stable",
+    urgency: decision.urgency || "low",
+    action: decision.action || "none",
     messageContent: decision.message,
     escalationTarget: decision.escalation_target,
     coordinatorPersona: coordinator?.name || null,
@@ -239,15 +251,26 @@ Respond in valid JSON with this exact format:
 
   // If action is send_message, create the message
   if (decision.action === "send_message" && decision.message) {
+    // Enforce quiet hours — skip non-urgent messages during quiet period
+    const isUrgent = decision.urgency === "high" || decision.urgency === "critical";
+    const userTz = profile.timezone || "America/New_York";
+    const quietStart = prefs?.quietStart || "22:00";
+    const quietEnd = prefs?.quietEnd || "07:00";
+
+    if (!isUrgent && isQuietHours(userTz, quietStart, quietEnd)) {
+      console.log(`[MONOLOGUE] Skipping non-urgent message for ${userId} — quiet hours (${quietStart}-${quietEnd} ${userTz})`);
+      return { userId, action: "none", reason: "quiet_hours", urgency: decision.urgency };
+    }
+
     await db.insert(messages).values({
       userId,
       sender: "ai",
-      messageType: decision.urgency === "high" || decision.urgency === "critical" ? "alert" : "check_in",
+      messageType: isUrgent ? "alert" : "check_in",
       content: decision.message,
       triggeredBy: actionRow.id,
     });
     // Send push notification with routing data
-    const msgType = decision.urgency === "high" || decision.urgency === "critical" ? "alert" : "check_in";
+    const msgType = isUrgent ? "alert" : "check_in";
     await sendPush(userId, {
       title: coordinator?.name || "Care Coordinator",
       body: decision.message.length > 100 ? decision.message.substring(0, 97) + "..." : decision.message,
@@ -280,6 +303,27 @@ function formatVitals(vitalsArray) {
     const values = readings.slice(0, 5).map((r) => r.value);
     return `${type}: latest=${latest.value}${latest.unit}, recent=[${values.join(", ")}]`;
   }).join("\n");
+}
+
+/**
+ * Check if current time in the user's timezone falls within quiet hours.
+ * Handles overnight ranges (e.g., 22:00 - 07:00).
+ */
+function isQuietHours(timezone, quietStart, quietEnd) {
+  const nowStr = new Date().toLocaleString("en-US", { timeZone: timezone, hour12: false });
+  const now = new Date(nowStr);
+  const currentMinutes = now.getHours() * 60 + now.getMinutes();
+
+  const [startH, startM] = quietStart.split(":").map(Number);
+  const [endH, endM] = quietEnd.split(":").map(Number);
+  const startMinutes = startH * 60 + startM;
+  const endMinutes = endH * 60 + endM;
+
+  if (startMinutes > endMinutes) {
+    // Overnight range (e.g., 22:00 - 07:00)
+    return currentMinutes >= startMinutes || currentMinutes < endMinutes;
+  }
+  return currentMinutes >= startMinutes && currentMinutes < endMinutes;
 }
 
 module.exports = { runHourlyMonologue };

@@ -125,8 +125,8 @@ function DemoPage() {
       );
     }
 
-    // Day 2: proactive call in progress
-    if (currentDay === 2 && demoPhase !== "idle") {
+    // Day 2: proactive call in progress (calling/active/documenting phases)
+    if (currentDay === 2 && (demoPhase === "calling" || demoPhase === "active" || demoPhase === "documenting")) {
       return (
         <div className="flex items-center gap-2 px-3 py-1.5 bg-blue-500/10 border border-blue-500/30 rounded-lg">
           <div className="w-2 h-2 bg-blue-400 rounded-full animate-pulse" />
@@ -180,6 +180,15 @@ function DemoPage() {
 
     // Normal days 1-6 (not day 4): advance to next day
     if (currentDay >= 1 && currentDay < 7) {
+      // Show loading indicator when day content is still playing
+      if (!demo.dayContentComplete) {
+        return (
+          <div className="flex items-center gap-2 px-3 py-1.5 bg-blue-500/10 border border-blue-500/30 rounded-lg">
+            <div className="w-2 h-2 bg-blue-400 rounded-full animate-pulse" />
+            <span className="text-blue-400 text-xs font-medium">Day {currentDay} playing...</span>
+          </div>
+        );
+      }
       return (
         <button
           onClick={() => demo.advanceDay()}
@@ -234,7 +243,7 @@ function DemoPage() {
   };
 
   return (
-    <div className="flex h-screen flex-col bg-gradient-to-br from-slate-900 via-slate-900 to-slate-800 overflow-hidden">
+    <div className="flex h-screen flex-col bg-gradient-to-br from-[#111827] via-[#1a2744] to-[#111827] overflow-hidden">
       {/* Header */}
       <header className="flex items-center justify-between px-5 py-2 bg-slate-900/80 border-b border-slate-700/50 backdrop-blur-sm shrink-0 z-10">
         <div className="flex items-center gap-3">
@@ -272,6 +281,21 @@ function DemoPage() {
               Skip to Day 4
             </button>
           )}
+
+          {/* Hard refresh button — clears cached JS */}
+          <button
+            onClick={() => {
+              if ("caches" in window) caches.keys().then(keys => keys.forEach(k => caches.delete(k)));
+              window.location.href = window.location.pathname + "?v=" + Date.now();
+            }}
+            className="w-7 h-7 rounded-full bg-slate-800 border border-slate-700 text-slate-400 hover:text-white text-xs flex items-center justify-center transition-all"
+            title="Clear cache & reload"
+          >
+            <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5">
+              <path d="M1 4v6h6" strokeLinecap="round" strokeLinejoin="round" />
+              <path d="M3.51 15a9 9 0 102.13-9.36L1 10" strokeLinecap="round" strokeLinejoin="round" />
+            </svg>
+          </button>
 
           {/* Script button */}
           <button
@@ -332,7 +356,7 @@ function DemoPage() {
             </span>
             <span className="text-[10px] text-slate-500">AI Co-Pilot</span>
           </div>
-          <div className="flex-1 min-h-0 rounded-xl overflow-hidden border border-slate-700/50 shadow-2xl bg-white text-slate-900">
+          <div className="flex-1 min-h-0 rounded-xl overflow-hidden border border-slate-500/40 shadow-2xl shadow-[0_0_30px_rgba(255,255,255,0.07)] bg-white text-slate-900">
             <div className="h-full overflow-y-auto">
               <LiveTriage key={`triage-${currentPatientId}-${refreshKey}`} />
             </div>
@@ -347,7 +371,7 @@ function DemoPage() {
             </span>
             <span className="text-[10px] text-slate-500">Epic</span>
           </div>
-          <div className="flex-1 min-h-0 rounded-xl overflow-hidden border border-slate-700/50 shadow-2xl bg-white text-slate-900">
+          <div className="flex-1 min-h-0 rounded-xl overflow-hidden border border-slate-500/40 shadow-2xl shadow-[0_0_30px_rgba(255,255,255,0.07)] bg-white text-slate-900">
             <div className="h-full overflow-y-auto">
               <LiveBilling key={`billing-${refreshKey}`} />
             </div>

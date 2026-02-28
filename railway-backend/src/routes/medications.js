@@ -1,5 +1,5 @@
 const express = require("express");
-const { eq, and, gte, desc } = require("drizzle-orm");
+const { eq, and, gte, desc, sql } = require("drizzle-orm");
 const { db } = require("../db");
 const { medications, medicationLogs, userProfiles } = require("../db/schema");
 
@@ -18,9 +18,13 @@ router.get("/", async (req, res) => {
     const [profile] = await db.select({ tz: userProfiles.timezone })
       .from(userProfiles).where(eq(userProfiles.userId, req.user.userId));
     const tz = profile?.tz || "America/New_York";
-    const nowInTz = new Date(new Date().toLocaleString("en-US", { timeZone: tz }));
-    const todayStart = new Date(nowInTz);
-    todayStart.setHours(0, 0, 0, 0);
+    // Get today's date string in user's timezone, then compute midnight UTC equivalent
+    const dateStr = new Date().toLocaleDateString("en-CA", { timeZone: tz }); // "2026-02-20"
+    const midnightUTC = new Date(dateStr + "T12:00:00Z"); // noon UTC as safe reference
+    const utcRef = new Date(midnightUTC.toLocaleString("en-US", { timeZone: "UTC" }));
+    const tzRef = new Date(midnightUTC.toLocaleString("en-US", { timeZone: tz }));
+    const offsetMs = utcRef.getTime() - tzRef.getTime();
+    const todayStart = new Date(new Date(dateStr + "T00:00:00Z").getTime() + offsetMs);
 
     const logs = await db.select().from(medicationLogs)
       .where(and(
@@ -67,6 +71,42 @@ router.post("/confirm", async (req, res) => {
   }
 });
 
+// POST /api/medications/unconfirm — undo today's confirmation
+router.post("/unconfirm", async (req, res) => {
+  try {
+    const { medicationId } = req.body;
+    if (!medicationId) {
+      return res.status(400).json({ error: "medicationId required" });
+    }
+
+    // Find today's boundary in user's timezone
+    const [profile] = await db.select({ tz: userProfiles.timezone })
+      .from(userProfiles).where(eq(userProfiles.userId, req.user.userId));
+    const tz = profile?.tz || "America/New_York";
+    const dateStr = new Date().toLocaleDateString("en-CA", { timeZone: tz });
+    const midnightUTC = new Date(dateStr + "T12:00:00Z");
+    const utcRef = new Date(midnightUTC.toLocaleString("en-US", { timeZone: "UTC" }));
+    const tzRef = new Date(midnightUTC.toLocaleString("en-US", { timeZone: tz }));
+    const offsetMs = utcRef.getTime() - tzRef.getTime();
+    const todayStart = new Date(new Date(dateStr + "T00:00:00Z").getTime() + offsetMs);
+
+    // Delete today's "taken" log for this medication
+    const deleted = await db.delete(medicationLogs)
+      .where(and(
+        eq(medicationLogs.medicationId, medicationId),
+        eq(medicationLogs.patientId, req.user.userId),
+        gte(medicationLogs.scheduledAt, todayStart),
+        eq(medicationLogs.status, "taken"),
+      ))
+      .returning();
+
+    res.json({ success: true, removed: deleted.length });
+  } catch (err) {
+    console.error("Med unconfirm error:", err);
+    res.status(500).json({ error: "Failed to unconfirm medication" });
+  }
+});
+
 // POST /api/medications — add a new medication
 router.post("/", async (req, res) => {
   try {
@@ -99,10 +139,10 @@ router.post("/", async (req, res) => {
   }
 });
 
-// GET /api/medications/history?days=7 — medication logs for past N days
+// GET /api/medications/history?days=30 — medication logs for past N days
 router.get("/history", async (req, res) => {
   try {
-    const days = parseInt(req.query.days) || 7;
+    const days = parseInt(req.query.days) || 30;
     const since = new Date(Date.now() - days * 24 * 60 * 60 * 1000);
 
     const logs = await db.select().from(medicationLogs)

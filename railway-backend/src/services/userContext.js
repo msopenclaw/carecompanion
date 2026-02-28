@@ -3,8 +3,9 @@ const { db } = require("../db");
 const {
   userProfiles, careCoordinators, userCoordinator, vitals,
   medications, medicationLogs, messages, userPreferences,
-  voiceSessions, scheduledActions,
+  voiceSessions, scheduledActions, mealLogs,
 } = require("../db/schema");
+const { decrypt, decryptJson } = require("./encryption");
 
 /**
  * Fetch comprehensive user context for agent consumption.
@@ -12,8 +13,12 @@ const {
  */
 async function getUserContext(userId) {
   const since7d = new Date(Date.now() - 7 * 24 * 60 * 60 * 1000);
+
+  // Compute start of today in user's timezone (need profile first for tz)
+  // We'll use UTC midnight as a reasonable default; the chat agent
+  // doesn't need perfect per-user timezone here since it's context, not gating.
   const todayStart = new Date();
-  todayStart.setHours(0, 0, 0, 0);
+  todayStart.setUTCHours(0, 0, 0, 0);
 
   const [
     [profile],
@@ -25,6 +30,7 @@ async function getUserContext(userId) {
     [prefs],
     recentVoice,
     activeReminders,
+    todayMeals,
   ] = await Promise.all([
     db.select().from(userProfiles).where(eq(userProfiles.userId, userId)),
     db.select().from(userCoordinator).where(eq(userCoordinator.userId, userId)),
@@ -44,6 +50,9 @@ async function getUserContext(userId) {
       .orderBy(desc(voiceSessions.startedAt)).limit(5),
     db.select().from(scheduledActions)
       .where(and(eq(scheduledActions.userId, userId), eq(scheduledActions.isActive, true))),
+    db.select().from(mealLogs)
+      .where(and(eq(mealLogs.userId, userId), gte(mealLogs.createdAt, todayStart)))
+      .orderBy(desc(mealLogs.createdAt)),
   ]);
 
   let coordinator = null;
@@ -58,6 +67,15 @@ async function getUserContext(userId) {
     takenToday: todayMedLogs.some(l =>
       l.medicationId === med.id && (l.status === "taken" || l.status === "late")),
   }));
+
+  // Decrypt encrypted PII fields from profile
+  if (profile) {
+    profile.firstName = decrypt(profile.firstName);
+    profile.lastName = decrypt(profile.lastName);
+    if (profile.phone) profile.phone = decrypt(profile.phone);
+    if (profile.conditions) profile.conditions = decryptJson(profile.conditions);
+    if (profile.currentSideEffects) profile.currentSideEffects = decryptJson(profile.currentSideEffects);
+  }
 
   const glp1Start = profile?.glp1StartDate ? new Date(profile.glp1StartDate) : null;
   const daysSinceStart = glp1Start
@@ -75,7 +93,73 @@ async function getUserContext(userId) {
     activeReminders,
     glp1DaysSinceStart: daysSinceStart,
     glp1WeekNumber: daysSinceStart !== null ? Math.ceil(daysSinceStart / 7) : null,
+    todayMeals,
   };
 }
 
-module.exports = { getUserContext };
+/**
+ * Lightweight context for notification generation.
+ * Much cheaper than getUserContext — only fetches what the notification AI needs.
+ */
+async function getNotificationContext(userId) {
+  const todayStart = new Date();
+  todayStart.setUTCHours(0, 0, 0, 0);
+
+  const [
+    [profile],
+    [uc],
+    todayMedLogs,
+    todayVitals,
+    meds,
+  ] = await Promise.all([
+    db.select().from(userProfiles).where(eq(userProfiles.userId, userId)),
+    db.select().from(userCoordinator).where(eq(userCoordinator.userId, userId)),
+    db.select().from(medicationLogs)
+      .where(and(eq(medicationLogs.patientId, userId), gte(medicationLogs.scheduledAt, todayStart))),
+    db.select().from(vitals)
+      .where(and(eq(vitals.patientId, userId), gte(vitals.recordedAt, todayStart))),
+    db.select().from(medications)
+      .where(and(eq(medications.patientId, userId), eq(medications.isActive, true))),
+  ]);
+
+  // Decrypt PII
+  if (profile) {
+    profile.firstName = decrypt(profile.firstName);
+    if (profile.currentSideEffects) profile.currentSideEffects = decryptJson(profile.currentSideEffects);
+  }
+
+  // Coordinator name
+  let coordinatorName = null;
+  if (uc) {
+    const [coord] = await db.select().from(careCoordinators)
+      .where(eq(careCoordinators.id, uc.coordinatorId));
+    coordinatorName = coord?.name || null;
+  }
+
+  // GLP-1 week
+  const glp1Start = profile?.glp1StartDate ? new Date(profile.glp1StartDate) : null;
+  const daysSinceStart = glp1Start
+    ? Math.floor((Date.now() - glp1Start.getTime()) / 86400000)
+    : null;
+
+  return {
+    firstName: profile?.firstName || "there",
+    ageBracket: profile?.ageBracket || null,
+    glp1Med: profile?.glp1Medication || null,
+    glp1Dosage: profile?.glp1Dosage || null,
+    injectionDay: profile?.injectionDay || null,
+    weekNumber: daysSinceStart !== null ? Math.ceil(daysSinceStart / 7) : null,
+    dayNumber: daysSinceStart,
+    sideEffects: profile?.currentSideEffects?.length ? profile.currentSideEffects.join(", ") : null,
+    goals: profile?.goals?.length ? profile.goals.join(", ") : null,
+    coordinatorName,
+    medsTakenToday: todayMedLogs.filter(l => l.status === "taken" || l.status === "late").length,
+    totalMeds: meds.length,
+    medicationNames: meds.map(m => `${m.name} ${m.dosage}`).join(", "),
+    waterToday: todayVitals.filter(v => v.vitalType === "hydration").reduce((mx, v) => Math.max(mx, v.value), 0),
+    recentMood: todayVitals.find(v => v.vitalType === "mood")?.value || null,
+    timezone: profile?.timezone || "America/New_York",
+  };
+}
+
+module.exports = { getUserContext, getNotificationContext };

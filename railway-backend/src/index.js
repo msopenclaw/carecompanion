@@ -26,6 +26,8 @@ const day1Routes = require("./routes/day1");
 const voiceHandler = require("./routes/voice");
 const voiceApiRoutes = require("./routes/voiceApi");
 const agentToolsRoutes = require("./routes/agentTools");
+const tipsRoutes = require("./routes/tips");
+const nutritionRoutes = require("./routes/nutrition");
 const { runHourlyMonologue } = require("./cron/hourlyMonologue");
 const { runScheduledActions } = require("./cron/scheduledActions");
 
@@ -46,7 +48,7 @@ app.use(cors({
   ],
   credentials: true,
 }));
-app.use(express.json({ limit: "1mb" }));
+app.use(express.json({ limit: "5mb" }));
 app.use(rateLimiter);
 
 // ---------------------------------------------------------------------------
@@ -80,6 +82,8 @@ app.use("/api/preferences", authMiddleware, preferencesRoutes);
 app.use("/api/day1", authMiddleware, day1Routes);
 app.use("/api/voice", authMiddleware, voiceApiRoutes);
 app.use("/api/agent-tools", agentToolsRoutes);
+app.use("/api/tips", authMiddleware, tipsRoutes);
+app.use("/api/nutrition", authMiddleware, nutritionRoutes);
 
 // ---------------------------------------------------------------------------
 // Admin Routes (JWT + admin role required)
@@ -114,8 +118,10 @@ wss.on("connection", voiceHandler);
 // Cron — Hourly Monologue
 // ---------------------------------------------------------------------------
 
-const cronInterval = process.env.CRON_INTERVAL_MINUTES || "60";
-cron.schedule(`0 */${cronInterval} * * *`, async () => {
+// Hourly AI monologue — runs every hour at :00
+const cronIntervalMin = parseInt(process.env.CRON_INTERVAL_MINUTES || "60", 10);
+const monologueCron = cronIntervalMin <= 59 ? `*/${cronIntervalMin} * * * *` : "0 * * * *";
+cron.schedule(monologueCron, async () => {
   console.log(`[CRON] Running hourly monologue at ${new Date().toISOString()}`);
   try {
     await runHourlyMonologue();
@@ -133,6 +139,8 @@ cron.schedule("* * * * *", async () => {
     console.error("[CRON] Scheduled actions failed:", err);
   }
 });
+
+console.log(`[CRON] Registered: monologue (${monologueCron}), scheduled actions (every minute)`);
 
 // ---------------------------------------------------------------------------
 // Start Server
@@ -165,6 +173,17 @@ async function runStartupMigrations() {
     await sql`ALTER TABLE scheduled_actions ADD COLUMN IF NOT EXISTS interval_days INTEGER NOT NULL DEFAULT 1`;
     await sql`ALTER TABLE user_profiles ADD COLUMN IF NOT EXISTS goals JSONB DEFAULT '[]'`;
     await sql`ALTER TYPE vital_type ADD VALUE IF NOT EXISTS 'sleep'`;
+    await sql`ALTER TYPE vital_type ADD VALUE IF NOT EXISTS 'mood'`;
+
+    // Daily tips cache table
+    await sql`CREATE TABLE IF NOT EXISTS daily_tips (
+      id UUID DEFAULT gen_random_uuid() PRIMARY KEY,
+      user_id UUID NOT NULL REFERENCES users(id),
+      tip_date DATE NOT NULL,
+      content TEXT NOT NULL,
+      created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+    )`;
+    await sql`CREATE UNIQUE INDEX IF NOT EXISTS daily_tips_user_date ON daily_tips (user_id, tip_date)`;
     await sql`ALTER TABLE medications ADD COLUMN IF NOT EXISTS is_glp1 BOOLEAN NOT NULL DEFAULT false`;
 
     // Create user_preferences table if it doesn't exist
@@ -198,7 +217,26 @@ async function runStartupMigrations() {
       WHERE u.id NOT IN (SELECT id FROM patients)
     `;
 
-    console.log("[MIGRATION] scheduled_actions table + vital_type enum + goals + is_glp1 + patients backfill updated");
+    // Meal logs table for nutrition tracking
+    await sql`CREATE TABLE IF NOT EXISTS meal_logs (
+      id UUID DEFAULT gen_random_uuid() PRIMARY KEY,
+      user_id UUID NOT NULL REFERENCES users(id),
+      calories REAL,
+      protein_g REAL,
+      carbs_g REAL,
+      fat_g REAL,
+      fiber_g REAL,
+      description VARCHAR(500),
+      meal_type VARCHAR(20),
+      source VARCHAR(20) NOT NULL DEFAULT 'photo_ai',
+      analyzed_at TIMESTAMPTZ,
+      created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+    )`;
+
+    // Apple user ID for Apple Sign In duplicate prevention
+    await sql`ALTER TABLE users ADD COLUMN IF NOT EXISTS apple_user_id VARCHAR(255) UNIQUE`;
+
+    console.log("[MIGRATION] scheduled_actions table + vital_type enum + goals + is_glp1 + patients backfill + meal_logs updated");
   } catch (err) {
     // IF NOT EXISTS not supported on older PG, enum value may already exist
     if (err.message && err.message.includes("already exists")) {
@@ -213,5 +251,8 @@ const PORT = process.env.PORT || 3000;
 runStartupMigrations().then(() => {
   server.listen(PORT, () => {
     console.log(`CareCompanion backend running on port ${PORT}`);
+    if (!process.env.ENCRYPTION_KEY) {
+      console.warn("[SECURITY] ENCRYPTION_KEY not set — PII encryption disabled");
+    }
   });
 });

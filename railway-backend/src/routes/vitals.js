@@ -30,10 +30,10 @@ router.post("/", async (req, res) => {
   }
 });
 
-// GET /api/vitals?range=7&type=weight
+// GET /api/vitals?range=30&type=weight
 router.get("/", async (req, res) => {
   try {
-    const range = parseInt(req.query.range) || 7;
+    const range = parseInt(req.query.range) || 30;
     const type = req.query.type;
     const since = new Date(Date.now() - range * 24 * 60 * 60 * 1000);
 
@@ -87,7 +87,7 @@ router.get("/latest", async (req, res) => {
     const vitalTypes = [
       "weight", "blood_pressure_systolic", "blood_pressure_diastolic",
       "heart_rate", "blood_glucose", "oxygen_saturation", "temperature",
-      "hydration", "steps",
+      "hydration", "steps", "mood",
     ];
 
     const results = [];

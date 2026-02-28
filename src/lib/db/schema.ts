@@ -366,6 +366,365 @@ export const billingEntriesRelations = relations(
 );
 
 // ---------------------------------------------------------------------------
+// NEW Enums — CareCompanion Production
+// ---------------------------------------------------------------------------
+
+export const userRoleEnum = pgEnum("user_role", [
+  "patient",
+  "admin",
+  "provider",
+]);
+
+export const messageSenderEnum = pgEnum("message_sender", [
+  "ai",
+  "patient",
+  "admin",
+]);
+
+export const messageTypeEnum = pgEnum("message_type", [
+  "check_in",
+  "nudge",
+  "alert",
+  "celebration",
+  "text",
+  "call_request",
+]);
+
+export const aiUrgencyEnum = pgEnum("ai_urgency", [
+  "low",
+  "medium",
+  "high",
+  "critical",
+]);
+
+export const aiActionEnum = pgEnum("ai_action", [
+  "none",
+  "send_message",
+  "call",
+  "escalate",
+]);
+
+export const aiSourceEnum = pgEnum("ai_source", [
+  "cron",
+  "manual_override",
+  "patient_trigger",
+]);
+
+export const voiceInitiatorEnum = pgEnum("voice_initiator", [
+  "ai",
+  "patient",
+  "admin",
+]);
+
+export const escalationTypeEnum = pgEnum("escalation_type", [
+  "provider",
+  "emergency",
+]);
+
+export const escalationStatusEnum = pgEnum("escalation_status", [
+  "open",
+  "acknowledged",
+  "resolved",
+]);
+
+// ---------------------------------------------------------------------------
+// NEW Tables — CareCompanion Production
+// ---------------------------------------------------------------------------
+
+// App authentication
+export const users = pgTable("users", {
+  id: uuid("id").defaultRandom().primaryKey(),
+  email: varchar("email", { length: 255 }).notNull().unique(),
+  passwordHash: varchar("password_hash", { length: 255 }).notNull(),
+  role: userRoleEnum("role").default("patient").notNull(),
+  isActive: boolean("is_active").default(true).notNull(),
+  ...timestamps,
+});
+
+// Onboarding profile data
+export const userProfiles = pgTable("user_profiles", {
+  id: uuid("id").defaultRandom().primaryKey(),
+  userId: uuid("user_id")
+    .references(() => users.id)
+    .notNull(),
+  firstName: varchar("first_name", { length: 100 }).notNull(),
+  lastName: varchar("last_name", { length: 100 }).notNull(),
+  dateOfBirth: date("date_of_birth").notNull(),
+  gender: varchar("gender", { length: 20 }),
+  phone: varchar("phone", { length: 20 }),
+  heightInches: integer("height_inches"),
+  startingWeight: real("starting_weight"),
+  conditions: jsonb("conditions").$type<string[]>().default([]),
+  activityLevel: varchar("activity_level", { length: 20 }),
+  glp1Medication: varchar("glp1_medication", { length: 100 }),
+  glp1Dosage: varchar("glp1_dosage", { length: 50 }),
+  glp1StartDate: date("glp1_start_date"),
+  injectionDay: varchar("injection_day", { length: 10 }),
+  otherMedications: jsonb("other_medications").$type<string[]>().default([]),
+  currentSideEffects: jsonb("current_side_effects").$type<string[]>().default([]),
+  ageBracket: varchar("age_bracket", { length: 10 }),
+  ...timestamps,
+});
+
+// AI care coordinator personas
+export const careCoordinators = pgTable("care_coordinators", {
+  id: uuid("id").defaultRandom().primaryKey(),
+  name: varchar("name", { length: 100 }).notNull(),
+  gender: varchar("gender", { length: 20 }).notNull(),
+  elevenlabsVoiceId: varchar("elevenlabs_voice_id", { length: 100 }).notNull(),
+  voiceSettings: jsonb("voice_settings")
+    .$type<{ stability: number; similarity_boost: number; style: number; use_speaker_boost?: boolean }>()
+    .notNull(),
+  personalityPrompt: text("personality_prompt").notNull(),
+  textStyle: text("text_style").notNull(),
+  bio: text("bio").notNull(),
+  avatarUrl: varchar("avatar_url", { length: 500 }),
+  bestForAgeBrackets: jsonb("best_for_age_brackets").$type<string[]>().default([]),
+  sampleGreeting: text("sample_greeting").notNull(),
+  isActive: boolean("is_active").default(true).notNull(),
+  createdAt: timestamp("created_at", { withTimezone: true }).defaultNow().notNull(),
+});
+
+// Which coordinator each user selected
+export const userCoordinator = pgTable("user_coordinator", {
+  id: uuid("id").defaultRandom().primaryKey(),
+  userId: uuid("user_id")
+    .references(() => users.id)
+    .notNull()
+    .unique(),
+  coordinatorId: uuid("coordinator_id")
+    .references(() => careCoordinators.id)
+    .notNull(),
+  selectedAt: timestamp("selected_at", { withTimezone: true }).defaultNow().notNull(),
+});
+
+// The internal monologue — every hourly AI decision
+export const aiActions = pgTable(
+  "ai_actions",
+  {
+    id: uuid("id").defaultRandom().primaryKey(),
+    userId: uuid("user_id")
+      .references(() => users.id)
+      .notNull(),
+    observation: text("observation").notNull(),
+    reasoning: text("reasoning").notNull(),
+    assessment: text("assessment").notNull(),
+    urgency: aiUrgencyEnum("urgency").notNull(),
+    action: aiActionEnum("action").notNull(),
+    messageContent: text("message_content"),
+    escalationTarget: varchar("escalation_target", { length: 20 }),
+    coordinatorPersona: varchar("coordinator_persona", { length: 100 }),
+    engagementProfile: varchar("engagement_profile", { length: 10 }),
+    glp1Context: text("glp1_context"),
+    source: aiSourceEnum("source").default("cron").notNull(),
+    outcome: text("outcome"),
+    createdAt: timestamp("created_at", { withTimezone: true }).defaultNow().notNull(),
+  },
+  (table) => ({
+    userCreatedIdx: index("ai_actions_user_created_idx").on(table.userId, table.createdAt),
+    urgencyIdx: index("ai_actions_urgency_idx").on(table.urgency),
+  }),
+);
+
+// AI proactive messages + patient replies
+export const messages = pgTable(
+  "messages",
+  {
+    id: uuid("id").defaultRandom().primaryKey(),
+    userId: uuid("user_id")
+      .references(() => users.id)
+      .notNull(),
+    sender: messageSenderEnum("sender").notNull(),
+    messageType: messageTypeEnum("message_type").default("text").notNull(),
+    content: text("content").notNull(),
+    isRead: boolean("is_read").default(false).notNull(),
+    triggeredBy: uuid("triggered_by").references(() => aiActions.id),
+    createdAt: timestamp("created_at", { withTimezone: true }).defaultNow().notNull(),
+  },
+  (table) => ({
+    userCreatedIdx: index("messages_user_created_idx").on(table.userId, table.createdAt),
+  }),
+);
+
+// APNs push tokens
+export const pushTokens = pgTable("push_tokens", {
+  id: uuid("id").defaultRandom().primaryKey(),
+  userId: uuid("user_id")
+    .references(() => users.id)
+    .notNull(),
+  deviceToken: varchar("device_token", { length: 500 }).notNull(),
+  platform: varchar("platform", { length: 10 }).default("ios").notNull(),
+  isActive: boolean("is_active").default(true).notNull(),
+  ...timestamps,
+});
+
+// Voice call sessions
+export const voiceSessions = pgTable("voice_sessions", {
+  id: uuid("id").defaultRandom().primaryKey(),
+  userId: uuid("user_id")
+    .references(() => users.id)
+    .notNull(),
+  initiatedBy: voiceInitiatorEnum("initiated_by").notNull(),
+  aiActionId: uuid("ai_action_id").references(() => aiActions.id),
+  startedAt: timestamp("started_at", { withTimezone: true }).defaultNow().notNull(),
+  endedAt: timestamp("ended_at", { withTimezone: true }),
+  durationSeconds: integer("duration_seconds"),
+  transcript: jsonb("transcript").$type<{ speaker: string; text: string; timestamp: string }[]>(),
+  summary: text("summary"),
+  coordinatorPersona: varchar("coordinator_persona", { length: 100 }),
+  createdAt: timestamp("created_at", { withTimezone: true }).defaultNow().notNull(),
+});
+
+// Escalations to providers
+export const escalations = pgTable("escalations", {
+  id: uuid("id").defaultRandom().primaryKey(),
+  userId: uuid("user_id")
+    .references(() => users.id)
+    .notNull(),
+  aiActionId: uuid("ai_action_id").references(() => aiActions.id),
+  escalationType: escalationTypeEnum("escalation_type").notNull(),
+  reason: text("reason").notNull(),
+  status: escalationStatusEnum("status").default("open").notNull(),
+  resolvedAt: timestamp("resolved_at", { withTimezone: true }),
+  resolvedBy: uuid("resolved_by").references(() => users.id),
+  resolutionNote: text("resolution_note"),
+  createdAt: timestamp("created_at", { withTimezone: true }).defaultNow().notNull(),
+});
+
+// HIPAA/disclosure consent log
+export const consents = pgTable("consents", {
+  id: uuid("id").defaultRandom().primaryKey(),
+  userId: uuid("user_id").references(() => users.id),
+  consentType: varchar("consent_type", { length: 50 }).notNull(),
+  consentVersion: varchar("consent_version", { length: 20 }).default("1.0").notNull(),
+  accepted: boolean("accepted").notNull(),
+  ipAddress: varchar("ip_address", { length: 50 }),
+  userAgent: text("user_agent"),
+  createdAt: timestamp("created_at", { withTimezone: true }).defaultNow().notNull(),
+});
+
+// Age-variant engagement configuration
+export const engagementConfig = pgTable("engagement_config", {
+  id: uuid("id").defaultRandom().primaryKey(),
+  ageBracket: varchar("age_bracket", { length: 10 }).notNull().unique(),
+  primaryChannel: varchar("primary_channel", { length: 20 }).notNull(),
+  maxDailyMessages: integer("max_daily_messages").default(3).notNull(),
+  maxWeeklyCalls: integer("max_weekly_calls").default(2).notNull(),
+  checkInFrequencyHours: integer("check_in_frequency_hours").default(24).notNull(),
+  escalationTextTimeoutHours: integer("escalation_text_timeout_hours").default(4).notNull(),
+  callThresholdLevel: integer("call_threshold_level").default(4).notNull(),
+  toneDescription: text("tone_description").notNull(),
+  uiFontScale: real("ui_font_scale").default(1.0).notNull(),
+  useEmoji: boolean("use_emoji").default(false).notNull(),
+  createdAt: timestamp("created_at", { withTimezone: true }).defaultNow().notNull(),
+});
+
+// ---------------------------------------------------------------------------
+// NEW Relations — CareCompanion Production
+// ---------------------------------------------------------------------------
+
+export const usersRelations = relations(users, ({ one, many }) => ({
+  profile: one(userProfiles, {
+    fields: [users.id],
+    references: [userProfiles.userId],
+  }),
+  coordinator: one(userCoordinator, {
+    fields: [users.id],
+    references: [userCoordinator.userId],
+  }),
+  messages: many(messages),
+  aiActions: many(aiActions),
+  pushTokens: many(pushTokens),
+  voiceSessions: many(voiceSessions),
+  escalations: many(escalations),
+  consents: many(consents),
+}));
+
+export const userProfilesRelations = relations(userProfiles, ({ one }) => ({
+  user: one(users, {
+    fields: [userProfiles.userId],
+    references: [users.id],
+  }),
+}));
+
+export const careCoordinatorsRelations = relations(careCoordinators, ({ many }) => ({
+  users: many(userCoordinator),
+}));
+
+export const userCoordinatorRelations = relations(userCoordinator, ({ one }) => ({
+  user: one(users, {
+    fields: [userCoordinator.userId],
+    references: [users.id],
+  }),
+  coordinator: one(careCoordinators, {
+    fields: [userCoordinator.coordinatorId],
+    references: [careCoordinators.id],
+  }),
+}));
+
+export const aiActionsRelations = relations(aiActions, ({ one, many }) => ({
+  user: one(users, {
+    fields: [aiActions.userId],
+    references: [users.id],
+  }),
+  messages: many(messages),
+  voiceSessions: many(voiceSessions),
+  escalations: many(escalations),
+}));
+
+export const messagesRelations = relations(messages, ({ one }) => ({
+  user: one(users, {
+    fields: [messages.userId],
+    references: [users.id],
+  }),
+  triggeredByAction: one(aiActions, {
+    fields: [messages.triggeredBy],
+    references: [aiActions.id],
+  }),
+}));
+
+export const pushTokensRelations = relations(pushTokens, ({ one }) => ({
+  user: one(users, {
+    fields: [pushTokens.userId],
+    references: [users.id],
+  }),
+}));
+
+export const voiceSessionsRelations = relations(voiceSessions, ({ one }) => ({
+  user: one(users, {
+    fields: [voiceSessions.userId],
+    references: [users.id],
+  }),
+  aiAction: one(aiActions, {
+    fields: [voiceSessions.aiActionId],
+    references: [aiActions.id],
+  }),
+}));
+
+export const escalationsRelations = relations(escalations, ({ one }) => ({
+  user: one(users, {
+    fields: [escalations.userId],
+    references: [users.id],
+  }),
+  aiAction: one(aiActions, {
+    fields: [escalations.aiActionId],
+    references: [aiActions.id],
+  }),
+  resolver: one(users, {
+    fields: [escalations.resolvedBy],
+    references: [users.id],
+    relationName: "escalationResolver",
+  }),
+}));
+
+export const consentsRelations = relations(consents, ({ one }) => ({
+  user: one(users, {
+    fields: [consents.userId],
+    references: [users.id],
+  }),
+}));
+
+// ---------------------------------------------------------------------------
 // Type exports for convenience
 // ---------------------------------------------------------------------------
 
@@ -389,3 +748,27 @@ export type BillingCode = typeof billingCodes.$inferSelect;
 export type NewBillingCode = typeof billingCodes.$inferInsert;
 export type BillingEntry = typeof billingEntries.$inferSelect;
 export type NewBillingEntry = typeof billingEntries.$inferInsert;
+
+// New type exports
+export type User = typeof users.$inferSelect;
+export type NewUser = typeof users.$inferInsert;
+export type UserProfile = typeof userProfiles.$inferSelect;
+export type NewUserProfile = typeof userProfiles.$inferInsert;
+export type CareCoordinator = typeof careCoordinators.$inferSelect;
+export type NewCareCoordinator = typeof careCoordinators.$inferInsert;
+export type UserCoordinatorSelect = typeof userCoordinator.$inferSelect;
+export type NewUserCoordinator = typeof userCoordinator.$inferInsert;
+export type AiAction = typeof aiActions.$inferSelect;
+export type NewAiAction = typeof aiActions.$inferInsert;
+export type Message = typeof messages.$inferSelect;
+export type NewMessage = typeof messages.$inferInsert;
+export type PushToken = typeof pushTokens.$inferSelect;
+export type NewPushToken = typeof pushTokens.$inferInsert;
+export type VoiceSession = typeof voiceSessions.$inferSelect;
+export type NewVoiceSession = typeof voiceSessions.$inferInsert;
+export type Escalation = typeof escalations.$inferSelect;
+export type NewEscalation = typeof escalations.$inferInsert;
+export type Consent = typeof consents.$inferSelect;
+export type NewConsent = typeof consents.$inferInsert;
+export type EngagementConfigRow = typeof engagementConfig.$inferSelect;
+export type NewEngagementConfig = typeof engagementConfig.$inferInsert;

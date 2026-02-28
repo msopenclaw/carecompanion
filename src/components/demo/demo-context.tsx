@@ -80,6 +80,7 @@ export interface DayData {
   engagementScore: number;
   textThread: TextMessage[];  // multi-turn text conversation (AI-initiated)
   patientInitThread?: TextMessage[];  // patient-initiated conversation (Days 5-7)
+  postCallThread?: TextMessage[];  // messages shown after voice call completes (Day 4)
   isIncidentDay: boolean;
   isCallDay: boolean;     // true for days that trigger a voice call
 }
@@ -118,9 +119,11 @@ export const DAY_DATA: DayData[] = [
     checkInDone: true,
     engagementScore: 92,
     textThread: [
-      { sender: "ai", text: "Welcome to your Wegovy journey, Margaret! Your first injection is confirmed. How are you feeling?" },
+      { sender: "ai", text: "Welcome to your Wegovy journey, Margaret! Your first injection is confirmed. How are you feeling? Any nausea or discomfort?" },
       { sender: "patient", text: "Feeling good! No side effects yet. Took all my meds this morning." },
-      { sender: "ai", text: "Great start! Remember to drink at least 64oz of water today. I'll check in tomorrow!" },
+      { sender: "ai", text: "Great to hear! How\u2019s your water intake today?" },
+      { sender: "patient", text: "I\u2019ve been keeping up \u2014 about 8 glasses so far!" },
+      { sender: "ai", text: "Perfect \u2014 that\u2019s right on target at 64oz! All your vitals look great today. I\u2019ll check in tomorrow. Remember, small frequent meals and stay hydrated!" },
     ],
     isIncidentDay: false,
     isCallDay: false,
@@ -154,9 +157,9 @@ export const DAY_DATA: DayData[] = [
     checkInDone: true,
     engagementScore: 60,
     textThread: [
-      { sender: "ai", text: "Hi Margaret, Day 3 check-in. How's the nausea? Are you staying hydrated?" },
+      { sender: "ai", text: "Hi Margaret, how\u2019s the nausea today? Were you able to try the small meals and ginger tea we talked about?" },
       { sender: "patient", text: "Nausea is worse today. Skipped dinner last night. Only had maybe 5 glasses of water." },
-      { sender: "ai", text: "I'm sorry to hear that. Try bland foods \u2014 crackers, rice, toast \u2014 and sip water throughout the day. Your glucose is improving nicely though!" },
+      { sender: "ai", text: "I hear you \u2014 hang in there. Try bland foods like crackers, rice, and toast. Keep sipping water throughout the day. Your glucose is actually coming down nicely \u2014 138 today!" },
     ],
     isIncidentDay: false,
     isCallDay: false,
@@ -172,7 +175,11 @@ export const DAY_DATA: DayData[] = [
     checkInDone: false,
     engagementScore: 41,
     textThread: [
-      { sender: "ai", text: "Hi Margaret, Day 4 check-in. How\u2019s the nausea? Are you staying hydrated?" },
+      { sender: "ai", text: "Hi Margaret, how are you doing today? How\u2019s the nausea and hydration?" },
+    ],
+    postCallThread: [
+      { sender: "ai", text: "Margaret, great talking with you. Dr. Patel has sent a prescription for ondansetron (anti-nausea) to your CVS pharmacy on Oak Street. They\u2019re open until 9pm tonight \u2014 please pick it up when you can. It will really help!" },
+      { sender: "patient", text: "Thank you so much. I\u2019ll pick it up this evening." },
     ],
     isIncidentDay: true,
     isCallDay: true,
@@ -188,9 +195,9 @@ export const DAY_DATA: DayData[] = [
     checkInDone: true,
     engagementScore: 78,
     textThread: [
-      { sender: "ai", text: "Welcome back, Margaret! So glad we talked yesterday. How are you feeling today?" },
-      { sender: "patient", text: "Much better! Ginger tea really helped. Had breakfast and lunch. About 6\u20137 glasses of water." },
-      { sender: "ai", text: "Wonderful progress! Keep following those small-meals tips. You're doing great!" },
+      { sender: "ai", text: "Good morning Margaret! How are you feeling today? Did you pick up the ondansetron?" },
+      { sender: "patient", text: "Yes! Much better today. The ginger tea really helped too. Had breakfast and lunch. About 6\u20137 glasses of water." },
+      { sender: "ai", text: "Wonderful progress! Your nausea is coming down. Keep those small meals going \u2014 you\u2019re doing great!" },
     ],
     patientInitThread: [
       { sender: "patient", text: "Hey, just wanted to share \u2014 I had ginger tea this morning and it really helped! Feeling so much better than yesterday." },
@@ -210,9 +217,11 @@ export const DAY_DATA: DayData[] = [
     checkInDone: true,
     engagementScore: 88,
     textThread: [
-      { sender: "ai", text: "Good morning! Day 6 \u2014 how's the nausea today?" },
-      { sender: "patient", text: "Feeling normal today! Ate all three meals, took all my meds, and drinking lots of water." },
-      { sender: "ai", text: "That's fantastic! Your body is adjusting beautifully to Wegovy. Keep it up!" },
+      { sender: "ai", text: "Good morning! How\u2019s the nausea today? Has the ondansetron been helping?" },
+      { sender: "patient", text: "So much better! The anti-nausea medication Dr. Patel prescribed made a huge difference. Ate all three meals today and drinking lots of water." },
+      { sender: "ai", text: "That\u2019s great to hear! How much water so far today?" },
+      { sender: "patient", text: "About 60oz!" },
+      { sender: "ai", text: "Excellent \u2014 almost at your 64oz goal! The ondansetron is doing its job. Your body is adjusting beautifully to Wegovy. Keep it up!" },
     ],
     patientInitThread: [
       { sender: "patient", text: "I walked 20 minutes today! First real exercise since starting Wegovy. Feeling more like myself \ud83d\ude0a" },
@@ -261,7 +270,7 @@ export const AI_THINKING_STEPS: ThinkingStep[] = [
   {
     id: "step-1",
     label: "Analyzing daily engagement pattern",
-    detail: "Check-in completion: Day 1: 100%, Day 2: 100%, Day 3: 100%, Day 4: MISSED. Engagement score: 92 \u2192 85 \u2192 60 \u2192 41. 3-day declining trend with first missed check-in \u2014 triggers outreach protocol.",
+    detail: "Text response rate: Day 1: replied, Day 2: replied, Day 3: replied, Day 4: no response. Engagement score: 92 \u2192 85 \u2192 60 \u2192 41. 3-day declining trend \u2014 patient stopped responding to texts, triggers outreach protocol.",
     icon: "vitals",
     durationMs: 2000,
   },
@@ -296,14 +305,14 @@ export const AI_THINKING_STEPS: ThinkingStep[] = [
   {
     id: "step-6",
     label: "Checking provider protocol",
-    detail: "Dr. Patel\u2019s GLP-1 standing order (updated Jan 2026): \"If GI symptoms persist 3+ days or patient misses daily check-in during initiation, initiate proactive outreach. Consider ondansetron PRN if nausea Grade 2+. Flag for review.\"",
+    detail: "Dr. Patel\u2019s GLP-1 standing order (updated Jan 2026): \"If GI symptoms persist 3+ days or patient stops responding to daily texts during initiation, initiate proactive outreach. Consider ondansetron PRN if nausea Grade 2+. Flag for review.\"",
     icon: "plan",
     durationMs: 1800,
   },
   {
     id: "step-7",
     label: "Decision: Initiate proactive engagement call",
-    detail: "All criteria met: missed check-in + escalating nausea (Grade 2) + dehydration risk + provider protocol match. Initiating voice call to Margaret Chen for GI symptom management and re-engagement.",
+    detail: "All criteria met: no response to today\u2019s text + escalating nausea (Grade 2) + dehydration risk + provider protocol match. Initiating voice call to Margaret Chen for GI symptom management and re-engagement.",
     icon: "call",
     durationMs: 1500,
   },
@@ -315,10 +324,17 @@ export const AI_THINKING_STEPS: ThinkingStep[] = [
 
 export const AI_THINKING_STEPS_DAY2: ThinkingStep[] = [
   {
+    id: "d2-0",
+    label: "Initiating daily check-in",
+    detail: "Margaret Chen, Day 2 of Wegovy 0.25mg. Reviewing vitals: Weight 247.0 lbs, Nausea Grade 1 (new). Preparing personalized check-in message.",
+    icon: "vitals",
+    durationMs: 1800,
+  },
+  {
     id: "d2-1",
     label: "Analyzing text sentiment",
     detail: "Patient message: \"threw up after breakfast... not sure I want to keep taking this medication.\" Sentiment: negative. Discontinuation risk: HIGH (0.91 confidence).",
-    icon: "vitals",
+    icon: "pattern",
     durationMs: 1800,
   },
   {
@@ -334,13 +350,6 @@ export const AI_THINKING_STEPS_DAY2: ThinkingStep[] = [
     detail: "Patient expressed discontinuation intent via text. Per Dr. Patel\u2019s standing order: immediate voice outreach when patient signals medication cessation within initiation window.",
     icon: "plan",
     durationMs: 1500,
-  },
-  {
-    id: "d2-4",
-    label: "Decision: Initiate proactive engagement call",
-    detail: "Discontinuation risk detected in text. Calling Margaret to provide nausea management coaching and encourage continuation. Coaching topics: small meals, ginger tea, hydration.",
-    icon: "call",
-    durationMs: 1200,
   },
 ];
 
@@ -399,7 +408,7 @@ export const DAILY_THINKING_STEPS: Record<number, ThinkingStep[]> = {
     {
       id: "d3-4",
       label: "Decision: Continue monitoring — send coaching text",
-      detail: "Symptoms concerning but patient engaged. Sending hydration and dietary coaching text. Flagged for automatic escalation if engagement drops below 50% or check-in missed tomorrow.",
+      detail: "Symptoms concerning but patient engaged. Sending hydration and dietary coaching text. Flagged for automatic escalation if engagement drops below 50% or patient stops responding to texts.",
       icon: "plan",
       durationMs: 1200,
     },
@@ -481,6 +490,21 @@ export const DAILY_THINKING_STEPS: Record<number, ThinkingStep[]> = {
       durationMs: 1200,
     },
   ],
+};
+
+// ---------------------------------------------------------------------------
+// Sync Config: maps each day to thinking step indices before each AI message
+// Each sub-array = step indices that run before the Nth AI message in the thread
+// ---------------------------------------------------------------------------
+
+export const SYNC_CONFIG: Record<number, number[][]> = {
+  1: [[0, 1], [2], []],     // 3 steps, 3 AI msgs
+  2: [[0], [1, 2, 3]],      // 4 steps, 2 AI msgs
+  3: [[0, 1], [2, 3]],      // 4 steps, 2 AI msgs
+  // Day 4: incident flow, no sync
+  5: [[0], [1, 2]],         // 3 steps, 2 AI msgs
+  6: [[0], [1], [2]],       // 3 steps, 3 AI msgs
+  7: [[0, 1], [2, 3]],      // 4 steps, 2 AI msgs
 };
 
 // ---------------------------------------------------------------------------
@@ -573,6 +597,9 @@ interface DemoState {
   billingEvents: BillingEvent[];
   showLogs: boolean;
   showScript: boolean;
+  dayContentComplete: boolean;
+  syncStep: number;
+  prescriptionSent: boolean;
 }
 
 interface DemoActions {
@@ -594,6 +621,9 @@ interface DemoActions {
   updateBilling: (minutes: number) => void;
   endDemo: () => void;           // any → complete (backward compat)
   resetDemo: () => void;         // any → idle, day → 0
+  setDayContentComplete: (complete: boolean) => void;
+  setSyncStep: (step: number) => void;
+  sendPrescription: () => void;
   toggleLogs: () => void;
   toggleScript: () => void;
 }
@@ -628,6 +658,9 @@ export function DemoProvider({ children }: { children: ReactNode }) {
   const [billingEvents, setBillingEvents] = useState<BillingEvent[]>([]);
   const [showLogs, setShowLogs] = useState(false);
   const [showScript, setShowScript] = useState(false);
+  const [dayContentComplete, setDayContentComplete] = useState(true);
+  const [syncStep, setSyncStepState] = useState(0);
+  const [prescriptionSent, setPrescriptionSent] = useState(false);
   const [selectedPatient, setSelectedPatientState] = useState<SelectedPatient>(DEFAULT_PATIENT);
 
   const alertIdCounter = useRef(0);
@@ -704,6 +737,8 @@ export function DemoProvider({ children }: { children: ReactNode }) {
     // Clear any pending staged timeouts from previous day
     stagedTimeouts.current.forEach(clearTimeout);
     stagedTimeouts.current = [];
+    setDayContentComplete(false);
+    setSyncStepState(0);
 
     setCurrentDay((prev) => {
       const next = prev + 1;
@@ -713,12 +748,8 @@ export function DemoProvider({ children }: { children: ReactNode }) {
         setDemoPhase("detecting");
         const t = setTimeout(() => setDemoPhase("analyzing"), 3500);
         stagedTimeouts.current.push(t);
-      } else if (next === 2) {
-        // Day 2: start idle — text plays first, then analysis triggers after texting
-        setDemoPhase("idle");
       } else {
-        // Days 1, 3, 5, 6, 7: start with AI analyzing (daily monitoring)
-        // After analysis completes → idle → text notification plays
+        // All other days: start analyzing — sync orchestration drives both panels
         setDemoPhase("analyzing");
       }
       return next;
@@ -731,6 +762,8 @@ export function DemoProvider({ children }: { children: ReactNode }) {
     if (targetDay < 1 || targetDay > 7) return;
     stagedTimeouts.current.forEach(clearTimeout);
     stagedTimeouts.current = [];
+    setDayContentComplete(false);
+    setSyncStepState(0);
     setTranscript([]);
     setAlerts([]);
     setBillingMinutes(0);
@@ -742,8 +775,6 @@ export function DemoProvider({ children }: { children: ReactNode }) {
       setDemoPhase("detecting");
       const t = setTimeout(() => setDemoPhase("analyzing"), 3500);
       stagedTimeouts.current.push(t);
-    } else if (targetDay === 2) {
-      setDemoPhase("idle");
     } else {
       setDemoPhase("analyzing");
     }
@@ -780,7 +811,10 @@ export function DemoProvider({ children }: { children: ReactNode }) {
     if (demoPhase === "analyzing") {
       const dayData = currentDay >= 1 && currentDay <= 7 ? DAY_DATA[currentDay - 1] : null;
       const isCallDay = dayData?.isCallDay || dayData?.isIncidentDay;
-      if (isCallDay) {
+      if (currentDay === 2) {
+        // Day 2: analysis completes → idle → text notification → text says "let me call" → call
+        setDemoPhase("idle");
+      } else if (isCallDay) {
         setDemoPhase("calling");
       } else {
         setDemoPhase("idle");
@@ -873,12 +907,28 @@ export function DemoProvider({ children }: { children: ReactNode }) {
     setBillingEvents([]);
     setShowLogs(false);
     setShowScript(false);
+    setDayContentComplete(true);
+    setSyncStepState(0);
+    setPrescriptionSent(false);
     alertIdCounter.current = 0;
   }, []);
 
   const setSelectedPatient = useCallback((patient: SelectedPatient) => {
     setSelectedPatientState(patient);
   }, []);
+
+  const setDayContentCompleteAction = useCallback((complete: boolean) => {
+    setDayContentComplete(complete);
+  }, []);
+
+  const setSyncStepAction = useCallback((step: number) => {
+    setSyncStepState(step);
+  }, []);
+
+  const sendPrescriptionAction = useCallback(() => {
+    setPrescriptionSent(true);
+    pushLog("ehr", "Prescription sent to patient\u2019s pharmacy \u2014 ondansetron 4mg PRN");
+  }, [pushLog]);
 
   const toggleLogs = useCallback(() => setShowLogs((prev) => !prev), []);
   const toggleScript = useCallback(() => setShowScript((prev) => !prev), []);
@@ -896,6 +946,9 @@ export function DemoProvider({ children }: { children: ReactNode }) {
     billingEvents,
     showLogs,
     showScript,
+    dayContentComplete,
+    syncStep,
+    prescriptionSent,
     setSelectedPatient,
     advanceDay,
     startDemo,
@@ -914,6 +967,9 @@ export function DemoProvider({ children }: { children: ReactNode }) {
     updateBilling,
     endDemo,
     resetDemo,
+    setDayContentComplete: setDayContentCompleteAction,
+    setSyncStep: setSyncStepAction,
+    sendPrescription: sendPrescriptionAction,
     toggleLogs,
     toggleScript,
   };

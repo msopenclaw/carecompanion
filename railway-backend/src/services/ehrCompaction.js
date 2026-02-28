@@ -402,6 +402,7 @@ Rules:
     const mergedTier2 = {
       ...(compacted.tier2 || {}),
       pipeline_log: existingTier2.pipeline_log,
+      pipeline_runs: existingTier2.pipeline_runs,
       first_call_prep: existingTier2.first_call_prep,
     };
     await db.update(patientMemory).set({

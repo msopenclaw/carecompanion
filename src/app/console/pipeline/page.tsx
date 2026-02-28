@@ -561,7 +561,7 @@ export default function PipelineTabPage() {
         <div className="bg-white rounded-xl shadow-sm border border-slate-200 p-6">
           <h2 className="font-semibold text-slate-900 mb-4">Agent Negotiation</h2>
           <p className="text-xs text-slate-500 mb-4">
-            Gemini 3.1 Pro (script generator) and Claude Sonnet 4.6 (judge) negotiate to produce the best call script.
+            Gemini 3 Flash (script generator) and Claude Sonnet 4.6 (judge) negotiate to produce the best call script.
           </p>
 
           <div className="space-y-6">
@@ -587,7 +587,7 @@ export default function PipelineTabPage() {
                         <div className="w-6 h-6 rounded-full bg-blue-100 flex items-center justify-center">
                           <svg className="w-3.5 h-3.5 text-blue-600" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7 M18.5 2.5a2.121 2.121 0 0 1 3 3L12 15l-4 1 1-4 9.5-9.5z" /></svg>
                         </div>
-                        <span className="text-xs font-semibold text-blue-700">Gemini 3.1 Pro (Generator)</span>
+                        <span className="text-xs font-semibold text-blue-700">Gemini 3 Flash (Generator)</span>
                         {genEvent?.durationMs != null && (
                           <span className="text-xs text-slate-400 ml-auto">{((genEvent.durationMs as number) / 1000).toFixed(1)}s</span>
                         )}
@@ -643,7 +643,7 @@ export default function PipelineTabPage() {
                             const score = judgeEvent.totalScore as number;
                             const max = (judgeEvent.maxScore as number) || 40;
                             const pct = score != null ? Math.round((score / max) * 100) : null;
-                            const passed = score != null && score >= 36;
+                            const passed = score != null && score >= 32;
                             const colorClass = passed ? "text-green-600" : score != null && score >= 28 ? "text-amber-600" : "text-red-600";
                             const bgClass = passed ? "bg-green-50 border-green-200" : score != null && score >= 28 ? "bg-amber-50 border-amber-200" : "bg-red-50 border-red-200";
                             return score != null ? (
@@ -651,7 +651,7 @@ export default function PipelineTabPage() {
                                 <span className={`text-2xl font-mono font-bold ${colorClass}`}>{score}</span>
                                 <div>
                                   <div className="text-xs text-slate-500">out of {max}{pct != null && <span className="ml-1 font-semibold">({pct}%)</span>}</div>
-                                  <div className="text-[10px] text-slate-400">threshold: 36/40 (90%)</div>
+                                  <div className="text-[10px] text-slate-400">threshold: 32/40 (80%)</div>
                                 </div>
                                 {passed && <span className="ml-auto text-xs font-bold text-green-700 bg-green-100 px-2 py-0.5 rounded">PASS</span>}
                                 {!passed && <span className="ml-auto text-xs font-bold text-red-700 bg-red-100 px-2 py-0.5 rounded">FAIL</span>}

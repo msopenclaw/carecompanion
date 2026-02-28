@@ -178,6 +178,35 @@ export default function PipelineTabPage() {
     }
   };
 
+  const deleteRuns = async (runIndex?: number) => {
+    if (!selectedPatientId) return;
+    try {
+      await fetch(`${RAILWAY_URL}/api/console/patients/${selectedPatientId}/pipeline-runs`, {
+        method: "DELETE",
+        headers: { ...headers, "Content-Type": "application/json" },
+        body: runIndex !== undefined ? JSON.stringify({ runIndex }) : "{}",
+      });
+      fetchPipeline();
+    } catch (e) {
+      console.error("Delete runs error:", e);
+    }
+  };
+
+  const cancelPipeline = async () => {
+    if (!selectedPatientId) return;
+    try {
+      await fetch(`${RAILWAY_URL}/api/console/patients/${selectedPatientId}/cancel-pipeline`, {
+        method: "POST",
+        headers: { ...headers, "Content-Type": "application/json" },
+      });
+      setRunningPipeline(false);
+      setAutoRefresh(false);
+      fetchPipeline();
+    } catch (e) {
+      console.error("Cancel pipeline error:", e);
+    }
+  };
+
   const toggleRun = (idx: number) => {
     setExpandedRuns(prev => {
       const next = new Set(prev);
@@ -284,6 +313,13 @@ export default function PipelineTabPage() {
           </span>
         </button>
 
+        {runningPipeline && (
+          <button onClick={cancelPipeline}
+            className="text-sm text-red-600 hover:text-red-800 px-3 py-2 rounded-lg border border-red-200 hover:bg-red-50 transition-colors font-medium">
+            Stop Run
+          </button>
+        )}
+
         {!runningPipeline && (
           <button onClick={fetchPipeline}
             className="text-sm text-blue-600 hover:text-blue-800 px-3 py-2 rounded-lg border border-blue-200 hover:bg-blue-50 transition-colors">
@@ -298,11 +334,21 @@ export default function PipelineTabPage() {
           </span>
         )}
 
-        {runs.length > 0 && (
-          <span className="text-xs text-slate-400 ml-auto">
-            {runs.length} run{runs.length !== 1 ? "s" : ""} total
-          </span>
-        )}
+        <span className="ml-auto flex items-center gap-3">
+          {runs.length > 0 && (
+            <>
+              <span className="text-xs text-slate-400">
+                {runs.length} run{runs.length !== 1 ? "s" : ""} total
+              </span>
+              {!runningPipeline && (
+                <button onClick={() => deleteRuns()}
+                  className="text-xs text-red-400 hover:text-red-600 px-2 py-1 rounded border border-red-200 hover:bg-red-50 transition-colors">
+                  Clear All
+                </button>
+              )}
+            </>
+          )}
+        </span>
       </div>
 
       {/* Live Status Line */}
@@ -327,7 +373,7 @@ export default function PipelineTabPage() {
             const eventCount = run.events.length;
 
             return (
-              <div key={idx} className={`bg-white rounded-xl shadow-sm border overflow-hidden transition-colors ${
+              <div key={idx} className={`relative bg-white rounded-xl shadow-sm border overflow-hidden transition-colors ${
                 isLatest && autoRefresh ? "border-violet-300 ring-1 ring-violet-100" : "border-slate-200"
               }`}>
                 {/* Run header — always visible */}
@@ -368,12 +414,28 @@ export default function PipelineTabPage() {
                         ? "bg-violet-100 text-violet-700"
                         : complete
                         ? "bg-green-100 text-green-700"
+                        : run.events?.some((e: PipelineEvent) => e.status === "cancelled")
+                        ? "bg-red-100 text-red-600"
                         : "bg-slate-100 text-slate-600"
                     }`}>
-                      {!complete && isLatest && autoRefresh ? "Running" : complete ? "Complete" : "Incomplete"}
+                      {!complete && isLatest && autoRefresh ? "Running"
+                        : run.events?.some((e: PipelineEvent) => e.status === "cancelled") ? "Cancelled"
+                        : complete ? "Complete" : "Incomplete"}
                     </span>
                   </div>
                 </button>
+                {/* Per-run delete */}
+                {!runningPipeline && (
+                  <button
+                    onClick={(e) => { e.stopPropagation(); deleteRuns(idx); }}
+                    className="absolute top-3 right-3 text-slate-300 hover:text-red-500 transition-colors p-1"
+                    title="Delete this run"
+                  >
+                    <svg className="w-4 h-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                      <path d="M6 18L18 6M6 6l12 12" />
+                    </svg>
+                  </button>
+                )}
 
                 {/* Expanded run events */}
                 {isExpanded && (

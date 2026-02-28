@@ -572,6 +572,69 @@ router.post("/patients/:id/run-pipeline", async (req, res) => {
   }
 });
 
+// POST /api/console/patients/:id/cancel-pipeline — cancel/clear a stuck pipeline run
+router.post("/patients/:id/cancel-pipeline", async (req, res) => {
+  try {
+    const userId = req.params.id;
+    const [mem] = await db.select().from(patientMemory).where(eq(patientMemory.userId, userId));
+    if (!mem) return res.status(404).json({ error: "No patient memory" });
+
+    const tier2 = mem.tier2 || {};
+    const runs = tier2.pipeline_runs || [];
+    if (runs.length > 0) {
+      const latestRun = runs[runs.length - 1];
+      const isComplete = latestRun.events?.some(e => e.step === "pipeline_complete");
+      if (!isComplete) {
+        // Add a cancelled event to end the run
+        latestRun.events = [...(latestRun.events || []), {
+          step: "pipeline_complete",
+          status: "cancelled",
+          timestamp: new Date().toISOString(),
+          detail: "Pipeline cancelled by admin",
+        }];
+        tier2.pipeline_runs = runs;
+        tier2.pipeline_log = latestRun.events;
+        await db.update(patientMemory).set({ tier2, updatedAt: new Date() })
+          .where(eq(patientMemory.userId, userId));
+      }
+    }
+    res.json({ success: true });
+  } catch (err) {
+    console.error("Console cancel-pipeline error:", err);
+    res.status(500).json({ error: "Failed to cancel pipeline" });
+  }
+});
+
+// DELETE /api/console/patients/:id/pipeline-runs — delete pipeline runs
+// Body: { runIndex: number } to delete one, or omit to delete all
+router.delete("/patients/:id/pipeline-runs", async (req, res) => {
+  try {
+    const userId = req.params.id;
+    const { runIndex } = req.body || {};
+    const [mem] = await db.select().from(patientMemory).where(eq(patientMemory.userId, userId));
+    if (!mem) return res.status(404).json({ error: "No patient memory" });
+
+    const tier2 = mem.tier2 || {};
+    const runs = tier2.pipeline_runs || [];
+
+    if (runIndex !== undefined && runIndex >= 0 && runIndex < runs.length) {
+      runs.splice(runIndex, 1);
+    } else {
+      runs.length = 0;
+    }
+
+    tier2.pipeline_runs = runs;
+    tier2.pipeline_log = runs.length > 0 ? runs[runs.length - 1].events || [] : [];
+    await db.update(patientMemory).set({ tier2, updatedAt: new Date() })
+      .where(eq(patientMemory.userId, userId));
+
+    res.json({ success: true, remaining: runs.length });
+  } catch (err) {
+    console.error("Console delete-pipeline-runs error:", err);
+    res.status(500).json({ error: "Failed to delete pipeline runs" });
+  }
+});
+
 // ---------------------------------------------------------------------------
 // Health Records — upload on behalf of patient + list
 // ---------------------------------------------------------------------------

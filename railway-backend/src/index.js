@@ -288,6 +288,11 @@ async function runStartupMigrations() {
       created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
     )`;
 
+    // Widen encrypted PII columns to fit encrypted values
+    await sql`ALTER TABLE user_profiles ALTER COLUMN phone TYPE VARCHAR(255)`;
+    await sql`ALTER TABLE user_profiles ALTER COLUMN first_name TYPE VARCHAR(255)`;
+    await sql`ALTER TABLE user_profiles ALTER COLUMN last_name TYPE VARCHAR(255)`;
+
     console.log("[MIGRATION] All tables migrated (including engagement pipeline)");
   } catch (err) {
     // IF NOT EXISTS not supported on older PG, enum value may already exist

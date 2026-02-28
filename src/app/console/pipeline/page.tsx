@@ -85,7 +85,7 @@ export default function PipelineTabPage() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [selectedPatientId, autoRefresh]);
 
-  // Initial load
+  // Initial load — also auto-start polling if a run is already in progress
   useEffect(() => {
     if (!selectedPatientId) { setPipeline(null); return; }
     setLoading(true);
@@ -93,10 +93,15 @@ export default function PipelineTabPage() {
       .then((r) => r.json())
       .then((data: PipelineData) => {
         setPipeline(data);
-        // Auto-expand the latest run
         const runs = data.pipelineRuns || [];
         if (runs.length > 0) {
           setExpandedRuns(new Set([runs.length - 1]));
+          // Auto-start polling if latest run is still in progress (triggered externally e.g. from iOS app)
+          const latestRun = runs[runs.length - 1];
+          if (latestRun && !isRunComplete(latestRun.events)) {
+            setAutoRefresh(true);
+            setRunningPipeline(true);
+          }
         }
       })
       .catch(console.error)
@@ -104,13 +109,40 @@ export default function PipelineTabPage() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [selectedPatientId]);
 
-  // Auto-refresh polling
+  // Active polling (2s) when a run is in progress
   useEffect(() => {
     if (autoRefresh) {
       intervalRef.current = setInterval(fetchPipeline, 2000);
       return () => { if (intervalRef.current) clearInterval(intervalRef.current); };
     }
   }, [autoRefresh, fetchPipeline]);
+
+  // Background polling (10s) to detect externally-triggered runs (e.g. from iOS "Call Me")
+  useEffect(() => {
+    if (autoRefresh || !selectedPatientId) return; // skip if already actively polling
+    const bgInterval = setInterval(() => {
+      fetch(`${RAILWAY_URL}/api/console/patients/${selectedPatientId}/pipeline`, { headers })
+        .then((r) => r.json())
+        .then((data: PipelineData) => {
+          const runs = data.pipelineRuns || [];
+          const latestRun = runs[runs.length - 1];
+          if (latestRun && !isRunComplete(latestRun.events)) {
+            // A run is in progress — switch to active polling
+            setPipeline(data);
+            setExpandedRuns(new Set([runs.length - 1]));
+            setAutoRefresh(true);
+            setRunningPipeline(true);
+          } else if (runs.length > (pipeline?.pipelineRuns?.length || 0)) {
+            // New completed run appeared — update display
+            setPipeline(data);
+            setExpandedRuns(new Set([runs.length - 1]));
+          }
+        })
+        .catch(() => {});
+    }, 10000);
+    return () => clearInterval(bgInterval);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [autoRefresh, selectedPatientId, pipeline?.pipelineRuns?.length]);
 
   // Auto-scroll when new events arrive during active run
   useEffect(() => {

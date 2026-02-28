@@ -119,36 +119,50 @@ router.get("/signed-url", async (req, res) => {
   }
 });
 
-// POST /api/voice/outbound-call — Initiate an outbound call to the patient
+// POST /api/voice/outbound-call — Trigger engagement pipeline → script gen → call
+// The pipeline runs: EHR compaction → dual-agent script gen → trigger gen → outbound call.
+// The call only happens AFTER the script passes the 90% judge threshold.
 router.post("/outbound-call", async (req, res) => {
   try {
-    const { initiateOutboundCall } = require("../services/outboundCall");
+    const { runOnboardingPipeline } = require("../services/onboardingPipeline");
+    const { patientMemory } = require("../db/schema");
     const userId = req.user.userId;
-    const result = await initiateOutboundCall(userId);
 
-    // Auto-trigger engagement pipeline if it hasn't been run yet
-    try {
-      const { runOnboardingPipeline } = require("../services/onboardingPipeline");
-      const { patientMemory } = require("../db/schema");
-      const { eq } = require("drizzle-orm");
-      const { db } = require("../db");
-      const [mem] = await db.select().from(patientMemory).where(eq(patientMemory.userId, userId));
-      const pipelineLog = mem?.tier2?.pipeline_log;
-      const hasRun = pipelineLog && pipelineLog.length > 0;
-      if (!hasRun) {
-        console.log(`[VOICE_API] Auto-triggering pipeline for ${userId}`);
-        runOnboardingPipeline(userId, { skipOutboundCall: true }).catch(err => {
-          console.error(`[VOICE_API] Pipeline auto-trigger failed:`, err.message);
-        });
-      }
-    } catch (pipeErr) {
-      console.error(`[VOICE_API] Pipeline check failed:`, pipeErr.message);
+    // Dedup: check if a pipeline is already running or recently completed
+    const [mem] = await db.select().from(patientMemory).where(eq(patientMemory.userId, userId));
+    const runs = mem?.tier2?.pipeline_runs || [];
+    const recentRun = runs.find(r => {
+      const started = new Date(r.startedAt).getTime();
+      return Date.now() - started < 10 * 60 * 1000;
+    });
+    const hasCompletedRun = runs.some(r =>
+      r.events?.some(e => e.step === "pipeline_complete")
+    );
+
+    if (recentRun) {
+      console.log(`[VOICE_API] Pipeline already running for ${userId}, skipping duplicate`);
+      return res.json({ success: true, status: "pipeline_already_running" });
     }
 
-    res.json(result);
+    if (hasCompletedRun) {
+      // Pipeline already ran — just trigger the outbound call directly
+      console.log(`[VOICE_API] Pipeline already completed for ${userId}, triggering call directly`);
+      const { initiateOutboundCall } = require("../services/outboundCall");
+      const callResult = await initiateOutboundCall(userId);
+      return res.json(callResult);
+    }
+
+    // No pipeline run yet — trigger the full pipeline (includes outbound call as final step)
+    console.log(`[VOICE_API] Triggering engagement pipeline for ${userId}`);
+    runOnboardingPipeline(userId).catch(err => {
+      console.error(`[VOICE_API] Pipeline failed:`, err.message);
+    });
+
+    // Respond immediately — pipeline runs in background, call happens at the end
+    res.json({ success: true, status: "pipeline_started" });
   } catch (err) {
     console.error("Outbound call error:", err);
-    res.status(500).json({ error: "Outbound call failed" });
+    res.status(500).json({ error: "Failed to start engagement pipeline" });
   }
 });
 

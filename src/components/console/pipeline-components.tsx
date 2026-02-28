@@ -49,6 +49,7 @@ export const STEP_LABELS: Record<string, string> = {
   first_call_prep: "First Call Preparation",
   script_generation: "Script Generation (Gemini)",
   judge_evaluation: "Script Judge (Claude Sonnet 4.6)",
+  judge_thinking: "Judge Reasoning (Extended Thinking)",
   script_accepted: "Script Accepted",
   revision_requested: "Revision Requested",
   fallback_used: "Fallback Script Used",
@@ -69,6 +70,7 @@ const STEP_ICON_KEYS: Record<string, string> = {
   first_call_prep: "phone",
   script_generation: "edit",
   judge_evaluation: "check-circle",
+  judge_thinking: "brain",
   script_accepted: "award",
   revision_requested: "rotate-ccw",
   fallback_used: "alert-triangle",
@@ -181,7 +183,9 @@ function has(val: unknown): val is string | number | boolean | object {
 }
 
 export function PipelineStep({ event, isLast, defaultExpanded = false }: { event: PipelineEvent; isLast: boolean; defaultExpanded?: boolean }) {
-  const [expanded, setExpanded] = useState(defaultExpanded);
+  // Auto-expand running events and thinking progress
+  const autoExpand = defaultExpanded || event.status === "running" || event.step === "judge_thinking";
+  const [expanded, setExpanded] = useState(autoExpand);
   const label = STEP_LABELS[event.step] || event.step;
   const ts = new Date(event.timestamp);
   const timeStr = ts.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit", second: "2-digit" });
@@ -192,7 +196,8 @@ export function PipelineStep({ event, isLast, defaultExpanded = false }: { event
     event.hookAnchor || event.reason || hasDimensions || event.geminiThinking ||
     event.claudeThinking || event.insights || event.careGaps || event.tier1Summary ||
     event.healthRecordsCount !== undefined || event.adherenceRate !== undefined ||
-    event.fullDimensionFeedback || event.finalScript || event.compactedContextPreview
+    event.fullDimensionFeedback || event.finalScript || event.compactedContextPreview ||
+    event.thinkingPreview || event.totalThinkingChars
   );
 
   return (
@@ -253,6 +258,15 @@ export function PipelineStep({ event, isLast, defaultExpanded = false }: { event
             {/* Basic fields */}
             {has(event.detail) && <div className="text-slate-600">{event.detail as string}</div>}
             {has(event.error) && <div className="text-red-600 font-medium">{event.error as string}</div>}
+            {has(event.thinkingPreview) && (
+              <div className="bg-indigo-50 border border-indigo-100 rounded p-2">
+                <div className="text-[10px] font-semibold text-indigo-600 uppercase tracking-wider mb-1">Judge Reasoning (live)</div>
+                <div className="text-slate-600 italic whitespace-pre-wrap font-mono text-[11px]">{event.thinkingPreview as string}</div>
+              </div>
+            )}
+            {has(event.totalThinkingChars) && (
+              <div className="text-slate-500">Total reasoning: {Math.round((event.totalThinkingChars as number) / 1000)}k characters</div>
+            )}
             {has(event.patientName) && <div><span className="font-medium text-slate-700">Patient:</span> {event.patientName as string}</div>}
             {has(event.currentFocus) && <div><span className="font-medium text-slate-700">Focus:</span> {event.currentFocus as string}</div>}
             {has(event.hookAnchor) && <div><span className="font-medium text-slate-700">Hook Anchor:</span> <span className="bg-violet-50 text-violet-700 px-1.5 py-0.5 rounded">{event.hookAnchor as string}</span></div>}

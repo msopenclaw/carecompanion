@@ -30,14 +30,32 @@ async function prepareFirstCall(userId) {
   if (!GEMINI_API_KEY) throw new Error("No GEMINI_API_KEY");
 
   const pipelineLog = [];
-  const logEvent = (step, status, detail) => {
+  const logEvent = async (step, status, detail) => {
     const event = { step, status, timestamp: new Date().toISOString(), ...detail };
     pipelineLog.push(event);
     console.log(`[FIRST_CALL_PREP] [${step}] ${status}: ${JSON.stringify(detail)}`);
+    // Immediately persist to DB so the console UI can poll and display progress
+    try {
+      const [mem] = await db.select().from(patientMemory).where(eq(patientMemory.userId, userId));
+      if (mem) {
+        const tier2 = mem.tier2 || {};
+        const runs = tier2.pipeline_runs || [];
+        if (runs.length > 0) {
+          const latestRun = runs[runs.length - 1];
+          latestRun.events = [...(latestRun.events || []), event];
+          tier2.pipeline_runs = runs;
+          tier2.pipeline_log = latestRun.events;
+          await db.update(patientMemory).set({ tier2, updatedAt: new Date() })
+            .where(eq(patientMemory.userId, userId));
+        }
+      }
+    } catch (e) {
+      console.error("[FIRST_CALL_PREP] Failed to persist event:", e.message);
+    }
   };
 
   // ── Load patient context ──
-  logEvent("load_context", "running", {
+  await logEvent("load_context", "running", {
     detail: "Loading patient data and compacted memory",
     maxIterations: MAX_ITERATIONS,
     minScore: `${MIN_SCORE}/40 (90%)`,
@@ -64,7 +82,7 @@ async function prepareFirstCall(userId) {
     currentFocus = `${profile.glp1Medication} therapy management`;
   }
 
-  logEvent("load_context", "completed", {
+  await logEvent("load_context", "completed", {
     patientName: firstName,
     hasCompactedMemory: !!compactedCtx,
     hookAnchor: hookAnchor || "default",
@@ -88,14 +106,14 @@ async function prepareFirstCall(userId) {
   let claude = null;
   if (hasJudge) {
     claude = new Anthropic({ apiKey: ANTHROPIC_API_KEY });
-    logEvent("agents_init", "completed", {
+    await logEvent("agents_init", "completed", {
       generator: "gemini-3.1-pro-preview",
       judge: "claude-sonnet-4-6",
       mode: "dual-agent adversarial",
       detail: "Judge is fully independent — uses the Hook Opener Rubric (8 dimensions, 0-5 each, /40). Generator never sees rubric scoring logic. Judge is instructed to be strict and find faults.",
     });
   } else {
-    logEvent("agents_init", "completed", {
+    await logEvent("agents_init", "completed", {
       generator: "gemini-3.1-pro-preview",
       judge: null,
       mode: "single-pass (no ANTHROPIC_API_KEY)",
@@ -111,7 +129,7 @@ async function prepareFirstCall(userId) {
     iterations = i + 1;
 
     // ── Step 1: Gemini generates the script ──
-    logEvent("script_generation", "running", {
+    await logEvent("script_generation", "running", {
       iteration: iterations,
       isRevision: i > 0,
       previousScore: judgeFeedback ? `${judgeFeedback.total_score}/40` : null,
@@ -142,7 +160,7 @@ async function prepareFirstCall(userId) {
     try {
       prep = JSON.parse(genResult.response.text());
     } catch {
-      logEvent("script_generation", "error", {
+      await logEvent("script_generation", "error", {
         iteration: iterations,
         error: "Gemini JSON parse failed",
         geminiThinking,
@@ -151,7 +169,7 @@ async function prepareFirstCall(userId) {
       continue;
     }
 
-    logEvent("script_generation", "completed", {
+    await logEvent("script_generation", "completed", {
       iteration: iterations,
       hookAnchor: prep.hook_anchor,
       openingScript: prep.opening_script,
@@ -166,7 +184,7 @@ async function prepareFirstCall(userId) {
     if (!hasJudge) {
       bestPrep = prep;
       bestScore = prep.rubric_score?.total || 30;
-      logEvent("script_accepted", "completed", {
+      await logEvent("script_accepted", "completed", {
         iteration: iterations,
         score: bestScore,
         maxScore: 40,
@@ -176,7 +194,7 @@ async function prepareFirstCall(userId) {
     }
 
     // ── Step 2: Claude judges the script ──
-    logEvent("judge_evaluation", "running", {
+    await logEvent("judge_evaluation", "running", {
       iteration: iterations,
       model: "claude-sonnet-4-6",
       detail: "Independent evaluation against Hook Opener Rubric — 8 dimensions scored 0-5, total /40. Judge has NOT seen the generator's instructions and is explicitly told to find faults.",
@@ -193,12 +211,12 @@ async function prepareFirstCall(userId) {
     });
 
     const judgeStart = Date.now();
-    const judgeResult = await judgeScript(claude, prep, patientContext);
+    const judgeResult = await judgeScript(claude, prep, patientContext, logEvent);
     const judgeDuration = Date.now() - judgeStart;
 
     const scorePercentage = Math.round((judgeResult.total_score / 40) * 100);
 
-    logEvent("judge_evaluation", "completed", {
+    await logEvent("judge_evaluation", "completed", {
       iteration: iterations,
       totalScore: judgeResult.total_score,
       maxScore: 40,
@@ -222,7 +240,7 @@ async function prepareFirstCall(userId) {
     }
 
     if (judgeResult.total_score >= MIN_SCORE) {
-      logEvent("script_accepted", "completed", {
+      await logEvent("script_accepted", "completed", {
         iteration: iterations,
         score: judgeResult.total_score,
         maxScore: 40,
@@ -242,7 +260,7 @@ async function prepareFirstCall(userId) {
       ?.filter(d => d.score < 4)
       ?.map(d => `${d.name}: ${d.score}/5 — ${d.feedback}`) || [];
 
-    logEvent("revision_requested", "completed", {
+    await logEvent("revision_requested", "completed", {
       iteration: iterations,
       score: judgeResult.total_score,
       maxScore: 40,
@@ -270,7 +288,7 @@ async function prepareFirstCall(userId) {
       talking_points: ["Current medication regimen", "Side effects management", "Daily routine integration"],
       follow_up_question: "What's been the biggest challenge — remembering to take it, dealing with side effects, or fitting it into your routine?",
     };
-    logEvent("fallback_used", "completed", {
+    await logEvent("fallback_used", "completed", {
       reason: `All ${MAX_ITERATIONS} iterations failed to meet threshold — using fallback script`,
       bestScoreAchieved: `${bestScore}/40`,
     });
@@ -285,31 +303,20 @@ async function prepareFirstCall(userId) {
 
   // Note: pipeline_complete is logged by the wrapper (onboardingPipeline.js), not here
 
-  // Save to patient_memory — MERGE pipeline logs, don't overwrite
+  // Save first_call_prep result to patient_memory
+  // Events are already persisted in real-time by logEvent — only save the prep result here
   const [currentMem] = await db.select().from(patientMemory).where(eq(patientMemory.userId, userId));
   if (currentMem) {
     const tier2 = currentMem.tier2 || {};
     tier2.first_call_prep = bestPrep;
-    const existingLog = tier2.pipeline_log || [];
-    tier2.pipeline_log = [...existingLog, ...pipelineLog];
-
-    // Also append to the latest pipeline_runs entry if it exists
-    const runs = tier2.pipeline_runs || [];
-    if (runs.length > 0) {
-      const latestRun = runs[runs.length - 1];
-      latestRun.events = [...(latestRun.events || []), ...pipelineLog];
-      tier2.pipeline_runs = runs;
-    }
-
     await db.update(patientMemory).set({
       tier2,
       updatedAt: new Date(),
     }).where(eq(patientMemory.userId, userId));
   } else {
-    const run = { startedAt: new Date().toISOString(), events: pipelineLog };
     await db.insert(patientMemory).values({
       userId,
-      tier2: { first_call_prep: bestPrep, pipeline_log: pipelineLog, pipeline_runs: [run] },
+      tier2: { first_call_prep: bestPrep },
     });
   }
 
@@ -450,7 +457,7 @@ Return JSON:
 // - Its thinking budget is large so its reasoning is thorough and visible
 // ---------------------------------------------------------------------------
 
-async function judgeScript(claude, prep, patientContext) {
+async function judgeScript(claude, prep, patientContext, logEvent) {
   const judgePrompt = `You are an independent quality assurance judge for health coaching call scripts. You have deep expertise in patient engagement, motivational interviewing, behavioral psychology, and the Hook Model.
 
 Your job is to rigorously evaluate a script and FIND ITS WEAKNESSES. You are NOT trying to help it pass. You are trying to ensure only genuinely excellent scripts get through. Be skeptical. Be thorough. Think like a discerning patient who has heard too many generic health pitches.
@@ -574,16 +581,54 @@ Return JSON:
 }`;
 
   // Use streaming — required for large thinking budgets (>10 min timeout)
+  // Also lets us emit progress events so the console UI shows real-time status
   const stream = claude.messages.stream({
     model: "claude-sonnet-4-6",
     max_tokens: 128000,
     thinking: { type: "enabled", budget_tokens: 100000 },
     messages: [{ role: "user", content: judgePrompt }],
   });
+
+  let thinkingTokens = 0;
+  let lastProgressLog = 0;
+  let claudeThinking = "";
+  let isThinking = true;
+
+  stream.on("contentBlockStart", () => {});
+  stream.on("contentBlockDelta", (event) => {
+    if (event.delta?.type === "thinking_delta") {
+      claudeThinking += event.delta.thinking || "";
+      thinkingTokens += (event.delta.thinking || "").length;
+      // Log progress every ~2000 chars of thinking
+      const now = Date.now();
+      if (now - lastProgressLog > 5000 && thinkingTokens > 500) {
+        lastProgressLog = now;
+        // Extract a brief preview of what the judge is considering
+        const recentThinking = claudeThinking.slice(-300).trim();
+        const preview = recentThinking.length > 200
+          ? "..." + recentThinking.slice(-200)
+          : recentThinking;
+        if (logEvent) {
+          logEvent("judge_thinking", "running", {
+            detail: `Judge is analyzing the script (${Math.round(thinkingTokens / 100)}k chars of reasoning so far)`,
+            thinkingPreview: preview,
+          });
+        }
+      }
+    } else if (event.delta?.type === "text_delta" && isThinking) {
+      isThinking = false;
+      if (logEvent) {
+        logEvent("judge_thinking", "completed", {
+          detail: `Judge finished reasoning (${Math.round(thinkingTokens / 100)}k chars), now writing evaluation`,
+          totalThinkingChars: thinkingTokens,
+        });
+      }
+    }
+  });
+
   const response = await stream.finalMessage();
 
-  // Capture Claude's extended thinking
-  let claudeThinking = null;
+  // Capture Claude's extended thinking from final message if stream capture missed it
   try {
     const thinkingBlocks = response.content.filter(b => b.type === "thinking");
     if (thinkingBlocks.length > 0) {

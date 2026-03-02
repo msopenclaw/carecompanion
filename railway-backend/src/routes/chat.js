@@ -9,8 +9,27 @@ const {
 const { getUserContext } = require("../services/userContext");
 const { sendPush } = require("../services/pushService");
 const { syncScheduledActions } = require("../services/preferenceScheduler");
+const { runDailyHookForUser } = require("../services/dailyHookRunner");
+const { dailyTips } = require("../db/schema");
 
 const router = express.Router();
+
+// Strip markdown formatting for clean text-message feel
+function stripMarkdown(text) {
+  if (!text) return text;
+  return text
+    .replace(/\*\*(.+?)\*\*/g, "$1")   // **bold** → bold
+    .replace(/\*(.+?)\*/g, "$1")       // *italic* → italic
+    .replace(/__(.+?)__/g, "$1")       // __bold__ → bold
+    .replace(/_(.+?)_/g, "$1")         // _italic_ → italic
+    .replace(/~~(.+?)~~/g, "$1")       // ~~strike~~ → strike
+    .replace(/^#{1,6}\s+/gm, "")       // ### headers → plain text
+    .replace(/^\s*[-*+]\s+/gm, "- ")   // bullet lists → dash
+    .replace(/^\s*\d+\.\s+/gm, "")     // numbered lists → plain
+    .replace(/`([^`]+)`/g, "$1")       // `code` → code
+    .replace(/\n{3,}/g, "\n\n")        // collapse excess newlines
+    .trim();
+}
 
 // ---------------------------------------------------------------------------
 // Gemini Function Declarations
@@ -211,6 +230,17 @@ const toolDeclarations = [
         category: { type: "STRING", description: "Notification category for action buttons: MEDICATION_REMINDER, HYDRATION_NUDGE, or CALL_REQUEST. Omit for plain notification." },
       },
       required: ["title", "body"],
+    },
+  },
+  {
+    name: "trigger_hook_refresh",
+    description: "Trigger an immediate refresh of the patient's daily tip and care script when they share significant new information (new side effects, medication changes, mood shifts, life events) or ask you to 'update my tip', 'refresh', 'change the tip', 'update my plan', 'refresh my coaching', 'call me about this', or 'create a new hook'. This clears the cached daily tip and regenerates their personalized coaching script.",
+    parameters: {
+      type: "OBJECT",
+      properties: {
+        reason: { type: "STRING", description: "Brief reason for the refresh (e.g., 'patient reported new side effect', 'patient requested updated coaching')" },
+      },
+      required: ["reason"],
     },
   },
 ];
@@ -439,14 +469,14 @@ async function executeTool(name, args, userId, ctx) {
       console.log(`[Chat] send_push: title="${args.title}", body="${args.body}", category=${args.category || "none"}, delay=${delaySec}s, userId=${userId}`);
 
       if (delaySec === 0) {
-        const result = await sendPush(userId, pushPayload);
+        const result = await sendPush(userId, pushPayload, { bypass: true });
         console.log(`[Chat] send_push immediate result:`, JSON.stringify(result));
         return { success: result.sent > 0, message: `Push sent (${result.sent} device${result.sent !== 1 ? "s" : ""})` };
       } else {
         console.log(`[Chat] send_push: scheduling delayed push in ${delaySec}s`);
         setTimeout(async () => {
           try {
-            const result = await sendPush(userId, pushPayload);
+            const result = await sendPush(userId, pushPayload, { bypass: true });
             console.log(`[Chat] Delayed push fired after ${delaySec}s:`, JSON.stringify(result));
           } catch (err) {
             console.error(`[Chat] Delayed push FAILED after ${delaySec}s:`, err.message, err.stack);
@@ -598,6 +628,22 @@ async function executeTool(name, args, userId, ctx) {
         .set({ isActive: false })
         .where(eq(scheduledActions.id, match.id));
       return { success: true, message: `Removed reminder: ${match.label || match.actionType}` };
+    }
+
+    case "trigger_hook_refresh": {
+      console.log(`[Chat] trigger_hook_refresh: reason="${args.reason}", userId=${userId}`);
+      // Clear cached daily tip so next home screen fetch generates a fresh one
+      const today = new Date().toISOString().split("T")[0];
+      await db.delete(dailyTips).where(and(
+        eq(dailyTips.userId, userId),
+        eq(dailyTips.tipDate, today),
+      ));
+      console.log(`[Chat] Cleared cached daily tip for ${userId}`);
+      // Run hook regeneration in background (don't block chat response)
+      runDailyHookForUser(userId, "on_demand").catch(err =>
+        console.error("[Chat] Hook refresh failed:", err.message)
+      );
+      return { success: true, message: "Tip refreshed and care script updating — pull down to refresh your home screen" };
     }
 
     default:
@@ -926,7 +972,19 @@ GUIDELINES:
 - Address the patient by first name (${patientName}) naturally, not every message
 - When you take an action with a tool, confirm what you did briefly
 - Never diagnose or prescribe NEW medications — but DO record medications the patient tells you they already take using add_medication
-- For medical advice beyond your scope, recommend they contact their provider`;
+- For medical advice beyond your scope, recommend they contact their provider
+
+TEXT MESSAGE STYLE:
+- Write like a real person texting — casual, warm, conversational
+- NEVER use markdown formatting: no **bold**, no *italic*, no bullet lists, no headers
+- Use plain text only — periods, commas, exclamation marks, question marks, and dashes
+- Instead of bullet lists, use natural sentences or separate short messages
+- Keep it human — contractions (you're, it's, don't), fragments are fine
+
+HOOK & TIP REFRESH:
+- If the patient shares significant new information (new side effects, medication changes, mood shifts, major life events) or explicitly asks you to "update my plan", "refresh my tip", "change the tip", "refresh my coaching", "call me about this", or "create a new hook", use trigger_hook_refresh
+- This clears their cached daily tip (so the home screen shows a fresh one) AND regenerates their care script
+- After triggering, tell the patient to pull down to refresh their home screen to see the new tip`;
 }
 
 // ---------------------------------------------------------------------------
@@ -1090,6 +1148,9 @@ router.post("/", async (req, res) => {
         res.write(`event: notification\ndata: ${JSON.stringify(notif)}\n\n`);
       }
     }
+
+    // Strip markdown artifacts for a clean text-message feel
+    finalText = stripMarkdown(finalText);
 
     if (finalText) {
       const chunkSize = 20;

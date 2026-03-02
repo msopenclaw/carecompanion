@@ -1,8 +1,10 @@
 const http2 = require("http2");
 const crypto = require("crypto");
-const { eq, and } = require("drizzle-orm");
+const { eq, and, gte } = require("drizzle-orm");
 const { db } = require("../db");
-const { pushTokens } = require("../db/schema");
+const { pushTokens, messages } = require("../db/schema");
+
+const DAILY_PUSH_CAP = 10; // max system-generated pushes per user per day
 
 // Try both environments — sandbox first, then production as fallback
 const APNS_SANDBOX = "api.sandbox.push.apple.com";
@@ -46,11 +48,28 @@ function getApnsJwt() {
  * Send push notification to a user's devices
  * @param {string} userId
  * @param {{ title: string, body: string, data?: object }} payload
+ * @param {{ bypass?: boolean }} opts — bypass=true skips daily cap (for user-requested pushes)
  */
-async function sendPush(userId, { title, body, data }) {
+async function sendPush(userId, { title, body, data }, opts = {}) {
   console.log(`[Push] ── sendPush called ──`);
-  console.log(`[Push] userId: ${userId}`);
+  console.log(`[Push] userId: ${userId}, bypass: ${!!opts.bypass}`);
   console.log(`[Push] title: "${title}", body: "${body}"`);
+
+  // Daily push cap — skip check for user-requested notifications (bypass=true)
+  if (!opts.bypass) {
+    const todayStart = new Date();
+    todayStart.setUTCHours(0, 0, 0, 0);
+    const todayMessages = await db.select().from(messages)
+      .where(and(
+        eq(messages.userId, userId),
+        eq(messages.sender, "ai"),
+        gte(messages.createdAt, todayStart),
+      ));
+    if (todayMessages.length >= DAILY_PUSH_CAP) {
+      console.log(`[Push] SKIPPED — daily cap reached (${todayMessages.length}/${DAILY_PUSH_CAP} messages today)`);
+      return { sent: 0, skipped: true, reason: "daily_cap" };
+    }
+  }
 
   const jwt = getApnsJwt();
   if (!jwt) {

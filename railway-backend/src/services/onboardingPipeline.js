@@ -4,7 +4,7 @@ const { generateOnboardingTriggers } = require("./triggerEngine");
 const { initiateOutboundCall } = require("./outboundCall");
 const { eq } = require("drizzle-orm");
 const { db } = require("../db");
-const { userProfiles, messages, patientMemory } = require("../db/schema");
+const { userProfiles, messages, patientMemory, scheduledActions } = require("../db/schema");
 const { decrypt } = require("./encryption");
 const { sendPush } = require("./pushService");
 const { emitPipelineEvent } = require("./pipelineEmitter");
@@ -48,6 +48,14 @@ async function runOnboardingPipeline(userId, options = {}) {
 
         await db.update(patientMemory).set({ tier2, updatedAt: new Date() })
           .where(eq(patientMemory.userId, userId));
+      } else {
+        // No patient_memory row yet (e.g. records were deleted) — create one so
+        // the pipeline-status endpoint returns "running" instead of "none"
+        const tier2 = {
+          pipeline_runs: [{ startedAt: runId, events: [event] }],
+          pipeline_log: [event],
+        };
+        await db.insert(patientMemory).values({ userId, tier2 });
       }
     } catch (e) {
       // Don't fail pipeline for logging errors
@@ -119,6 +127,35 @@ async function runOnboardingPipeline(userId, options = {}) {
     console.error("[PIPELINE] Trigger generation failed:", err);
     result.steps.triggers = { success: false, error: err.message };
     await appendPipelineEvent("trigger_generation", "error", { error: err.message });
+  }
+
+  // Step 3b: Seed daily hook regeneration actions (6am and 5pm)
+  try {
+    const [hookProfile] = await db.select().from(userProfiles).where(eq(userProfiles.userId, userId));
+    const patientTz = hookProfile?.timezone || "America/New_York";
+    const hookActions = [
+      { actionType: "hook_regeneration", scheduledTime: "06:00", label: "scheduled_6am", recurrence: "daily" },
+      { actionType: "hook_regeneration", scheduledTime: "17:00", label: "scheduled_5pm", recurrence: "daily" },
+    ];
+    for (const ha of hookActions) {
+      await db.insert(scheduledActions).values({
+        userId,
+        actionType: ha.actionType,
+        scheduledTime: ha.scheduledTime,
+        recurrence: ha.recurrence,
+        label: ha.label,
+        timezone: patientTz,
+        isActive: true,
+      });
+    }
+    await appendPipelineEvent("hook_schedule_seeded", "completed", {
+      detail: "Created daily hook regeneration actions at 6am and 5pm",
+      times: ["06:00", "17:00"],
+      timezone: patientTz,
+    });
+  } catch (err) {
+    console.error("[PIPELINE] Hook schedule seeding failed:", err.message);
+    await appendPipelineEvent("hook_schedule_seeded", "error", { error: err.message });
   }
 
   // Step 4: Patient engagement — call or in-app nudge

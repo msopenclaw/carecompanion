@@ -103,21 +103,31 @@ async function initiateOutboundCall(userId, prepOverride) {
     console.error("[OUTBOUND_CALL] Failed to get compacted context:", e.message);
   }
 
+  // Truncate helper — ElevenLabs dynamic_variables have size limits
+  const trunc = (s, max = 1500) => {
+    const str = String(s || "");
+    return str.length > max ? str.slice(0, max) + "..." : str;
+  };
+
   const dynamicVariables = {
     patient_name: firstName,
     coordinator_name: coordinatorName,
     opening_script: prep?.opening_script || fallbackOpening,
     hook_anchor: prep?.hook_anchor || "medication management",
-    talking_points: prep?.talking_points?.join("; ") || "medication adherence, side effects, daily routine",
+    talking_points: trunc(prep?.talking_points?.join("; ") || "medication adherence, side effects, daily routine"),
     follow_up_question: prep?.follow_up_question || "What's been the biggest challenge so far — remembering to take it, dealing with side effects, or fitting it into your routine?",
-    conversation_guide: conversationGuide,
-    hook_options: hookOptions,
-    anticipated_responses: anticipatedResponses,
-    notes_for_this_call: prep?.notes_for_next_call || "",
-    patient_context: patientContext,
-    care_gaps: mem?.rawRecords?.care_gaps?.map(g => `[${g.urgency}] ${g.description}`).join("; ") || "",
-    top_insights: mem?.rawRecords?.top_3_insights?.join("; ") || "",
+    conversation_guide: trunc(conversationGuide, 2000),
+    hook_options: trunc(hookOptions, 1000),
+    anticipated_responses: trunc(anticipatedResponses, 1000),
+    notes_for_this_call: trunc(prep?.notes_for_next_call || ""),
+    patient_context: trunc(patientContext, 2000),
+    care_gaps: trunc(mem?.rawRecords?.care_gaps?.map(g => `[${g.urgency}] ${g.description}`).join("; ") || ""),
+    top_insights: trunc(mem?.rawRecords?.top_3_insights?.join("; ") || ""),
   };
+
+  // Log payload size for debugging
+  const payloadSize = JSON.stringify(dynamicVariables).length;
+  console.log(`[OUTBOUND_CALL] Dynamic variables payload size: ${payloadSize} chars`);
 
   // Call ElevenLabs outbound API
   const phoneNumberId = process.env.ELEVENLABS_PHONE_NUMBER_ID;
@@ -126,34 +136,36 @@ async function initiateOutboundCall(userId, prepOverride) {
     return { success: false, error: "no_phone_number_id" };
   }
 
+  const requestBody = {
+    agent_id: agentId,
+    agent_phone_number_id: phoneNumberId,
+    to_number: phone,
+    conversation_initiation_client_data: {
+      dynamic_variables: dynamicVariables,
+    },
+  };
+
+  const bodyJson = JSON.stringify(requestBody);
+  console.log(`[OUTBOUND_CALL] Request body size: ${bodyJson.length} chars, agent_id: ${agentId}`);
+
   const response = await fetch("https://api.elevenlabs.io/v1/convai/twilio/outbound-call", {
     method: "POST",
     headers: {
       "xi-api-key": ELEVENLABS_API_KEY,
       "Content-Type": "application/json",
     },
-    body: JSON.stringify({
-      agent_id: agentId,
-      agent_phone_number_id: phoneNumberId,
-      to_number: phone,
-      conversation_initiation_client_data: {
-        dynamic_variables: dynamicVariables,
-        conversation_config_override: {
-          agent: {
-            first_message: dynamicVariables.opening_script,
-          },
-        },
-      },
-    }),
+    body: bodyJson,
   });
 
+  const responseText = await response.text();
+  console.log(`[OUTBOUND_CALL] ElevenLabs response: ${response.status} ${responseText.slice(0, 500)}`);
+
   if (!response.ok) {
-    const errorText = await response.text();
-    console.error(`[OUTBOUND_CALL] ElevenLabs API error: ${response.status} ${errorText}`);
+    console.error(`[OUTBOUND_CALL] ElevenLabs API error: ${response.status} ${responseText}`);
     return { success: false, error: `api_error_${response.status}` };
   }
 
-  const callData = await response.json();
+  const callData = JSON.parse(responseText);
 
   // Create voice session record
   const [session] = await db.insert(voiceSessions).values({

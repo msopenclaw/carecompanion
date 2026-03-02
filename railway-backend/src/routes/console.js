@@ -9,7 +9,7 @@ const {
   users, userProfiles, messages, aiActions, voiceSessions,
   escalations, vitals, medications, medicationLogs, engagementConfig,
   userCoordinator, careCoordinators, userPreferences, patientMemory,
-  healthRecords,
+  healthRecords, scheduledActions, triggers,
 } = require("../db/schema");
 const { decrypt, decryptJson } = require("../services/encryption");
 const { sendPush } = require("../services/pushService");
@@ -466,7 +466,7 @@ router.post("/push", async (req, res) => {
       title,
       body,
       data: { route: "messages", ...(category ? { category } : {}) },
-    });
+    }, { bypass: true });
 
     // Log as AI action
     await db.insert(aiActions).values({
@@ -509,7 +509,7 @@ router.post("/call-request", async (req, res) => {
       title: coordinatorName,
       body: reason || "Your care coordinator would like to speak with you. Tap to start a call.",
       data: { route: "call", category: "call_request" },
-    });
+    }, { bypass: true });
 
     // Log
     await db.insert(aiActions).values({
@@ -824,6 +824,73 @@ router.post("/patients/:id/health-records/upload", upload.single("file"), async 
   } catch (err) {
     console.error("Console health-records upload error:", err);
     res.status(500).json({ error: "Upload failed" });
+  }
+});
+
+// ---------------------------------------------------------------------------
+// GET /api/console/heartbeat/:userId — All scheduled actions + pending triggers
+// ---------------------------------------------------------------------------
+
+router.get("/heartbeat/:userId", async (req, res) => {
+  try {
+    const { userId } = req.params;
+
+    // All scheduled actions for this patient
+    const actions = await db.select().from(scheduledActions)
+      .where(eq(scheduledActions.userId, userId))
+      .orderBy(scheduledActions.scheduledTime);
+
+    // Pending/delivering triggers
+    const pendingTriggers = await db.select().from(triggers)
+      .where(and(
+        eq(triggers.userId, userId),
+        inArray(triggers.status, ["pending", "delivering"]),
+      ))
+      .orderBy(triggers.scheduledFor);
+
+    // Recent delivered triggers (last 48h)
+    const since48h = new Date(Date.now() - 48 * 60 * 60 * 1000);
+    const recentTriggers = await db.select().from(triggers)
+      .where(and(
+        eq(triggers.userId, userId),
+        eq(triggers.status, "delivered"),
+        gte(triggers.createdAt, since48h),
+      ))
+      .orderBy(desc(triggers.createdAt))
+      .limit(20);
+
+    // Pipeline run history
+    const [mem] = await db.select().from(patientMemory)
+      .where(eq(patientMemory.userId, userId));
+    const pipelineRuns = (mem?.tier2?.pipeline_runs || []).map(r => ({
+      startedAt: r.startedAt,
+      runType: r.runType || "onboarding",
+      eventCount: (r.events || []).length,
+      lastStep: r.events?.[r.events.length - 1]?.step || null,
+      lastStatus: r.events?.[r.events.length - 1]?.status || null,
+      isComplete: (r.events || []).some(e => e.step === "pipeline_complete"),
+      isInterrupted: (r.events || []).some(e => e.step === "pipeline_interrupted"),
+    }));
+
+    // Hook version history
+    const hookVersions = (mem?.tier2?.hook_versions || []).slice(-10);
+
+    res.json({
+      scheduledActions: actions,
+      pendingTriggers,
+      recentTriggers,
+      pipelineRuns,
+      hookVersions,
+      currentScript: mem?.tier2?.first_call_prep ? {
+        score: mem.tier2.first_call_prep.judge_score,
+        preparedAt: mem.tier2.first_call_prep.prepared_at,
+        iterations: mem.tier2.first_call_prep.iterations,
+        openingPreview: mem.tier2.first_call_prep.opening_script?.substring(0, 150),
+      } : null,
+    });
+  } catch (err) {
+    console.error("Heartbeat error:", err);
+    res.status(500).json({ error: "Failed to fetch heartbeat data" });
   }
 });
 

@@ -123,6 +123,83 @@ async function prepareFirstCall(userId) {
     });
   }
 
+  // Run the dual-agent loop
+  const { bestPrep, bestScore, iterations } = await runDualAgentLoop({
+    userId,
+    gemini,
+    claude,
+    hasJudge,
+    patientContext,
+    logEvent,
+    firstName,
+  });
+
+  // Store result
+  bestPrep.prepared_at = new Date().toISOString();
+  bestPrep.judge_score = bestScore;
+  bestPrep.judge_score_max = 40;
+  bestPrep.judge_score_percentage = Math.round((bestScore / 40) * 100);
+  bestPrep.iterations = iterations;
+
+  // Note: pipeline_complete is logged by the wrapper (onboardingPipeline.js), not here
+
+  // Save first_call_prep result to patient_memory
+  // Events are already persisted in real-time by logEvent — only save the prep result here
+  const [currentMem] = await db.select().from(patientMemory).where(eq(patientMemory.userId, userId));
+  if (currentMem) {
+    const tier2 = currentMem.tier2 || {};
+    tier2.first_call_prep = bestPrep;
+    await db.update(patientMemory).set({
+      tier2,
+      updatedAt: new Date(),
+    }).where(eq(patientMemory.userId, userId));
+  } else {
+    await db.insert(patientMemory).values({
+      userId,
+      tier2: { first_call_prep: bestPrep },
+    });
+  }
+
+  console.log(`[FIRST_CALL_PREP] Final for ${userId}: score=${bestScore}/40, iterations=${iterations}`);
+  return bestPrep;
+}
+
+// ---------------------------------------------------------------------------
+// Build patient context string (shared between generator and judge)
+// ---------------------------------------------------------------------------
+
+function buildPatientContext(firstName, compactedCtx, hookAnchor, currentFocus, insights, careGaps) {
+  return `Patient: ${firstName}
+${compactedCtx || "No detailed health records available yet."}
+
+Hook Anchor (most interesting detail): ${hookAnchor || "Their current medication regimen and adherence patterns"}
+Current Focus: ${currentFocus}
+Top Insights: ${insights.length > 0 ? insights.map((ins, i) => `${i + 1}. ${ins}`).join("\n") : "No specific insights yet."}
+Care Gaps: ${careGaps.length > 0 ? careGaps.map(g => `[${g.urgency}] ${g.description}`).join("; ") : "None identified"}`;
+}
+
+// ---------------------------------------------------------------------------
+// Reusable Dual-Agent Loop (used by prepareFirstCall and dailyHookRunner)
+// ---------------------------------------------------------------------------
+
+/**
+ * runDualAgentLoop — Runs the generator (Gemini) + judge (Claude) iteration loop.
+ *
+ * @param {Object} opts
+ * @param {string} opts.userId
+ * @param {Object} opts.gemini — Gemini model instance
+ * @param {Object|null} opts.claude — Anthropic client (null = single-pass)
+ * @param {boolean} opts.hasJudge
+ * @param {string} opts.patientContext — context string for prompts
+ * @param {Function} opts.logEvent — async (step, status, detail) => void
+ * @param {string} opts.firstName — for fallback script
+ * @param {Object} [opts.previousScript] — previous script for daily runs (delta mode)
+ * @param {string} [opts.deltaContext] — what changed since last run
+ * @returns {{ bestPrep, bestScore, iterations }}
+ */
+async function runDualAgentLoop(opts) {
+  const { userId, gemini, claude, hasJudge, patientContext, logEvent, firstName, previousScript, deltaContext } = opts;
+
   let bestPrep = null;
   let bestScore = 0;
   let judgeFeedback = null;
@@ -142,7 +219,7 @@ async function prepareFirstCall(userId) {
         : `Revision #${i} — reworking based on judge critique (previous: ${judgeFeedback?.total_score}/40, need ${MIN_SCORE}/40)`,
     });
 
-    const generatorPrompt = buildGeneratorPrompt(patientContext, judgeFeedback, i);
+    const generatorPrompt = buildGeneratorPrompt(patientContext, judgeFeedback, i, previousScript, deltaContext);
     const genStart = Date.now();
     const genHeartbeat = setInterval(async () => {
       const elapsed = Math.round((Date.now() - genStart) / 1000);
@@ -154,6 +231,7 @@ async function prepareFirstCall(userId) {
     }, 8000);
 
     let genResult;
+    const GEN_TIMEOUT_MS = 180_000; // 3 minutes max per generation attempt
     try {
       const streamResult = await gemini.generateContentStream({
         contents: [{ role: "user", parts: [{ text: generatorPrompt }] }],
@@ -163,25 +241,36 @@ async function prepareFirstCall(userId) {
       // Stream token deltas to SSE listeners, buffered at ~500ms intervals
       let fullText = "";
       let lastDeltaEmit = Date.now();
-      for await (const chunk of streamResult.stream) {
-        const chunkText = chunk.text();
-        if (chunkText) {
-          fullText += chunkText;
-          const now = Date.now();
-          if (now - lastDeltaEmit > 500) {
-            emitPipelineEvent(userId, {
-              step: "script_generation",
-              status: "streaming",
-              timestamp: new Date().toISOString(),
-              iteration: iterations,
-              partial_text: fullText,
-              type: "token_delta",
-            });
-            lastDeltaEmit = now;
+
+      // Wrap streaming in a timeout to prevent indefinite hangs
+      const streamWithTimeout = Promise.race([
+        (async () => {
+          for await (const chunk of streamResult.stream) {
+            const chunkText = chunk.text();
+            if (chunkText) {
+              fullText += chunkText;
+              const now = Date.now();
+              if (now - lastDeltaEmit > 500) {
+                emitPipelineEvent(userId, {
+                  step: "script_generation",
+                  status: "streaming",
+                  timestamp: new Date().toISOString(),
+                  iteration: iterations,
+                  partial_text: fullText,
+                  type: "token_delta",
+                });
+                lastDeltaEmit = now;
+              }
+            }
           }
-        }
-      }
-      genResult = await streamResult.response;
+          return streamResult.response;
+        })(),
+        new Promise((_, reject) =>
+          setTimeout(() => reject(new Error("Gemini generator timed out after 3 minutes")), GEN_TIMEOUT_MS)
+        ),
+      ]);
+
+      genResult = await streamWithTimeout;
     } finally {
       clearInterval(genHeartbeat);
     }
@@ -330,13 +419,12 @@ async function prepareFirstCall(userId) {
     });
 
     } catch (iterErr) {
-      console.error(`[FIRST_CALL_PREP] Iteration ${iterations} error:`, iterErr.message);
+      console.error(`[DUAL_AGENT] Iteration ${iterations} error:`, iterErr.message);
       await logEvent("iteration_error", "error", {
         iteration: iterations,
         error: iterErr.message,
         detail: `Iteration ${iterations} failed — continuing with best score so far (${bestScore}/40)`,
       });
-      // Continue to next iteration or fall through to fallback
     }
   }
 
@@ -354,55 +442,14 @@ async function prepareFirstCall(userId) {
     });
   }
 
-  // Store result
-  bestPrep.prepared_at = new Date().toISOString();
-  bestPrep.judge_score = bestScore;
-  bestPrep.judge_score_max = 40;
-  bestPrep.judge_score_percentage = Math.round((bestScore / 40) * 100);
-  bestPrep.iterations = iterations;
-
-  // Note: pipeline_complete is logged by the wrapper (onboardingPipeline.js), not here
-
-  // Save first_call_prep result to patient_memory
-  // Events are already persisted in real-time by logEvent — only save the prep result here
-  const [currentMem] = await db.select().from(patientMemory).where(eq(patientMemory.userId, userId));
-  if (currentMem) {
-    const tier2 = currentMem.tier2 || {};
-    tier2.first_call_prep = bestPrep;
-    await db.update(patientMemory).set({
-      tier2,
-      updatedAt: new Date(),
-    }).where(eq(patientMemory.userId, userId));
-  } else {
-    await db.insert(patientMemory).values({
-      userId,
-      tier2: { first_call_prep: bestPrep },
-    });
-  }
-
-  console.log(`[FIRST_CALL_PREP] Final for ${userId}: score=${bestScore}/40, iterations=${iterations}`);
-  return bestPrep;
-}
-
-// ---------------------------------------------------------------------------
-// Build patient context string (shared between generator and judge)
-// ---------------------------------------------------------------------------
-
-function buildPatientContext(firstName, compactedCtx, hookAnchor, currentFocus, insights, careGaps) {
-  return `Patient: ${firstName}
-${compactedCtx || "No detailed health records available yet."}
-
-Hook Anchor (most interesting detail): ${hookAnchor || "Their current medication regimen and adherence patterns"}
-Current Focus: ${currentFocus}
-Top Insights: ${insights.length > 0 ? insights.map((ins, i) => `${i + 1}. ${ins}`).join("\n") : "No specific insights yet."}
-Care Gaps: ${careGaps.length > 0 ? careGaps.map(g => `[${g.urgency}] ${g.description}`).join("; ") : "None identified"}`;
+  return { bestPrep, bestScore, iterations };
 }
 
 // ---------------------------------------------------------------------------
 // Agent 1: Gemini — Script Generator Prompt
 // ---------------------------------------------------------------------------
 
-function buildGeneratorPrompt(patientContext, judgeFeedback, iteration) {
+function buildGeneratorPrompt(patientContext, judgeFeedback, iteration, previousScript, deltaContext) {
   let prompt = `You are a health coach preparing a personalized call opening.
 
 ## Skill: Health Coach Call Openings That Hook
@@ -462,6 +509,20 @@ Step 4: Count your words. If over 50, cut. Count your sentences. If over 3, cut.
 - No alarm language
 - A concrete win with a timeframe is named
 - Under 20 seconds when read aloud`;
+
+  // For daily hook regeneration: include previous script + what changed
+  if (previousScript && iteration === 0) {
+    prompt += `
+
+## PREVIOUS SCRIPT (from your last run — use as a baseline to improve)
+
+Opening: "${previousScript.opening_script || ""}"
+Hook Anchor: ${previousScript.hook_anchor || "N/A"}
+Score: ${previousScript.judge_score || "N/A"}/40
+Prepared: ${previousScript.prepared_at || "unknown"}
+
+${deltaContext ? `## WHAT CHANGED SINCE LAST RUN\n\n${deltaContext}\n\nUpdate the script to reflect these changes. Keep what worked well. Rework anything that's now stale or irrelevant given the new information.` : ""}`;
+  }
 
   if (judgeFeedback && iteration > 0) {
     prompt += `
@@ -789,4 +850,4 @@ Return JSON:
   }
 }
 
-module.exports = { prepareFirstCall };
+module.exports = { prepareFirstCall, runDualAgentLoop, buildGeneratorPrompt, buildPatientContext, judgeScript };

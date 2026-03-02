@@ -178,6 +178,12 @@ export default function PatientDetailPage() {
           </div>
           <div className="flex items-center gap-2">
             <Link
+              href={`/console/patients/${id}/heartbeat`}
+              className="text-xs text-emerald-600 hover:text-emerald-800 px-2 py-1 rounded border border-emerald-200 hover:bg-emerald-50 font-medium"
+            >
+              Heartbeat
+            </Link>
+            <Link
               href={`/console/patients/${id}/pipeline`}
               className="text-xs text-violet-600 hover:text-violet-800 px-2 py-1 rounded border border-violet-200 hover:bg-violet-50 font-medium"
             >

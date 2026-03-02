@@ -38,8 +38,8 @@ export default function ConsoleLoginPage() {
         return;
       }
 
-      // Set cookie
-      document.cookie = `console_token=${data.accessToken}; path=/; max-age=${60 * 60}; samesite=strict`;
+      // Set cookie — 30 days to match long-lived JWT
+      document.cookie = `console_token=${data.accessToken}; path=/; max-age=${60 * 60 * 24 * 30}; samesite=strict`;
       // Also store in localStorage for API calls
       localStorage.setItem("console_token", data.accessToken);
       localStorage.setItem("console_refresh", data.refreshToken);

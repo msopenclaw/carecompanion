@@ -161,6 +161,20 @@ Return a JSON array of 3 strings. Each question should be specific to THEIR data
 // deliverDueTriggers — Check queue and deliver pending triggers (every minute)
 // ---------------------------------------------------------------------------
 
+// Strip markdown formatting for clean text-message feel
+function stripMarkdown(text) {
+  if (!text) return text;
+  return text
+    .replace(/\*\*(.+?)\*\*/g, "$1")
+    .replace(/\*(.+?)\*/g, "$1")
+    .replace(/__(.+?)__/g, "$1")
+    .replace(/_(.+?)_/g, "$1")
+    .replace(/^#{1,6}\s+/gm, "")
+    .replace(/`([^`]+)`/g, "$1")
+    .replace(/\n{3,}/g, "\n\n")
+    .trim();
+}
+
 async function deliverDueTriggers() {
   const now = new Date();
 
@@ -174,7 +188,17 @@ async function deliverDueTriggers() {
 
   for (const trigger of dueTriggers) {
     try {
-      // Check quiet hours
+      // ── Atomic claim: mark as "delivering" to prevent race condition ──
+      // If another cron tick already claimed this trigger, skip it
+      const claimed = await db.update(triggers)
+        .set({ status: "delivering" })
+        .where(and(eq(triggers.id, trigger.id), eq(triggers.status, "pending")));
+      // If no rows updated, another process already claimed it
+      if (!claimed.rowCount && claimed.rowCount !== undefined) {
+        continue;
+      }
+
+      // Check quiet hours (using patient's timezone)
       const [prefs] = await db.select().from(userPreferences)
         .where(eq(userPreferences.userId, trigger.userId));
       const [profile] = await db.select().from(userProfiles)
@@ -185,12 +209,17 @@ async function deliverDueTriggers() {
       const quietEnd = prefs?.quietEnd || "07:00";
 
       if (trigger.priority !== "high" && isQuietHours(userTz, quietStart, quietEnd)) {
-        // Reschedule to after quiet hours
+        // Reschedule to after quiet hours (using patient's timezone)
         const [endH, endM] = quietEnd.split(":").map(Number);
-        const tomorrow = new Date(now);
-        tomorrow.setHours(endH, endM, 0, 0);
-        if (tomorrow <= now) tomorrow.setDate(tomorrow.getDate() + 1);
-        await db.update(triggers).set({ scheduledFor: tomorrow }).where(eq(triggers.id, trigger.id));
+        const nowInTz = new Date(now.toLocaleString("en-US", { timeZone: userTz }));
+        const nextWindow = new Date(nowInTz);
+        nextWindow.setHours(endH, endM, 0, 0);
+        if (nextWindow <= nowInTz) nextWindow.setDate(nextWindow.getDate() + 1);
+        // Convert back to UTC approximately
+        const offsetMs = now.getTime() - nowInTz.getTime();
+        const rescheduledUtc = new Date(nextWindow.getTime() + offsetMs);
+        await db.update(triggers).set({ scheduledFor: rescheduledUtc, status: "pending" }).where(eq(triggers.id, trigger.id));
+        console.log(`[TRIGGER_ENGINE] Rescheduled trigger ${trigger.id} to after quiet hours (${quietEnd} ${userTz})`);
         continue;
       }
 
@@ -200,24 +229,48 @@ async function deliverDueTriggers() {
         continue;
       }
 
+      // Dedup: check if we already sent a message with similar content in the last 2 hours
+      const twoHoursAgo = new Date(now.getTime() - 2 * 60 * 60 * 1000);
+      const recentMsgs = await db.select().from(messages)
+        .where(and(
+          eq(messages.userId, trigger.userId),
+          eq(messages.sender, "ai"),
+          gte(messages.createdAt, twoHoursAgo),
+        ));
+      const bodySnippet = (trigger.body || "").substring(0, 60).toLowerCase();
+      const isDuplicate = recentMsgs.some(m =>
+        (m.content || "").toLowerCase().includes(bodySnippet) && bodySnippet.length > 10
+      );
+      if (isDuplicate) {
+        await db.update(triggers).set({ status: "delivered" }).where(eq(triggers.id, trigger.id));
+        console.log(`[TRIGGER_ENGINE] DEDUPED trigger ${trigger.id} — similar message already sent recently`);
+        continue;
+      }
+
+      // Strip markdown from content
+      const cleanBody = stripMarkdown(trigger.body);
+      const cleanTitle = stripMarkdown(trigger.title);
+
       // Deliver: push notification + in-app message
       await sendPush(trigger.userId, {
-        title: trigger.title,
-        body: trigger.body.length > 150 ? trigger.body.substring(0, 147) + "..." : trigger.body,
+        title: cleanTitle,
+        body: cleanBody.length > 150 ? cleanBody.substring(0, 147) + "..." : cleanBody,
         data: { route: "messages", triggerType: trigger.type },
       });
 
-      // Save as message for in-app display
+      // Save as message for in-app display (clean, no markdown wrapping)
       await db.insert(messages).values({
         userId: trigger.userId,
         sender: "ai",
         messageType: "nudge",
-        content: `**${trigger.title}**\n\n${trigger.body}`,
+        content: `${cleanTitle}\n\n${cleanBody}`,
       });
 
       await db.update(triggers).set({ status: "delivered" }).where(eq(triggers.id, trigger.id));
       console.log(`[TRIGGER_ENGINE] Delivered trigger ${trigger.id} (${trigger.type}) to ${trigger.userId}`);
     } catch (err) {
+      // If delivery failed, reset to pending so it can retry
+      await db.update(triggers).set({ status: "pending" }).where(eq(triggers.id, trigger.id)).catch(() => {});
       console.error(`[TRIGGER_ENGINE] Failed to deliver trigger ${trigger.id}:`, err);
     }
   }

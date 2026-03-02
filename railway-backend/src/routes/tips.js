@@ -7,7 +7,7 @@ const { getUserContext } = require("../services/userContext");
 
 const router = express.Router();
 
-// Fallback tips — medication-agnostic, adherence/wellness focused
+// Fallback tips — medication-agnostic, adherence/wellness focused, demo-safe
 const FALLBACK_TIPS = [
   "Stay hydrated today — aim for at least 64oz of water. Your body uses it for everything from digestion to focus.",
   "Taking your medications at the same time each day builds a habit loop that sticks. Pick a daily anchor like breakfast or brushing teeth.",
@@ -19,6 +19,16 @@ const FALLBACK_TIPS = [
   "Sleep is medicine. Even 15 extra minutes tonight can improve how your body processes tomorrow's medications.",
   "Your recent logging streak matters more than any single reading. You're building the data that drives better care.",
   "Small wins compound. One healthy choice today makes tomorrow's healthy choice easier.",
+  "Deep breathing for 2 minutes can lower cortisol and blood pressure. Try it before your next meal.",
+  "Your body rebuilds overnight. A consistent bedtime matters more than the number of hours.",
+  "Eating your largest meal earlier in the day can improve metabolic outcomes. Breakfast really is underrated.",
+  "Regular movement doesn't have to mean the gym. Dancing, gardening, or playing with a pet all count.",
+  "Fiber is one of the most underrated nutrients. Adding one extra serving of vegetables today is a great start.",
+  "Sunlight in the first 30 minutes of your morning helps regulate your circadian rhythm and energy levels.",
+  "Stress shows up in your body before your mind notices. Check your shoulders — are they up by your ears?",
+  "Keeping a consistent meal schedule helps stabilize energy and blood sugar throughout the day.",
+  "Your care team sees the full picture. Logging even the small things helps us spot trends early.",
+  "Progress isn't always visible on a scale. Better sleep, more energy, and improved mood all count as wins.",
 ];
 
 // GET /api/tips/today — get today's personalized tip
@@ -89,7 +99,8 @@ Rules:
 - Don't start with "Tip:" or "Today's tip:"
 - Don't include greetings or the patient's name
 - Don't use exclamation marks more than once
-- Jump straight into the actionable advice`;
+- Jump straight into the actionable advice
+- NEVER mention embarrassing or sensitive topics (constipation, diarrhea, gas, bloating, sexual health, incontinence, etc.) — keep it positive and something the patient would be comfortable showing on their screen`;
 
     const genAI = new GoogleGenerativeAI(GEMINI_API_KEY);
     const model = genAI.getGenerativeModel({ model: "gemini-2.0-flash" });
@@ -103,6 +114,23 @@ Rules:
     // Fallback on any error
     const dayIndex = Math.floor(Math.random() * FALLBACK_TIPS.length);
     res.json({ tip: FALLBACK_TIPS[dayIndex], cached: false });
+  }
+});
+
+// POST /api/tips/refresh — delete cached tip so next fetch generates fresh one
+router.post("/refresh", async (req, res) => {
+  try {
+    const userId = req.user.userId;
+    const today = new Date().toISOString().split("T")[0];
+    await db.delete(dailyTips).where(and(
+      eq(dailyTips.userId, userId),
+      eq(dailyTips.tipDate, today),
+    ));
+    console.log(`[Tips] Cleared cached tip for ${userId} (${today})`);
+    res.json({ success: true, message: "Tip cache cleared — next fetch will generate a new one" });
+  } catch (err) {
+    console.error("Tips refresh error:", err);
+    res.status(500).json({ error: "Failed to refresh tip" });
   }
 });
 

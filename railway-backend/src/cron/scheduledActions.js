@@ -4,6 +4,7 @@ const { db } = require("../db");
 const { scheduledActions, messages, medications, medicationLogs, vitals } = require("../db/schema");
 const { sendPush } = require("../services/pushService");
 const { getNotificationContext } = require("../services/userContext");
+const { runDailyHookForUser } = require("../services/dailyHookRunner");
 
 let geminiModel = null;
 function getModel() {
@@ -56,8 +57,55 @@ async function runScheduledActions() {
         continue;
       }
 
+      // Hook regeneration — run the daily hook pipeline instead of sending a notification
+      if (action.actionType === "hook_regeneration") {
+        try {
+          await runDailyHookForUser(action.userId, action.label || "scheduled");
+          console.log(`[Scheduler] Hook regeneration completed for ${action.userId}`);
+        } catch (err) {
+          console.error(`[Scheduler] Hook regeneration failed for ${action.userId}:`, err.message);
+        }
+        await db.update(scheduledActions)
+          .set({ lastTriggeredAt: now })
+          .where(eq(scheduledActions.id, action.id));
+        fired++;
+        // Stagger between hook runs (they're expensive)
+        await new Promise(r => setTimeout(r, 3000));
+        continue;
+      }
+
+      // ── Update lastTriggeredAt FIRST to prevent race condition ──
+      // (If two cron ticks fire in the same minute, the second one will see it was already triggered)
+      await db.update(scheduledActions)
+        .set({ lastTriggeredAt: now })
+        .where(eq(scheduledActions.id, action.id));
+
+      // User-requested reminders (via chat "schedule_push") bypass dedup + daily cap
+      const isUserRequested = action.actionType === "custom_reminder";
+
       // Generate AI-personalized content (falls back to static if Gemini unavailable)
       const { title, body, messageType, category } = await getSmartContent(action);
+
+      // Dedup: check if a similar message was already sent in the last 2 hours
+      // Skip dedup for user-requested custom reminders
+      if (!isUserRequested) {
+        const twoHoursAgo = new Date(now.getTime() - 2 * 60 * 60 * 1000);
+        const recentMsgs = await db.select().from(messages)
+          .where(and(
+            eq(messages.userId, action.userId),
+            eq(messages.sender, "ai"),
+            gte(messages.createdAt, twoHoursAgo),
+          ));
+        const bodySnippet = (body || "").substring(0, 40).toLowerCase();
+        const isDuplicate = recentMsgs.some(m =>
+          (m.content || "").toLowerCase().includes(bodySnippet) && bodySnippet.length > 10
+        );
+        if (isDuplicate) {
+          console.log(`[Scheduler] DEDUPED ${action.actionType} for ${action.userId} — similar message sent recently`);
+          fired++;
+          continue;
+        }
+      }
 
       // Insert message
       await db.insert(messages).values({
@@ -67,7 +115,7 @@ async function runScheduledActions() {
         content: body,
       });
 
-      // Send push notification
+      // Send push notification (bypass daily cap for user-requested reminders)
       await sendPush(action.userId, {
         title,
         body,
@@ -76,12 +124,7 @@ async function runScheduledActions() {
           messageType,
           ...(category ? { category } : {}),
         },
-      });
-
-      // Update lastTriggeredAt
-      await db.update(scheduledActions)
-        .set({ lastTriggeredAt: now })
-        .where(eq(scheduledActions.id, action.id));
+      }, isUserRequested ? { bypass: true } : {});
 
       // Deactivate one-time actions
       if (action.recurrence === "once") {
@@ -195,7 +238,11 @@ Return ONLY the notification body text. No quotes, no prefix.`;
       generationConfig: { maxOutputTokens: 80, temperature: 0.7 },
     });
 
-    const aiBody = result.response.text().trim();
+    let aiBody = result.response.text().trim()
+      .replace(/\*\*(.+?)\*\*/g, "$1")
+      .replace(/\*(.+?)\*/g, "$1")
+      .replace(/__(.+?)__/g, "$1")
+      .replace(/`([^`]+)`/g, "$1");
     if (aiBody && aiBody.length > 5) {
       return {
         ...fallback,

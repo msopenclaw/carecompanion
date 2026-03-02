@@ -226,6 +226,13 @@ When recommending an action, classify it as one of:
 
 Prefer creating a TRIGGER (scheduled insight) over a direct message when the content is an insight or non-urgent finding. Triggers are tracked and deliver at optimal times.
 
+TEXT MESSAGE STYLE for the "message" field:
+- Write like a real person texting — casual, warm, conversational
+- NEVER use markdown: no **bold**, no *italic*, no bullet lists, no headers, no numbered lists
+- Use plain text only — periods, commas, exclamation marks, question marks, dashes
+- Keep it short and human — contractions are good, fragments are fine
+- Sound like a friendly text message, not a clinical report
+
 CURRENT TIME: ${new Date().toISOString()}
 
 Respond in valid JSON with this exact format:
@@ -306,6 +313,19 @@ Respond in valid JSON with this exact format:
     } catch (e) {
       console.error("[MONOLOGUE] Failed to create trigger:", e);
     }
+  }
+
+  // Strip markdown from message for text-message feel
+  if (decision.message) {
+    decision.message = decision.message
+      .replace(/\*\*(.+?)\*\*/g, "$1")
+      .replace(/\*(.+?)\*/g, "$1")
+      .replace(/__(.+?)__/g, "$1")
+      .replace(/_(.+?)_/g, "$1")
+      .replace(/^#{1,6}\s+/gm, "")
+      .replace(/`([^`]+)`/g, "$1")
+      .replace(/\n{3,}/g, "\n\n")
+      .trim();
   }
 
   // If action is send_message, create the message

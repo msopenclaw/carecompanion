@@ -155,6 +155,99 @@ cron.schedule("* * * * *", async () => {
 console.log(`[CRON] Registered: monologue (${monologueCron}), scheduled actions (every minute), trigger delivery (every minute)`);
 
 // ---------------------------------------------------------------------------
+// Startup Self-Healing — ensure scheduled actions survive restarts
+// ---------------------------------------------------------------------------
+
+async function selfHealOnStartup() {
+  try {
+    const { db } = require("./db");
+    const { patientMemory, scheduledActions, userProfiles } = require("./db/schema");
+    const { eq, and } = require("drizzle-orm");
+
+    // 1. Find all patients with memory (uploaded health records = started onboarding)
+    const allMemory = await db.select().from(patientMemory);
+    let seeded = 0;
+
+    for (const mem of allMemory) {
+
+      // Check if they have hook_regeneration scheduled actions
+      const existing = await db.select({ id: scheduledActions.id }).from(scheduledActions)
+        .where(and(
+          eq(scheduledActions.userId, mem.userId),
+          eq(scheduledActions.actionType, "hook_regeneration"),
+          eq(scheduledActions.isActive, true),
+        ));
+
+      if (existing.length >= 2) continue; // already has both
+
+      // Get patient timezone
+      const [profile] = await db.select().from(userProfiles).where(eq(userProfiles.userId, mem.userId));
+      const tz = profile?.timezone || "America/New_York";
+
+      // Seed missing hook_regeneration actions
+      const needed = [
+        { scheduledTime: "06:00", label: "scheduled_6am" },
+        { scheduledTime: "17:00", label: "scheduled_5pm" },
+      ];
+      const existingTimes = new Set();
+      if (existing.length > 0) {
+        const rows = await db.select().from(scheduledActions)
+          .where(and(eq(scheduledActions.userId, mem.userId), eq(scheduledActions.actionType, "hook_regeneration")));
+        rows.forEach(r => existingTimes.add(r.scheduledTime));
+      }
+
+      for (const n of needed) {
+        if (existingTimes.has(n.scheduledTime)) continue;
+        await db.insert(scheduledActions).values({
+          userId: mem.userId,
+          actionType: "hook_regeneration",
+          scheduledTime: n.scheduledTime,
+          recurrence: "daily",
+          label: n.label,
+          timezone: tz,
+          isActive: true,
+        });
+        seeded++;
+      }
+    }
+
+    if (seeded > 0) {
+      console.log(`[STARTUP] Self-healed: seeded ${seeded} missing hook_regeneration action(s)`);
+    }
+
+    // 2. Mark any pipeline runs left in "running" state as interrupted
+    for (const mem of allMemory) {
+      if (!mem.tier2?.pipeline_runs) continue;
+      const runs = mem.tier2.pipeline_runs;
+      let changed = false;
+      for (const run of runs) {
+        const events = run.events || [];
+        const isComplete = events.some(e => e.step === "pipeline_complete");
+        const hasError = events.some(e => e.status === "error");
+        if (!isComplete && !hasError && events.length > 0) {
+          run.events.push({
+            step: "pipeline_interrupted",
+            status: "error",
+            timestamp: new Date().toISOString(),
+            detail: "Server restarted while pipeline was running",
+          });
+          changed = true;
+        }
+      }
+      if (changed) {
+        const tier2 = { ...mem.tier2, pipeline_runs: runs };
+        await db.update(patientMemory).set({ tier2, updatedAt: new Date() })
+          .where(eq(patientMemory.userId, mem.userId));
+      }
+    }
+
+    console.log("[STARTUP] Self-healing complete");
+  } catch (err) {
+    console.error("[STARTUP] Self-healing error (non-fatal):", err.message);
+  }
+}
+
+// ---------------------------------------------------------------------------
 // Start Server
 // ---------------------------------------------------------------------------
 
@@ -311,5 +404,7 @@ runStartupMigrations().then(() => {
     if (!process.env.ENCRYPTION_KEY) {
       console.warn("[SECURITY] ENCRYPTION_KEY not set — PII encryption disabled");
     }
+    // Run self-healing after server is up (non-blocking)
+    selfHealOnStartup().catch(err => console.error("[STARTUP] Self-heal failed:", err.message));
   });
 });

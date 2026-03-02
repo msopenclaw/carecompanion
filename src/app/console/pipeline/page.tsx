@@ -53,10 +53,10 @@ export default function PipelineTabPage() {
   const [loading, setLoading] = useState(false);
   const [runningPipeline, setRunningPipeline] = useState(false);
   const [autoRefresh, setAutoRefresh] = useState(false);
-  const [expandedRuns, setExpandedRuns] = useState<Set<number>>(new Set());
   const [sseFailed, setSseFailed] = useState(false);
   const [autoScroll, setAutoScroll] = useState(true);
   const [callingRunIndex, setCallingRunIndex] = useState<number | null>(null);
+  const [selectedRunIndex, setSelectedRunIndex] = useState<number | null>(null);
   const intervalRef = useRef<ReturnType<typeof setInterval> | null>(null);
   const sseAbortRef = useRef<AbortController | null>(null);
   const timelineEndRef = useRef<HTMLDivElement | null>(null);
@@ -71,13 +71,8 @@ export default function PipelineTabPage() {
       .then((data: PipelineData) => {
         setPipeline(data);
         const runs = data.pipelineRuns || [];
-        // Always keep latest run expanded during auto-refresh
         if (runs.length > 0) {
-          setExpandedRuns(prev => {
-            const next = new Set(prev);
-            next.add(runs.length - 1);
-            return next;
-          });
+          setSelectedRunIndex(prev => prev === null ? runs.length - 1 : prev);
         }
         const latestRun = runs[runs.length - 1];
         if (latestRun && isRunComplete(latestRun.events) && autoRefresh) {
@@ -99,7 +94,7 @@ export default function PipelineTabPage() {
         setPipeline(data);
         const runs = data.pipelineRuns || [];
         if (runs.length > 0) {
-          setExpandedRuns(new Set([runs.length - 1]));
+          setSelectedRunIndex(runs.length - 1);
           // Auto-start polling if latest run is still in progress (triggered externally e.g. from iOS app)
           const latestRun = runs[runs.length - 1];
           if (latestRun && !isRunComplete(latestRun.events)) {
@@ -218,13 +213,13 @@ export default function PipelineTabPage() {
           if (latestRun && !isRunComplete(latestRun.events)) {
             // A run is in progress — switch to active polling
             setPipeline(data);
-            setExpandedRuns(new Set([runs.length - 1]));
+            setSelectedRunIndex(runs.length - 1);
             setAutoRefresh(true);
             setRunningPipeline(true);
           } else if (runs.length > (pipeline?.pipelineRuns?.length || 0)) {
             // New completed run appeared — update display
             setPipeline(data);
-            setExpandedRuns(new Set([runs.length - 1]));
+            setSelectedRunIndex(runs.length - 1);
           }
         })
         .catch(() => {});
@@ -250,9 +245,9 @@ export default function PipelineTabPage() {
     setRunningPipeline(true);
     setAutoRefresh(true);
 
-    // Pre-expand the next run slot
+    // Pre-expand the next run slot and select it
     const currentRunCount = pipeline?.pipelineRuns?.length || 0;
-    setExpandedRuns(new Set([currentRunCount]));
+    setSelectedRunIndex(currentRunCount);
     prevEventCount.current = 0;
 
     try {
@@ -276,6 +271,11 @@ export default function PipelineTabPage() {
         headers: { ...headers, "Content-Type": "application/json" },
         body: runIndex !== undefined ? JSON.stringify({ runIndex }) : "{}",
       });
+      if (runIndex === undefined) {
+        setSelectedRunIndex(null);
+      } else if (selectedRunIndex !== null && runIndex <= selectedRunIndex) {
+        setSelectedRunIndex(prev => prev !== null && prev > 0 ? prev - 1 : 0);
+      }
       fetchPipeline();
     } catch (e) {
       console.error("Delete runs error:", e);
@@ -323,15 +323,6 @@ export default function PipelineTabPage() {
     setTimeout(() => setCallCooldown(false), 30000);
   };
 
-  const toggleRun = (idx: number) => {
-    setExpandedRuns(prev => {
-      const next = new Set(prev);
-      if (next.has(idx)) next.delete(idx);
-      else next.add(idx);
-      return next;
-    });
-  };
-
   if (!selectedPatientId) {
     return (
       <div className="flex items-center justify-center h-[60vh]">
@@ -359,19 +350,25 @@ export default function PipelineTabPage() {
   // Fall back to flat pipelineLog if no runs exist (legacy data)
   const legacyLog = pipeline?.pipelineLog || [];
   const hasRuns = runs.length > 0;
-  const latestRun = hasRuns ? runs[runs.length - 1] : null;
-  const latestEvents = latestRun?.events || legacyLog;
   const legacyIsRunning = !hasRuns && legacyLog.length > 0 && !isRunComplete(legacyLog);
 
-  // Group events by iteration for negotiation view (from latest run)
+  // Selected run for detailed view
+  const selectedRun = selectedRunIndex !== null && selectedRunIndex < runs.length ? runs[selectedRunIndex] : null;
+  const selectedEvents = selectedRun?.events || [];
+
+  // Group events by iteration for negotiation view (from selected run)
   const iterations: Map<number, PipelineEvent[]> = new Map();
-  for (const event of latestEvents) {
+  for (const event of selectedEvents) {
     if (event.iteration != null) {
       const iter = event.iteration as number;
       if (!iterations.has(iter)) iterations.set(iter, []);
       iterations.get(iter)!.push(event);
     }
   }
+
+  // Extract accepted script from selected run (for Final Script section)
+  const selectedAccepted = selectedEvents.find(e => e.step === "script_accepted" && e.status === "completed");
+  const selectedRunComplete = selectedRun ? isRunComplete(selectedEvents) : false;
 
   return (
     <div className="max-w-5xl mx-auto space-y-6">
@@ -383,23 +380,33 @@ export default function PipelineTabPage() {
         </div>
 
         <div className="flex items-center gap-3">
-          {firstCallPrep && (
-            <span className={`text-sm font-mono font-bold px-3 py-1 rounded-lg ${
-              (firstCallPrep.judge_score as number) >= 36 ? "bg-green-100 text-green-700" :
-              (firstCallPrep.judge_score as number) >= 28 ? "bg-amber-100 text-amber-700" :
-              "bg-slate-100 text-slate-600"
-            }`}>
-              Score: {firstCallPrep.judge_score as number}/{firstCallPrep.judge_score_max as number || 40}
-              {firstCallPrep.judge_score_percentage != null && (
-                <span className="ml-1 opacity-70">({firstCallPrep.judge_score_percentage as number}%)</span>
-              )}
-            </span>
-          )}
-          {firstCallPrep && (
-            <span className="text-sm text-slate-500">
-              {firstCallPrep.iterations as number} iteration{(firstCallPrep.iterations as number) !== 1 ? "s" : ""}
-            </span>
-          )}
+          {(() => {
+            // Show score from selected run's judge evaluation
+            const judgeEv = selectedEvents.find(e => e.step === "script_accepted" && e.status === "completed")
+              || selectedEvents.filter(e => e.step === "judge_evaluation" && e.status === "completed").at(-1);
+            const score = (judgeEv?.totalScore ?? judgeEv?.finalScore ?? firstCallPrep?.judge_score) as number | undefined;
+            const max = (judgeEv?.maxScore ?? firstCallPrep?.judge_score_max ?? 40) as number;
+            const iterCount = iterations.size || (firstCallPrep?.iterations as number) || 0;
+            if (score == null) return null;
+            const pct = Math.round((score / max) * 100);
+            return (
+              <>
+                <span className={`text-sm font-mono font-bold px-3 py-1 rounded-lg ${
+                  score >= 36 ? "bg-green-100 text-green-700" :
+                  score >= 28 ? "bg-amber-100 text-amber-700" :
+                  "bg-slate-100 text-slate-600"
+                }`}>
+                  Score: {score}/{max}
+                  <span className="ml-1 opacity-70">({pct}%)</span>
+                </span>
+                {iterCount > 0 && (
+                  <span className="text-sm text-slate-500">
+                    {iterCount} iteration{iterCount !== 1 ? "s" : ""}
+                  </span>
+                )}
+              </>
+            );
+          })()}
         </div>
       </div>
 
@@ -466,6 +473,36 @@ export default function PipelineTabPage() {
         </span>
       </div>
 
+      {/* Run pills */}
+      {runs.length > 0 && (
+        <div className="flex items-center gap-2 flex-wrap">
+          {runs.map((run, idx) => {
+            const complete = isRunComplete(run.events);
+            const isActive = selectedRunIndex === idx;
+            const isRunning = !complete && idx === runs.length - 1 && autoRefresh;
+            return (
+              <button
+                key={idx}
+                onClick={() => setSelectedRunIndex(idx)}
+                className={`flex items-center gap-1.5 text-xs font-medium px-3 py-1.5 rounded-full border transition-all ${
+                  isActive
+                    ? "bg-violet-600 text-white border-violet-600 shadow-sm"
+                    : "bg-white text-slate-600 border-slate-200 hover:border-violet-300 hover:text-violet-700"
+                }`}
+              >
+                <span className={`w-1.5 h-1.5 rounded-full flex-shrink-0 ${
+                  isRunning ? "bg-violet-300 animate-pulse" :
+                  isActive && complete ? "bg-green-300" :
+                  complete ? "bg-green-500" : "bg-slate-300"
+                }`} />
+                Run {idx + 1}
+                {isRunning && <span className="text-[10px] opacity-70">(live)</span>}
+              </button>
+            );
+          })}
+        </div>
+      )}
+
       {/* Live Status Line — sticky so it stays visible while scrolling */}
       {autoRefresh && lastRunningEvent && (
         <div className="sticky top-0 z-30">
@@ -473,123 +510,83 @@ export default function PipelineTabPage() {
         </div>
       )}
 
-      {/* Pipeline Runs */}
+      {/* Selected Run Detail */}
       {!hasRuns && legacyLog.length === 0 ? (
         <div className="bg-white rounded-xl shadow-sm border border-slate-200 p-12 text-center">
           <div className="text-3xl mb-3 opacity-20">&#x26A1;</div>
           <p className="text-slate-500 text-sm">No agents have been run for this patient yet.</p>
           <p className="text-slate-400 text-xs mt-1">Click &ldquo;Run Agents&rdquo; above to start.</p>
         </div>
-      ) : hasRuns ? (
-        <div className="space-y-3">
-          {runs.map((run, idx) => {
-            const isExpanded = expandedRuns.has(idx);
-            const isLatest = idx === runs.length - 1;
-            const complete = isRunComplete(run.events);
-            const duration = getRunDuration(run.events);
-            const eventCount = run.events.length;
+      ) : selectedRun ? (
+        <div className="bg-white rounded-xl shadow-sm border border-slate-200 overflow-hidden">
+          {/* Selected run header */}
+          <div className="flex items-center gap-3 px-5 py-3.5 bg-slate-50 border-b border-slate-200">
+            <span className={`w-2.5 h-2.5 rounded-full flex-shrink-0 ${
+              !selectedRunComplete && selectedRunIndex === runs.length - 1 && autoRefresh ? "bg-violet-500 animate-pulse" :
+              selectedRunComplete ? "bg-green-500" : "bg-slate-300"
+            }`} />
+            <span className="text-sm font-semibold text-slate-900">Run #{(selectedRunIndex ?? 0) + 1}</span>
+            <span className="text-xs text-slate-500">{formatRunDate(selectedRun.startedAt)}</span>
+            {getRunDuration(selectedEvents) && (
+              <span className="text-xs text-slate-400 font-mono">{getRunDuration(selectedEvents)}</span>
+            )}
+            <span className="text-xs text-slate-400">{selectedEvents.length} events</span>
+            <span className={`text-xs font-medium px-2 py-0.5 rounded ${
+              !selectedRunComplete && selectedRunIndex === runs.length - 1 && autoRefresh
+                ? "bg-violet-100 text-violet-700"
+                : selectedRunComplete
+                ? "bg-green-100 text-green-700"
+                : selectedEvents.some((e: PipelineEvent) => e.status === "cancelled")
+                ? "bg-red-100 text-red-600"
+                : "bg-slate-100 text-slate-600"
+            }`}>
+              {!selectedRunComplete && selectedRunIndex === runs.length - 1 && autoRefresh ? "Running"
+                : selectedEvents.some((e: PipelineEvent) => e.status === "cancelled") ? "Cancelled"
+                : selectedRunComplete ? "Complete" : "Incomplete"}
+            </span>
 
-            return (
-              <div key={idx} className={`relative bg-white rounded-xl shadow-sm border overflow-hidden transition-colors ${
-                isLatest && autoRefresh ? "border-violet-300 ring-1 ring-violet-100" : "border-slate-200"
-              }`}>
-                {/* Run header — always visible */}
+            <div className="ml-auto flex items-center gap-2">
+              {selectedEvents.some((e: PipelineEvent) => e.step === "script_accepted" && e.status === "completed") && (
                 <button
-                  onClick={() => toggleRun(idx)}
-                  className="w-full flex items-center gap-3 px-5 py-3.5 hover:bg-slate-50 transition-colors text-left"
+                  onClick={() => triggerCall(selectedRunIndex!)}
+                  className={`flex items-center gap-1.5 text-xs font-medium px-3 py-1.5 rounded-lg transition-colors ${
+                    callingRunIndex === selectedRunIndex
+                      ? "bg-green-100 text-green-700 animate-pulse"
+                      : "text-green-700 bg-green-50 hover:bg-green-100 border border-green-200"
+                  }`}
                 >
-                  <svg className={`w-4 h-4 text-slate-400 transition-transform flex-shrink-0 ${isExpanded ? "rotate-90" : ""}`}
-                    viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
-                    <path d="M9 18l6-6-6-6" />
+                  <svg className="w-3.5 h-3.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                    <path d="M22 16.92v3a2 2 0 0 1-2.18 2 19.79 19.79 0 0 1-8.63-3.07 19.5 19.5 0 0 1-6-6 19.79 19.79 0 0 1-3.07-8.67A2 2 0 0 1 4.11 2h3a2 2 0 0 1 2 1.72 12.84 12.84 0 0 0 .7 2.81 2 2 0 0 1-.45 2.11L8.09 9.91a16 16 0 0 0 6 6l1.27-1.27a2 2 0 0 1 2.11-.45 12.84 12.84 0 0 0 2.81.7A2 2 0 0 1 22 16.92z" />
                   </svg>
-
-                  <div className="flex items-center gap-2 flex-1 min-w-0">
-                    <span className={`w-2.5 h-2.5 rounded-full flex-shrink-0 ${
-                      !complete && isLatest && autoRefresh ? "bg-violet-500 animate-pulse" :
-                      complete ? "bg-green-500" : "bg-slate-300"
-                    }`} />
-                    <span className="text-sm font-semibold text-slate-900">
-                      Run #{idx + 1}
-                    </span>
-                    <span className="text-xs text-slate-500">
-                      {formatRunDate(run.startedAt)}
-                    </span>
-                    {isLatest && (
-                      <span className="text-[10px] font-bold uppercase tracking-wider bg-blue-50 text-blue-600 px-1.5 py-0.5 rounded">
-                        Latest
-                      </span>
-                    )}
-                  </div>
-
-                  <div className="flex items-center gap-3 flex-shrink-0">
-                    {duration && (
-                      <span className="text-xs text-slate-400 font-mono">{duration}</span>
-                    )}
-                    <span className="text-xs text-slate-400">{eventCount} events</span>
-                    <span className={`text-xs font-medium px-2 py-0.5 rounded ${
-                      !complete && isLatest && autoRefresh
-                        ? "bg-violet-100 text-violet-700"
-                        : complete
-                        ? "bg-green-100 text-green-700"
-                        : run.events?.some((e: PipelineEvent) => e.status === "cancelled")
-                        ? "bg-red-100 text-red-600"
-                        : "bg-slate-100 text-slate-600"
-                    }`}>
-                      {!complete && isLatest && autoRefresh ? "Running"
-                        : run.events?.some((e: PipelineEvent) => e.status === "cancelled") ? "Cancelled"
-                        : complete ? "Complete" : "Incomplete"}
-                    </span>
-
-                    {/* Call button — only for runs with an accepted script */}
-                    {run.events?.some((e: PipelineEvent) => e.step === "script_accepted" && e.status === "completed") && (
-                      <span
-                        role="button"
-                        onClick={(e) => { e.stopPropagation(); triggerCall(idx); }}
-                        className={`p-1.5 rounded-lg transition-colors ${
-                          callingRunIndex === idx
-                            ? "bg-green-100 text-green-600 animate-pulse"
-                            : "text-slate-400 hover:text-green-600 hover:bg-green-50"
-                        } ${callingRunIndex !== null && callingRunIndex !== idx ? "opacity-40 pointer-events-none" : ""}`}
-                        title={`Call patient using Run #${idx + 1} script`}
-                      >
-                        <svg className="w-4 h-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-                          <path d="M22 16.92v3a2 2 0 0 1-2.18 2 19.79 19.79 0 0 1-8.63-3.07 19.5 19.5 0 0 1-6-6 19.79 19.79 0 0 1-3.07-8.67A2 2 0 0 1 4.11 2h3a2 2 0 0 1 2 1.72 12.84 12.84 0 0 0 .7 2.81 2 2 0 0 1-.45 2.11L8.09 9.91a16 16 0 0 0 6 6l1.27-1.27a2 2 0 0 1 2.11-.45 12.84 12.84 0 0 0 2.81.7A2 2 0 0 1 22 16.92z" />
-                        </svg>
-                      </span>
-                    )}
-
-                    {/* Delete button */}
-                    {!runningPipeline && (
-                      <span
-                        role="button"
-                        onClick={(e) => { e.stopPropagation(); deleteRuns(idx); }}
-                        className="text-slate-300 hover:text-red-500 transition-colors p-1"
-                        title="Delete this run"
-                      >
-                        <svg className="w-4 h-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
-                          <path d="M6 18L18 6M6 6l12 12" />
-                        </svg>
-                      </span>
-                    )}
-                  </div>
+                  Call
                 </button>
+              )}
+              {!runningPipeline && (
+                <button
+                  onClick={() => deleteRuns(selectedRunIndex!)}
+                  className="text-xs text-red-400 hover:text-red-600 px-2 py-1 rounded border border-red-200 hover:bg-red-50 transition-colors"
+                >
+                  Delete
+                </button>
+              )}
+            </div>
+          </div>
 
-                {/* Expanded run events */}
-                {isExpanded && (
-                  <div className="border-t border-slate-100 px-5 py-4">
-                    <div className="space-y-0">
-                      {run.events.map((event, i) => (
-                        <PipelineStep key={i} event={event} isLast={i === run.events.length - 1} defaultExpanded={isLatest} />
-                      ))}
-                    </div>
-                    {isLatest && autoRefresh && (
-                      <div ref={timelineEndRef} />
-                    )}
-                  </div>
-                )}
-              </div>
-            );
-          })}
+          {/* Full event timeline */}
+          <div className="px-5 py-4">
+            <div className="space-y-0">
+              {selectedEvents.map((event, i) => (
+                <PipelineStep key={i} event={event} isLast={i === selectedEvents.length - 1} defaultExpanded={true} />
+              ))}
+            </div>
+            {selectedRunIndex === runs.length - 1 && autoRefresh && (
+              <div ref={timelineEndRef} />
+            )}
+          </div>
+        </div>
+      ) : hasRuns ? (
+        <div className="bg-white rounded-xl shadow-sm border border-slate-200 p-8 text-center">
+          <p className="text-slate-500 text-sm">Select a run above to view details.</p>
         </div>
       ) : (
         /* Legacy flat log (no runs array) */
@@ -759,29 +756,29 @@ export default function PipelineTabPage() {
         </div>
       )}
 
-      {/* Final Script */}
-      {firstCallPrep && (
+      {/* Final Script — from selected run's accepted event */}
+      {selectedAccepted && (
         <div className="bg-white rounded-xl shadow-sm border border-slate-200 p-6">
-          <h2 className="font-semibold text-slate-900 mb-3">Final Opening Script</h2>
+          <h2 className="font-semibold text-slate-900 mb-3">Final Opening Script — Run #{(selectedRunIndex ?? 0) + 1}</h2>
           <div className="bg-gradient-to-br from-violet-50 to-blue-50 rounded-xl p-5 border border-violet-100">
             <p className="text-xs text-slate-800 leading-relaxed">
-              &ldquo;{firstCallPrep.opening_script as string}&rdquo;
+              &ldquo;{(selectedAccepted.finalScript as string) || (firstCallPrep?.opening_script as string) || ""}&rdquo;
             </p>
             <div className="mt-4 flex flex-wrap gap-2 text-xs">
               <span className="bg-white/60 text-violet-700 px-2 py-1 rounded border border-violet-200">
-                Anchor: {firstCallPrep.hook_anchor as string}
+                Anchor: {(selectedAccepted.finalHookAnchor as string) || (firstCallPrep?.hook_anchor as string) || ""}
               </span>
-              {!!firstCallPrep.follow_up_question && (
+              {!!(selectedAccepted.finalFollowUp || firstCallPrep?.follow_up_question) && (
                 <span className="bg-white/60 text-blue-700 px-2 py-1 rounded border border-blue-200">
-                  Follow-up: {firstCallPrep.follow_up_question as string}
+                  Follow-up: {(selectedAccepted.finalFollowUp as string) || (firstCallPrep?.follow_up_question as string) || ""}
                 </span>
               )}
             </div>
-            {Array.isArray(firstCallPrep.talking_points) && (
+            {(Array.isArray(selectedAccepted.finalTalkingPoints) || Array.isArray(firstCallPrep?.talking_points)) && (
               <div className="mt-3 text-xs text-slate-600">
                 <span className="font-medium">Talking Points:</span>
                 <ul className="list-disc list-inside mt-1 space-y-0.5">
-                  {(firstCallPrep.talking_points as string[]).map((tp, i) => <li key={i}>{tp}</li>)}
+                  {((selectedAccepted.finalTalkingPoints as string[]) || (firstCallPrep?.talking_points as string[]) || []).map((tp, i) => <li key={i}>{tp}</li>)}
                 </ul>
               </div>
             )}

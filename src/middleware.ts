@@ -8,22 +8,10 @@ export function middleware(req: NextRequest) {
     return NextResponse.next();
   }
 
-  // Console routes — check JWT cookie
-  if (path.startsWith("/console")) {
-    const token = req.cookies.get("console_token")?.value;
-    if (!token) {
-      return NextResponse.redirect(new URL("/console/login", req.url));
-    }
-    // Token validation happens in the console layout (server-side)
-    return NextResponse.next();
-  }
-
-  // Console API routes — check JWT cookie
-  if (path.startsWith("/api/console")) {
-    const token = req.cookies.get("console_token")?.value;
-    if (!token) {
-      return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
-    }
+  // Console routes — skip middleware, auth handled client-side via localStorage
+  // (Cookie-based middleware caused premature logouts when the 1h cookie expired
+  // while the JWT in localStorage was still valid)
+  if (path.startsWith("/console") || path.startsWith("/api/console")) {
     return NextResponse.next();
   }
 
